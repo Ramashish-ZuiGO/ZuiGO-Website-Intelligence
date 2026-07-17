@@ -1,8 +1,9 @@
-import os
-
 from celery import Celery
 
-redis_url = os.getenv("REDIS_URL", "redis://redis:6379/0")
+from worker_app.config import get_settings
+
+settings = get_settings()
+redis_url = str(settings.redis_url)
 
 celery_app = Celery("website_intelligence_worker", broker=redis_url, backend=redis_url)
 celery_app.conf.update(

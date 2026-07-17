@@ -17,4 +17,4 @@ USER app
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "-c", "log_level=$(printf '%s' \"${LOG_LEVEL:-INFO}\" | tr '[:upper:]' '[:lower:]'); exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --log-level \"$log_level\""]

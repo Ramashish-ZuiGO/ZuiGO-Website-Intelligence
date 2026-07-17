@@ -1,5 +1,7 @@
 import os
 
+os.environ["APP_ENV"] = "test"
+os.environ["LOG_LEVEL"] = "INFO"
 os.environ["POSTGRES_USER"] = "website_intelligence"
 os.environ["POSTGRES_PASSWORD"] = "test_password"
 os.environ["POSTGRES_DB"] = "website_intelligence"

@@ -1,18 +1,39 @@
+import json
+from enum import StrEnum
 from functools import lru_cache
+from typing import Annotated, Any
 from urllib.parse import quote
 
-from pydantic import SecretStr
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import AnyHttpUrl, SecretStr, TypeAdapter, field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+http_url_adapter = TypeAdapter(AnyHttpUrl)
+
+
+class AppEnvironment(StrEnum):
+    DEVELOPMENT = "development"
+    TEST = "test"
+    PRODUCTION = "production"
+
+
+class LogLevel(StrEnum):
+    DEBUG = "DEBUG"
+    INFO = "INFO"
+    WARNING = "WARNING"
+    ERROR = "ERROR"
+    CRITICAL = "CRITICAL"
 
 
 class Settings(BaseSettings):
+    app_env: AppEnvironment = AppEnvironment.DEVELOPMENT
+    log_level: LogLevel = LogLevel.INFO
     postgres_user: str = "website_intelligence"
     postgres_password: SecretStr
     postgres_db: str = "website_intelligence"
     postgres_host: str = "postgres"
     postgres_port: int = 5432
-    redis_url: str = "redis://redis:6379/0"
-    backend_cors_origins: str = "http://localhost:3000"
+    redis_url: str
+    backend_cors_origins: Annotated[list[str], NoDecode] = ["http://localhost:3000"]
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -26,9 +47,33 @@ class Settings(BaseSettings):
             f"@{self.postgres_host}:{self.postgres_port}/{database}"
         )
 
+    @field_validator("backend_cors_origins", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, value: Any) -> list[str]:
+        if isinstance(value, str):
+            stripped_value = value.strip()
+            if stripped_value.startswith("["):
+                value = json.loads(stripped_value)
+            else:
+                value = stripped_value.split(",")
+
+        if not isinstance(value, list):
+            raise ValueError("BACKEND_CORS_ORIGINS must be a comma-separated or JSON list")
+
+        origins = [str(origin).strip().rstrip("/") for origin in value if str(origin).strip()]
+        if not origins:
+            raise ValueError("BACKEND_CORS_ORIGINS must contain at least one origin")
+
+        for origin in origins:
+            parsed_origin = http_url_adapter.validate_python(origin)
+            if parsed_origin.path not in ("", "/") or parsed_origin.query or parsed_origin.fragment:
+                raise ValueError("CORS origins must not contain paths, queries, or fragments")
+
+        return origins
+
     @property
     def cors_origins(self) -> list[str]:
-        return [origin.strip() for origin in self.backend_cors_origins.split(",") if origin.strip()]
+        return self.backend_cors_origins
 
 
 @lru_cache

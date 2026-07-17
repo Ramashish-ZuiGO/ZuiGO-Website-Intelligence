@@ -21,6 +21,21 @@ Replace `POSTGRES_PASSWORD` in `.env` with a local secret. PostgreSQL connection
 are supplied as individual variables, and the API constructs its database URL internally.
 The `.env` file is ignored by Git.
 
+Backend configuration belongs in the repository-root `.env`:
+
+- `APP_ENV`: `development`, `test`, or `production`; defaults to `development`.
+- `LOG_LEVEL`: `DEBUG`, `INFO`, `WARNING`, `ERROR`, or `CRITICAL`; defaults to `INFO`.
+- `POSTGRES_USER`: PostgreSQL role and database URL user.
+- `POSTGRES_PASSWORD`: required PostgreSQL secret; no default.
+- `POSTGRES_DB`: PostgreSQL database name.
+- `POSTGRES_HOST`: PostgreSQL host used to construct `DATABASE_URL`.
+- `POSTGRES_PORT`: PostgreSQL port used to construct `DATABASE_URL`.
+- `REDIS_URL`: required Redis URL used by the API and as Celery's broker and result backend.
+- `BACKEND_CORS_ORIGINS`: comma-separated HTTP origins allowed to call the API.
+
+`DATABASE_URL` is derived once by the typed API settings from the PostgreSQL fields above and
+is shared by SQLAlchemy and Alembic. Do not add a second password-bearing URL to `.env`.
+
 Create the frontend environment file:
 
 ```powershell
@@ -28,7 +43,8 @@ Copy-Item apps/web/.env.local.example apps/web/.env.local
 ```
 
 Next.js loads `apps/web/.env.local`; it does not automatically load the repository-root
-`.env`. Do not place secrets in frontend environment variables.
+`.env`. `NEXT_PUBLIC_API_URL` is the browser-visible API base URL. Do not place secrets in
+frontend variables or in any variable beginning with `NEXT_PUBLIC_`.
 
 Install the pinned Python development tools and service dependencies:
 

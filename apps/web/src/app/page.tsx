@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 
 type HealthStatus = "loading" | "healthy" | "error";
 
@@ -45,6 +46,12 @@ export default function Home() {
         <p className="mt-4 text-lg leading-8 text-slate-600">
           The frontend foundation is running. Backend connectivity is shown below.
         </p>
+        <Link
+          className="mt-6 inline-flex rounded-lg bg-slate-950 px-5 py-3 font-semibold text-white"
+          href="/projects"
+        >
+          Manage projects
+        </Link>
 
         <div className="mt-8 rounded-xl bg-slate-50 p-5" aria-live="polite">
           <p className="text-sm font-medium text-slate-600">API status</p>

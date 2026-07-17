@@ -80,6 +80,31 @@ docker compose down
 
 To also remove local database and Redis data, explicitly run `docker compose down --volumes`.
 
+## Database migrations
+
+Run Alembic commands from the repository root. The configuration uses the existing typed API
+settings and the PostgreSQL values from `.env`.
+
+```powershell
+# Create an empty migration
+python -m alembic -c apps/api/alembic.ini revision -m "describe_change"
+
+# Create a migration by comparing models with the current database
+python -m alembic -c apps/api/alembic.ini revision --autogenerate -m "describe_change"
+
+# Upgrade to the latest migration
+python -m alembic -c apps/api/alembic.ini upgrade head
+
+# Downgrade one migration
+python -m alembic -c apps/api/alembic.ini downgrade -1
+
+# Show the database's current revision
+python -m alembic -c apps/api/alembic.ini current
+
+# Show migration history
+python -m alembic -c apps/api/alembic.ini history
+```
+
 ## Useful commands
 
 ```powershell

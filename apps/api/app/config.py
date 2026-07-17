@@ -22,7 +22,8 @@ class Settings(BaseSettings):
         password = quote(self.postgres_password.get_secret_value(), safe="")
         database = quote(self.postgres_db, safe="")
         return (
-            f"postgresql://{user}:{password}@{self.postgres_host}:{self.postgres_port}/{database}"
+            f"postgresql+psycopg://{user}:{password}"
+            f"@{self.postgres_host}:{self.postgres_port}/{database}"
         )
 
     @property

@@ -108,6 +108,26 @@ docker compose logs api --tail 50
 docker compose logs worker --tail 50
 ```
 
+## API errors
+
+API errors use one response envelope and include the request ID returned in the
+`X-Request-ID` response header:
+
+```json
+{
+  "error": {
+    "code": "ERROR_CODE",
+    "message": "Safe user-facing message",
+    "details": null,
+    "request_id": "request-id"
+  }
+}
+```
+
+Frontend code should branch on the stable `error.code`, display `error.message`, and retain
+`error.request_id` for troubleshooting. Clients may send `X-Request-ID`; absent or invalid IDs
+are replaced by the API. Validation errors include safe field-level information in `details`.
+
 ## Database migrations
 
 Run Alembic commands from the repository root. The configuration uses the existing typed API

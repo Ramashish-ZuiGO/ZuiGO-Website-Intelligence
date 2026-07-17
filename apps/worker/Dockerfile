@@ -8,9 +8,9 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir --requirement requirements.txt
 
-COPY app ./app
+COPY worker_app ./worker_app
 
 RUN addgroup --system app && adduser --system --ingroup app app
 USER app
 
-CMD ["celery", "--app", "app.celery_app:celery_app", "worker", "--loglevel=info"]
+CMD ["celery", "--app", "worker_app.celery_app:celery_app", "worker", "--loglevel=info"]

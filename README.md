@@ -72,6 +72,30 @@ npm.cmd --prefix apps/web ci
 Use `npm ci` for reproducible frontend installations. Run `npm install` only when intentionally
 changing dependencies and updating `apps/web/package-lock.json`.
 
+## Pre-commit checks
+
+Install the pinned development dependencies and Git hook:
+
+```powershell
+python -m pip install -r requirements-dev.txt
+python -m pre_commit install
+```
+
+Run every configured check manually:
+
+```powershell
+python -m pre_commit run --all-files
+```
+
+Update third-party hook revisions intentionally with:
+
+```powershell
+python -m pre_commit autoupdate
+```
+
+For a genuine emergency only, bypass the hook with `git commit --no-verify`. Do not use
+`--no-verify` to avoid fixing ordinary lint, formatting, test, or repository-hygiene failures.
+
 ## Run locally
 
 Start PostgreSQL, Redis, the FastAPI API, and the Celery worker:

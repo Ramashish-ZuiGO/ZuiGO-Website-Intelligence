@@ -96,6 +96,18 @@ docker compose down
 
 To also remove local database and Redis data, explicitly run `docker compose down --volumes`.
 
+## Logging
+
+API and worker logs use a consistent structured text format with a UTC timestamp, level,
+service, logger, and message. Set `LOG_LEVEL` in the root `.env` to `DEBUG`, `INFO`, `WARNING`,
+`ERROR`, or `CRITICAL`. Request and response bodies, credentials, cookies, authorization
+headers, and environment values are not logged. Health requests are logged only at DEBUG.
+
+```powershell
+docker compose logs api --tail 50
+docker compose logs worker --tail 50
+```
+
 ## Database migrations
 
 Run Alembic commands from the repository root. The configuration uses the existing typed API

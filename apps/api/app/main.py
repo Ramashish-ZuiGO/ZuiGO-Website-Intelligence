@@ -3,10 +3,13 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.router import api_router
 from app.config import get_settings
+from app.logging_config import configure_logging
+from app.middleware.request_logging import RequestLoggingMiddleware
 
 
 def create_app() -> FastAPI:
     settings = get_settings()
+    configure_logging(settings.log_level)
     application = FastAPI(title="ZuiGO Website Intelligence API")
 
     application.add_middleware(
@@ -16,6 +19,7 @@ def create_app() -> FastAPI:
         allow_methods=["GET"],
         allow_headers=["*"],
     )
+    application.add_middleware(RequestLoggingMiddleware)
     application.include_router(api_router)
 
     return application

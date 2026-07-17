@@ -96,6 +96,12 @@ python -m pre_commit autoupdate
 For a genuine emergency only, bypass the hook with `git commit --no-verify`. Do not use
 `--no-verify` to avoid fixing ordinary lint, formatting, test, or repository-hygiene failures.
 
+## Continuous integration
+
+GitHub Actions runs Python quality checks, frontend lint and production builds, and Docker image
+builds for pushes and pull requests targeting `main`. The workflow can also be started manually
+from GitHub. CI uses safe dummy Docker values and does not deploy or require cloud credentials.
+
 ## Run locally
 
 Start PostgreSQL, Redis, the FastAPI API, and the Celery worker:

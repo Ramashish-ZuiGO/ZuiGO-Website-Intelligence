@@ -1,0 +1,107 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Python quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            requirements-dev.txt
+            apps/api/requirements.txt
+            apps/worker/requirements.txt
+
+      - name: Install Python dependencies
+        run: python -m pip install -r requirements-dev.txt
+
+      - name: Run Ruff lint
+        run: python -m ruff check .
+
+      - name: Run Ruff format check
+        run: python -m ruff format --check .
+
+      - name: Run tests
+        run: python -m pytest
+
+      - name: Check Python dependencies
+        run: python -m pip check
+
+      - name: Check Alembic history
+        run: python -m alembic -c apps/api/alembic.ini history
+
+  frontend:
+    name: Frontend quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: apps/web
+        run: npm ci
+
+      - name: Run frontend lint
+        run: npm run lint
+
+      - name: Build frontend
+        run: npm run build
+
+  docker:
+    name: Docker build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Create safe Docker environment
+        run: |
+          cat > .env <<'EOF'
+          APP_ENV=test
+          LOG_LEVEL=INFO
+          POSTGRES_USER=ci_user
+          POSTGRES_PASSWORD=ci_only_dummy_password
+          POSTGRES_DB=ci_database
+          POSTGRES_HOST=postgres
+          POSTGRES_PORT=5432
+          REDIS_URL=redis://redis:6379/0
+          BACKEND_CORS_ORIGINS=http://localhost:3000
+          EOF
+
+      - name: Validate Docker Compose
+        run: docker compose config > /dev/null
+
+      - name: Build service images
+        run: docker compose build api worker

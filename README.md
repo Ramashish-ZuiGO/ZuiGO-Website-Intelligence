@@ -40,6 +40,22 @@ Runtime dependencies remain pinned in each service's `requirements.txt`. Shared 
 tools are pinned separately in `requirements-dev.txt`; no additional dependency manager is
 required.
 
+For a runtime-only Python installation, install the relevant service requirements directly:
+
+```powershell
+python -m pip install -r apps/api/requirements.txt
+python -m pip install -r apps/worker/requirements.txt
+```
+
+Install the frontend dependencies from its committed lock file:
+
+```powershell
+npm.cmd --prefix apps/web ci
+```
+
+Use `npm ci` for reproducible frontend installations. Run `npm install` only when intentionally
+changing dependencies and updating `apps/web/package-lock.json`.
+
 ## Run locally
 
 Start PostgreSQL, Redis, the FastAPI API, and the Celery worker:

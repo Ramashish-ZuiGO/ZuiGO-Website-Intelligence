@@ -1,9 +1,4 @@
 import os
-import sys
-from pathlib import Path
-
-API_ROOT = Path(__file__).resolve().parents[2] / "apps" / "api"
-sys.path.insert(0, str(API_ROOT))
 
 os.environ["POSTGRES_USER"] = "website_intelligence"
 os.environ["POSTGRES_PASSWORD"] = "test_password"

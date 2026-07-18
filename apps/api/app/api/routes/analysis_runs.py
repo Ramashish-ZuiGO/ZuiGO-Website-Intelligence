@@ -1,14 +1,14 @@
 import uuid
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, status
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy import case, select
+from sqlalchemy.orm import Session, selectinload
 
 from app.db.session import get_db
 from app.errors.exceptions import ApplicationError
-from app.models import AnalysisRun, AnalysisStatus, Website
-from app.schemas import AnalysisRunRead
+from app.models import AnalysisFinding, AnalysisRun, AnalysisStatus, FindingSeverity, Website
+from app.schemas import AnalysisResultsResponse, AnalysisResultSummary, AnalysisRunRead
 from app.services.analysis_queue import enqueue_analysis
 
 router = APIRouter(tags=["analysis-runs"])
@@ -26,18 +26,64 @@ def get_website_or_raise(db: Session, website_id: uuid.UUID) -> Website:
     return website
 
 
+def lighthouse_metrics(data: dict[str, Any]) -> dict[str, Any]:
+    categories = data.get("categories") if isinstance(data.get("categories"), dict) else {}
+    audits = data.get("audits") if isinstance(data.get("audits"), dict) else {}
+
+    def score(name: str) -> int | None:
+        category = categories.get(name)
+        value = category.get("score") if isinstance(category, dict) else None
+        return round(value * 100) if isinstance(value, (int, float)) else None
+
+    def metric(name: str) -> float | None:
+        audit = audits.get(name)
+        value = audit.get("numericValue") if isinstance(audit, dict) else None
+        return float(value) if isinstance(value, (int, float)) else None
+
+    return {
+        "performance_score": score("performance"),
+        "accessibility_score": score("accessibility"),
+        "best_practices_score": score("best-practices"),
+        "seo_score": score("seo"),
+        "first_contentful_paint_ms": metric("first-contentful-paint"),
+        "largest_contentful_paint_ms": metric("largest-contentful-paint"),
+        "total_blocking_time_ms": metric("total-blocking-time"),
+        "cumulative_layout_shift": metric("cumulative-layout-shift"),
+        "speed_index_ms": metric("speed-index"),
+        "time_to_interactive_ms": metric("interactive"),
+    }
+
+
+def run_response(analysis_run: AnalysisRun) -> AnalysisRunRead:
+    summary = None
+    if analysis_run.result is not None:
+        metrics = lighthouse_metrics(analysis_run.result.raw_lighthouse_data)
+        summary = AnalysisResultSummary(
+            final_url=analysis_run.result.final_url,
+            http_status_code=analysis_run.result.http_status_code,
+            page_title=analysis_run.result.page_title,
+            performance_score=metrics["performance_score"],
+            accessibility_score=metrics["accessibility_score"],
+            best_practices_score=metrics["best_practices_score"],
+            seo_score=metrics["seo_score"],
+            finding_count=len(analysis_run.findings),
+        )
+    return AnalysisRunRead.model_validate(analysis_run).model_copy(
+        update={"result_summary": summary}
+    )
+
+
 @router.post(
     "/websites/{website_id}/analysis-runs",
     response_model=AnalysisRunRead,
     status_code=status.HTTP_202_ACCEPTED,
 )
-def start_analysis(website_id: uuid.UUID, db: DatabaseSession) -> AnalysisRun:
+def start_analysis(website_id: uuid.UUID, db: DatabaseSession) -> AnalysisRunRead:
     get_website_or_raise(db, website_id)
     analysis_run = AnalysisRun(website_id=website_id)
     db.add(analysis_run)
     db.commit()
     db.refresh(analysis_run)
-
     try:
         analysis_run.celery_task_id = enqueue_analysis(str(analysis_run.id))
     except Exception as exception:
@@ -50,34 +96,101 @@ def start_analysis(website_id: uuid.UUID, db: DatabaseSession) -> AnalysisRun:
             message="Analysis could not be queued.",
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         ) from exception
-
     db.commit()
     db.refresh(analysis_run)
-    return analysis_run
+    return run_response(analysis_run)
 
 
 @router.get("/analysis-runs/{analysis_run_id}", response_model=AnalysisRunRead)
-def get_analysis_run(analysis_run_id: uuid.UUID, db: DatabaseSession) -> AnalysisRun:
-    analysis_run = db.get(AnalysisRun, analysis_run_id)
+def get_analysis_run(analysis_run_id: uuid.UUID, db: DatabaseSession) -> AnalysisRunRead:
+    analysis_run = db.scalar(
+        select(AnalysisRun)
+        .options(selectinload(AnalysisRun.result), selectinload(AnalysisRun.findings))
+        .where(AnalysisRun.id == analysis_run_id)
+    )
     if analysis_run is None:
         raise ApplicationError(
             code="ANALYSIS_RUN_NOT_FOUND",
             message="Analysis run not found.",
             status_code=status.HTTP_404_NOT_FOUND,
         )
-    return analysis_run
+    return run_response(analysis_run)
 
 
-@router.get(
-    "/websites/{website_id}/analysis-runs",
-    response_model=list[AnalysisRunRead],
-)
-def list_analysis_runs(website_id: uuid.UUID, db: DatabaseSession) -> list[AnalysisRun]:
+@router.get("/websites/{website_id}/analysis-runs", response_model=list[AnalysisRunRead])
+def list_analysis_runs(website_id: uuid.UUID, db: DatabaseSession) -> list[AnalysisRunRead]:
     get_website_or_raise(db, website_id)
-    return list(
+    runs = list(
         db.scalars(
             select(AnalysisRun)
+            .options(selectinload(AnalysisRun.result), selectinload(AnalysisRun.findings))
             .where(AnalysisRun.website_id == website_id)
             .order_by(AnalysisRun.created_at.desc(), AnalysisRun.id.desc())
         )
+    )
+    return [run_response(run) for run in runs]
+
+
+@router.get("/analysis-runs/{analysis_run_id}/results", response_model=AnalysisResultsResponse)
+def get_analysis_results(
+    analysis_run_id: uuid.UUID, db: DatabaseSession
+) -> AnalysisResultsResponse:
+    analysis_run = db.scalar(
+        select(AnalysisRun)
+        .options(selectinload(AnalysisRun.result))
+        .where(AnalysisRun.id == analysis_run_id)
+    )
+    if analysis_run is None:
+        raise ApplicationError(
+            code="ANALYSIS_RUN_NOT_FOUND",
+            message="Analysis run not found.",
+            status_code=status.HTTP_404_NOT_FOUND,
+        )
+    if analysis_run.result is None:
+        raise ApplicationError(
+            code="ANALYSIS_RESULTS_NOT_AVAILABLE",
+            message="Analysis results are not available.",
+            status_code=status.HTTP_409_CONFLICT,
+        )
+    severity_order = case(
+        (AnalysisFinding.severity == FindingSeverity.CRITICAL, 0),
+        (AnalysisFinding.severity == FindingSeverity.HIGH, 1),
+        (AnalysisFinding.severity == FindingSeverity.MEDIUM, 2),
+        (AnalysisFinding.severity == FindingSeverity.LOW, 3),
+        else_=4,
+    )
+    findings = list(
+        db.scalars(
+            select(AnalysisFinding)
+            .where(AnalysisFinding.analysis_run_id == analysis_run_id)
+            .order_by(severity_order, AnalysisFinding.created_at)
+        )
+    )
+    safe_keys = {
+        "canonical_url",
+        "html_language",
+        "h1_count",
+        "h1_texts",
+        "image_count",
+        "images_missing_alt",
+        "internal_link_count",
+        "external_link_count",
+        "form_count",
+        "button_count",
+        "console_errors",
+        "page_javascript_errors",
+        "failed_network_requests",
+        "https_usage",
+        "responsive_viewport",
+        "technology_indicators",
+    }
+    return AnalysisResultsResponse(
+        result=analysis_run.result,
+        lighthouse_metrics=lighthouse_metrics(analysis_run.result.raw_lighthouse_data),
+        playwright_measurements={
+            key: value
+            for key, value in analysis_run.result.raw_playwright_data.items()
+            if key in safe_keys
+        },
+        findings=findings,
     )

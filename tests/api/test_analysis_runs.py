@@ -7,7 +7,16 @@ from app.api.routes import analysis_runs as analysis_routes
 from app.db.base import Base
 from app.db.session import get_db
 from app.main import app
-from app.models import AnalysisRun, AnalysisStatus, Project, Website
+from app.models import (
+    AnalysisFinding,
+    AnalysisResult,
+    AnalysisRun,
+    AnalysisStatus,
+    FindingSeverity,
+    FindingSource,
+    Project,
+    Website,
+)
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event, func, select
 from sqlalchemy.orm import Session, sessionmaker
@@ -119,3 +128,66 @@ def test_website_deletion_cascades_to_analysis_runs(db_session: Session) -> None
     db_session.commit()
 
     assert db_session.scalar(select(func.count()).select_from(AnalysisRun)) == 0
+
+
+def test_api_results_response_and_cascade(client: TestClient, db_session: Session) -> None:
+    website = create_website(db_session)
+    now = datetime.now(UTC)
+    run = AnalysisRun(
+        website_id=website.id,
+        status=AnalysisStatus.COMPLETED,
+        progress_percent=100,
+        completed_at=now,
+    )
+    db_session.add(run)
+    db_session.flush()
+    db_session.add(
+        AnalysisResult(
+            analysis_run_id=run.id,
+            requested_url=website.url,
+            final_url=website.url,
+            http_status_code=200,
+            page_title="Example",
+            analysis_started_at=now,
+            analysis_completed_at=now,
+            raw_lighthouse_data={
+                "categories": {
+                    "performance": {"score": 0.8},
+                    "accessibility": {"score": 0.9},
+                    "best-practices": {"score": 1.0},
+                    "seo": {"score": 0.95},
+                },
+                "audits": {},
+            },
+            raw_playwright_data={"h1_count": 0, "html_language": "en"},
+        )
+    )
+    db_session.add(
+        AnalysisFinding(
+            analysis_run_id=run.id,
+            finding_code="MISSING_H1",
+            category="seo",
+            title="Missing H1 heading",
+            description="The homepage has no H1 heading.",
+            severity=FindingSeverity.MEDIUM,
+            affected_url=website.url,
+            evidence={"h1_count": 0},
+            source=FindingSource.PLAYWRIGHT,
+            confidence_percent=100,
+        )
+    )
+    db_session.commit()
+
+    status_response = client.get(f"/api/v1/analysis-runs/{run.id}")
+    results_response = client.get(f"/api/v1/analysis-runs/{run.id}/results")
+
+    assert status_response.json()["result_summary"]["performance_score"] == 80
+    assert status_response.json()["result_summary"]["finding_count"] == 1
+    assert results_response.status_code == 200
+    assert results_response.json()["lighthouse_metrics"]["seo_score"] == 95
+    assert results_response.json()["findings"][0]["finding_code"] == "MISSING_H1"
+
+    db_session.delete(run)
+    db_session.commit()
+    assert db_session.scalar(select(func.count()).select_from(AnalysisResult)) == 0
+    assert db_session.scalar(select(func.count()).select_from(AnalysisFinding)) == 0

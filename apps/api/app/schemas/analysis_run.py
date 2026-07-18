@@ -6,6 +6,17 @@ from pydantic import BaseModel, ConfigDict
 from app.models.analysis_run import AnalysisStatus
 
 
+class AnalysisResultSummary(BaseModel):
+    final_url: str
+    http_status_code: int | None
+    page_title: str | None
+    performance_score: int | None
+    accessibility_score: int | None
+    best_practices_score: int | None
+    seo_score: int | None
+    finding_count: int
+
+
 class AnalysisRunRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -20,3 +31,4 @@ class AnalysisRunRead(BaseModel):
     error_message: str | None
     created_at: datetime
     updated_at: datetime
+    result_summary: AnalysisResultSummary | None = None

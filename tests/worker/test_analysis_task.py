@@ -3,7 +3,7 @@ from collections.abc import Iterator
 from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy import create_engine, insert, select
+from sqlalchemy import create_engine, func, insert, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from worker_app import db as worker_db
@@ -20,7 +20,6 @@ def session_factory(monkeypatch: pytest.MonkeyPatch) -> Iterator[sessionmaker]:
     worker_db.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     monkeypatch.setattr(analysis, "SessionLocal", factory)
-    monkeypatch.setattr(analysis.time, "sleep", lambda _: None)
     yield factory
     worker_db.metadata.drop_all(engine)
     engine.dispose()
@@ -28,12 +27,16 @@ def session_factory(monkeypatch: pytest.MonkeyPatch) -> Iterator[sessionmaker]:
 
 def insert_queued_run(factory: sessionmaker) -> uuid.UUID:
     run_id = uuid.uuid4()
+    website_id = uuid.uuid4()
     now = datetime.now(UTC)
     with factory() as session:
         session.execute(
+            insert(worker_db.websites).values(id=website_id, url="https://example.com/")
+        )
+        session.execute(
             insert(worker_db.analysis_runs).values(
                 id=run_id,
-                website_id=uuid.uuid4(),
+                website_id=website_id,
                 status="queued",
                 progress_percent=0,
                 created_at=now,
@@ -56,36 +59,81 @@ def load_run(factory: sessionmaker, run_id: uuid.UUID) -> dict[str, object]:
         return dict(row)
 
 
-def test_worker_transitions_queued_to_completed(session_factory: sessionmaker) -> None:
+def configure_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(analysis, "validate_public_url", lambda url: url)
+    monkeypatch.setattr(analysis, "chromium_executable_path", lambda: "/chromium")
+    monkeypatch.setattr(
+        analysis,
+        "inspect_page",
+        lambda url: {
+            "requested_url": url,
+            "final_url": url,
+            "http_status_code": 200,
+            "page_title": "Example",
+            "meta_description": "Example page",
+            "canonical_url": url,
+            "html_language": "en",
+            "h1_count": 1,
+            "h1_texts": ["Example"],
+            "image_count": 0,
+            "images_missing_alt": 0,
+            "page_javascript_errors": [],
+            "failed_network_requests": [],
+            "https_usage": True,
+            "user_agent": "test-agent",
+        },
+    )
+    monkeypatch.setattr(
+        analysis,
+        "run_lighthouse",
+        lambda url, chrome: {
+            "lighthouseVersion": "13.3.0",
+            "finalDisplayedUrl": url,
+            "categories": {
+                "performance": {"score": 0.9},
+                "accessibility": {"score": 1.0},
+                "best-practices": {"score": 1.0},
+                "seo": {"score": 1.0},
+            },
+            "audits": {},
+        },
+    )
+
+
+def test_successful_result_persistence_and_retry_is_idempotent(
+    session_factory: sessionmaker, monkeypatch: pytest.MonkeyPatch
+) -> None:
     run_id = insert_queued_run(session_factory)
+    configure_success(monkeypatch)
 
-    result = analysis.run_analysis.run(str(run_id))
+    first = analysis.run_analysis.run(str(run_id))
+    second = analysis.run_analysis.run(str(run_id))
     stored = load_run(session_factory, run_id)
+    with session_factory() as session:
+        result_count = session.scalar(select(func.count()).select_from(worker_db.analysis_results))
 
-    assert result["status"] == "completed"
-    assert stored["status"] == "completed"
+    assert first["status"] == "completed"
+    assert second["status"] == "completed"
     assert stored["progress_percent"] == 100
-    assert stored["started_at"] is not None
-    assert stored["completed_at"] is not None
-    assert stored["current_step"] == "Analysis lifecycle completed"
+    assert result_count == 1
 
 
 def test_worker_failure_stores_safe_failed_state(
     session_factory: sessionmaker, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     run_id = insert_queued_run(session_factory)
-
-    def fail_lifecycle(*args: object, **kwargs: object) -> None:
-        del args, kwargs
-        raise RuntimeError("internal secret must not be stored")
-
-    monkeypatch.setattr(analysis, "advance_lifecycle", fail_lifecycle)
+    monkeypatch.setattr(analysis, "validate_public_url", lambda url: url)
+    monkeypatch.setattr(
+        analysis,
+        "inspect_page",
+        lambda url: (_ for _ in ()).throw(RuntimeError("internal secret must not be stored")),
+    )
 
     result = analysis.run_analysis.run(str(run_id))
     stored = load_run(session_factory, run_id)
 
     assert result["status"] == "failed"
     assert stored["status"] == "failed"
-    assert stored["error_code"] == "ANALYSIS_TASK_FAILED"
-    assert stored["error_message"] == "Analysis lifecycle task failed."
+    assert stored["error_code"] == "PLAYWRIGHT_FAILED"
+    assert stored["error_message"] == "The browser inspection failed."
     assert "secret" not in str(stored["error_message"])

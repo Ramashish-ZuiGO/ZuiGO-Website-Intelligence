@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { apiRequest } from "@/lib/api";
-import type { AnalysisRun } from "@/lib/types";
+import type { AnalysisResults, AnalysisRun } from "@/lib/types";
 
 interface WebsiteAnalysisPanelProps {
   websiteId: string;
@@ -18,6 +18,7 @@ export function WebsiteAnalysisPanel({ websiteId }: WebsiteAnalysisPanelProps) {
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [results, setResults] = useState<AnalysisResults | null>(null);
   const latestRun = history[0];
 
   const loadHistory = useCallback(async () => {
@@ -73,9 +74,31 @@ export function WebsiteAnalysisPanel({ websiteId }: WebsiteAnalysisPanelProps) {
     return () => window.clearInterval(timer);
   }, [latestRun]);
 
+  useEffect(() => {
+    if (latestRun?.status !== "completed") {
+      return;
+    }
+    let cancelled = false;
+    void apiRequest<AnalysisResults>(`/api/v1/analysis-runs/${latestRun.id}/results`)
+      .then((loadedResults) => {
+        if (!cancelled) setResults(loadedResults);
+      })
+      .catch((requestError: unknown) => {
+        if (!cancelled) {
+          setError(
+            requestError instanceof Error ? requestError.message : "Unable to load results.",
+          );
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [latestRun]);
+
   async function startAnalysis() {
     setStarting(true);
     setError(null);
+    setResults(null);
     try {
       const analysisRun = await apiRequest<AnalysisRun>(
         `/api/v1/websites/${websiteId}/analysis-runs`,
@@ -121,7 +144,13 @@ export function WebsiteAnalysisPanel({ websiteId }: WebsiteAnalysisPanelProps) {
           disabled={starting || isActive(latestRun)}
           onClick={() => void startAnalysis()}
         >
-          {starting ? "Queueing…" : isActive(latestRun) ? "Analysis in progress" : "Start analysis"}
+          {starting
+            ? "Queueing…"
+            : isActive(latestRun)
+              ? "Analysis in progress"
+              : latestRun
+                ? "Start new analysis"
+                : "Start analysis"}
         </button>
       </div>
 
@@ -131,6 +160,34 @@ export function WebsiteAnalysisPanel({ websiteId }: WebsiteAnalysisPanelProps) {
         </div>
       )}
       {error && <p className="mt-3 text-sm text-red-700" role="alert">{error}</p>}
+
+      {results && (
+        <section className="mt-5 rounded-lg bg-slate-50 p-4">
+          <h3 className="font-semibold text-slate-900">Verified homepage results</h3>
+          <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
+            <div><dt className="text-slate-500">Final URL</dt><dd className="break-all font-medium">{results.result.final_url}</dd></div>
+            <div><dt className="text-slate-500">HTTP status</dt><dd className="font-medium">{results.result.http_status_code ?? "Unavailable"}</dd></div>
+            <div><dt className="text-slate-500">Page title</dt><dd className="font-medium">{results.result.page_title || "Missing"}</dd></div>
+            {(["performance_score", "accessibility_score", "best_practices_score", "seo_score"] as const).map((key) => (
+              <div key={key}><dt className="capitalize text-slate-500">{key.replaceAll("_", " ")}</dt><dd className="font-medium">{results.lighthouse_metrics[key] ?? "Unavailable"}</dd></div>
+            ))}
+            <div><dt className="text-slate-500">Total findings</dt><dd className="font-medium">{results.findings.length}</dd></div>
+          </dl>
+          <h4 className="mt-5 font-semibold">Findings</h4>
+          {results.findings.length === 0 ? (
+            <p className="mt-2 text-sm text-slate-600">No findings were generated from the measured thresholds.</p>
+          ) : (
+            <ul className="mt-3 grid gap-3">
+              {results.findings.map((finding) => (
+                <li className="rounded-lg border border-slate-200 bg-white p-3 text-sm" key={finding.id}>
+                  <p className="font-semibold"><span className="uppercase text-slate-500">{finding.severity}</span> · {finding.title}</p>
+                  <p className="mt-1 text-slate-600">{finding.category} · {JSON.stringify(finding.evidence)}</p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
 
       <details className="mt-4">
         <summary className="cursor-pointer text-sm font-semibold text-slate-700">Analysis history ({history.length})</summary>

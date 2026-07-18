@@ -8,6 +8,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 
 if TYPE_CHECKING:
+    from app.models.analysis_run import AnalysisRun
     from app.models.project import Project
 
 
@@ -28,3 +29,9 @@ class Website(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
     project: Mapped["Project"] = relationship(back_populates="websites")
+    analysis_runs: Mapped[list["AnalysisRun"]] = relationship(
+        back_populates="website",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="AnalysisRun.created_at.desc()",
+    )

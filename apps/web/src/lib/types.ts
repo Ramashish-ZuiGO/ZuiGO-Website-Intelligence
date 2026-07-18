@@ -18,3 +18,19 @@ export interface Project {
 export interface ProjectDetail extends Project {
   websites: Website[];
 }
+
+export type AnalysisStatus = "queued" | "running" | "completed" | "failed";
+
+export interface AnalysisRun {
+  id: string;
+  website_id: string;
+  status: AnalysisStatus;
+  progress_percent: number;
+  current_step: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  error_code: string | null;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+}

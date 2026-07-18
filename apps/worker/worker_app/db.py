@@ -75,6 +75,27 @@ analysis_findings = Table(
     Column("confidence_percent", Integer, nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
 )
+analysis_scores = Table(
+    "analysis_scores",
+    metadata,
+    Column("id", Uuid, primary_key=True),
+    Column("analysis_run_id", Uuid, nullable=False, unique=True),
+    Column("formula_version", String(50), nullable=False),
+    Column("overall_score", Integer),
+    Column("performance_score", Integer),
+    Column("accessibility_score", Integer),
+    Column("best_practices_score", Integer),
+    Column("seo_score", Integer),
+    Column("technical_quality_score", Integer),
+    Column("confidence_percent", Integer, nullable=False),
+    Column("available_categories", JSON, nullable=False),
+    Column("unavailable_categories", JSON, nullable=False),
+    Column("weights", JSON, nullable=False),
+    Column("deductions", JSON, nullable=False),
+    Column("calculation_details", JSON, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+)
 
 engine = create_engine(get_settings().database_url, pool_pre_ping=True)
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)

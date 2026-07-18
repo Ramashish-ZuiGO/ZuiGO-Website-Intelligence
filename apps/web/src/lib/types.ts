@@ -44,6 +44,9 @@ export interface AnalysisResultSummary {
   accessibility_score: number | null;
   best_practices_score: number | null;
   seo_score: number | null;
+  overall_score: number | null;
+  technical_quality_score: number | null;
+  confidence_percent: number | null;
   finding_count: number;
 }
 
@@ -75,6 +78,35 @@ export interface AnalysisResults {
     analysis_started_at: string;
     analysis_completed_at: string;
   };
+  lighthouse_metrics: Record<string, number | string | null>;
+  playwright_measurements: Record<string, unknown>;
+  findings: AnalysisFinding[];
+}
+
+export interface AnalysisScore {
+  id: string;
+  formula_version: string;
+  overall_score: number | null;
+  performance_score: number | null;
+  accessibility_score: number | null;
+  best_practices_score: number | null;
+  seo_score: number | null;
+  technical_quality_score: number | null;
+  confidence_percent: number;
+  available_categories: string[];
+  unavailable_categories: string[];
+  weights: Record<string, number>;
+  deductions: Array<Record<string, unknown>>;
+  calculation_details: Record<string, unknown>;
+}
+
+export interface AnalysisReport {
+  report_id: string;
+  analysis_run_id: string;
+  analysis_status: AnalysisStatus;
+  website: { id: string; name: string | null; url: string };
+  result: AnalysisResults["result"];
+  score: AnalysisScore;
   lighthouse_metrics: Record<string, number | string | null>;
   playwright_measurements: Record<string, unknown>;
   findings: AnalysisFinding[];

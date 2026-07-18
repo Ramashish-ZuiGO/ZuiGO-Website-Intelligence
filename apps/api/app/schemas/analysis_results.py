@@ -43,3 +43,40 @@ class AnalysisResultsResponse(BaseModel):
     lighthouse_metrics: dict[str, JsonValue]
     playwright_measurements: dict[str, JsonValue]
     findings: list[AnalysisFindingRead]
+
+
+class AnalysisScoreRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    formula_version: str
+    overall_score: int | None
+    performance_score: int | None
+    accessibility_score: int | None
+    best_practices_score: int | None
+    seo_score: int | None
+    technical_quality_score: int | None
+    confidence_percent: int
+    available_categories: list[str]
+    unavailable_categories: list[str]
+    weights: dict[str, int]
+    deductions: list[dict[str, JsonValue]]
+    calculation_details: dict[str, JsonValue]
+
+
+class ReportWebsiteRead(BaseModel):
+    id: uuid.UUID
+    name: str | None
+    url: str
+
+
+class AnalysisReportResponse(BaseModel):
+    report_id: uuid.UUID
+    analysis_run_id: uuid.UUID
+    analysis_status: str
+    website: ReportWebsiteRead
+    result: AnalysisResultRead
+    score: AnalysisScoreRead
+    lighthouse_metrics: dict[str, JsonValue]
+    playwright_measurements: dict[str, JsonValue]
+    findings: list[AnalysisFindingRead]

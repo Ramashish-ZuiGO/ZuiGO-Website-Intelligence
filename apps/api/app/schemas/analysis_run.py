@@ -14,6 +14,9 @@ class AnalysisResultSummary(BaseModel):
     accessibility_score: int | None
     best_practices_score: int | None
     seo_score: int | None
+    overall_score: int | None
+    technical_quality_score: int | None
+    confidence_percent: int | None
     finding_count: int
 
 

@@ -8,11 +8,34 @@ from sqlalchemy.orm import Session, selectinload
 from app.db.session import get_db
 from app.errors.exceptions import ApplicationError
 from app.models import AnalysisFinding, AnalysisRun, AnalysisStatus, FindingSeverity, Website
-from app.schemas import AnalysisResultsResponse, AnalysisResultSummary, AnalysisRunRead
+from app.schemas import (
+    AnalysisReportResponse,
+    AnalysisResultsResponse,
+    AnalysisResultSummary,
+    AnalysisRunRead,
+)
 from app.services.analysis_queue import enqueue_analysis
 
 router = APIRouter(tags=["analysis-runs"])
 DatabaseSession = Annotated[Session, Depends(get_db)]
+SAFE_PLAYWRIGHT_KEYS = {
+    "canonical_url",
+    "html_language",
+    "h1_count",
+    "h1_texts",
+    "image_count",
+    "images_missing_alt",
+    "internal_link_count",
+    "external_link_count",
+    "form_count",
+    "button_count",
+    "console_errors",
+    "page_javascript_errors",
+    "failed_network_requests",
+    "https_usage",
+    "responsive_viewport",
+    "technology_indicators",
+}
 
 
 def get_website_or_raise(db: Session, website_id: uuid.UUID) -> Website:
@@ -66,6 +89,13 @@ def run_response(analysis_run: AnalysisRun) -> AnalysisRunRead:
             accessibility_score=metrics["accessibility_score"],
             best_practices_score=metrics["best_practices_score"],
             seo_score=metrics["seo_score"],
+            overall_score=analysis_run.score.overall_score if analysis_run.score else None,
+            technical_quality_score=(
+                analysis_run.score.technical_quality_score if analysis_run.score else None
+            ),
+            confidence_percent=(
+                analysis_run.score.confidence_percent if analysis_run.score else None
+            ),
             finding_count=len(analysis_run.findings),
         )
     return AnalysisRunRead.model_validate(analysis_run).model_copy(
@@ -105,7 +135,11 @@ def start_analysis(website_id: uuid.UUID, db: DatabaseSession) -> AnalysisRunRea
 def get_analysis_run(analysis_run_id: uuid.UUID, db: DatabaseSession) -> AnalysisRunRead:
     analysis_run = db.scalar(
         select(AnalysisRun)
-        .options(selectinload(AnalysisRun.result), selectinload(AnalysisRun.findings))
+        .options(
+            selectinload(AnalysisRun.result),
+            selectinload(AnalysisRun.findings),
+            selectinload(AnalysisRun.score),
+        )
         .where(AnalysisRun.id == analysis_run_id)
     )
     if analysis_run is None:
@@ -123,7 +157,11 @@ def list_analysis_runs(website_id: uuid.UUID, db: DatabaseSession) -> list[Analy
     runs = list(
         db.scalars(
             select(AnalysisRun)
-            .options(selectinload(AnalysisRun.result), selectinload(AnalysisRun.findings))
+            .options(
+                selectinload(AnalysisRun.result),
+                selectinload(AnalysisRun.findings),
+                selectinload(AnalysisRun.score),
+            )
             .where(AnalysisRun.website_id == website_id)
             .order_by(AnalysisRun.created_at.desc(), AnalysisRun.id.desc())
         )
@@ -166,31 +204,75 @@ def get_analysis_results(
             .order_by(severity_order, AnalysisFinding.created_at)
         )
     )
-    safe_keys = {
-        "canonical_url",
-        "html_language",
-        "h1_count",
-        "h1_texts",
-        "image_count",
-        "images_missing_alt",
-        "internal_link_count",
-        "external_link_count",
-        "form_count",
-        "button_count",
-        "console_errors",
-        "page_javascript_errors",
-        "failed_network_requests",
-        "https_usage",
-        "responsive_viewport",
-        "technology_indicators",
-    }
     return AnalysisResultsResponse(
         result=analysis_run.result,
         lighthouse_metrics=lighthouse_metrics(analysis_run.result.raw_lighthouse_data),
         playwright_measurements={
             key: value
             for key, value in analysis_run.result.raw_playwright_data.items()
-            if key in safe_keys
+            if key in SAFE_PLAYWRIGHT_KEYS
+        },
+        findings=findings,
+    )
+
+
+@router.get("/analysis-runs/{analysis_run_id}/report", response_model=AnalysisReportResponse)
+def get_analysis_report(analysis_run_id: uuid.UUID, db: DatabaseSession) -> AnalysisReportResponse:
+    analysis_run = db.scalar(
+        select(AnalysisRun)
+        .options(
+            selectinload(AnalysisRun.result),
+            selectinload(AnalysisRun.score),
+            selectinload(AnalysisRun.website),
+        )
+        .where(AnalysisRun.id == analysis_run_id)
+    )
+    if analysis_run is None:
+        raise ApplicationError(
+            code="ANALYSIS_RUN_NOT_FOUND",
+            message="Analysis run not found.",
+            status_code=status.HTTP_404_NOT_FOUND,
+        )
+    if analysis_run.result is None or analysis_run.score is None:
+        raise ApplicationError(
+            code="ANALYSIS_REPORT_NOT_AVAILABLE",
+            message="Analysis report is not available.",
+            status_code=status.HTTP_409_CONFLICT,
+        )
+    severity_order = case(
+        (AnalysisFinding.severity == FindingSeverity.CRITICAL, 0),
+        (AnalysisFinding.severity == FindingSeverity.HIGH, 1),
+        (AnalysisFinding.severity == FindingSeverity.MEDIUM, 2),
+        (AnalysisFinding.severity == FindingSeverity.LOW, 3),
+        else_=4,
+    )
+    findings = list(
+        db.scalars(
+            select(AnalysisFinding)
+            .where(AnalysisFinding.analysis_run_id == analysis_run_id)
+            .order_by(
+                severity_order,
+                AnalysisFinding.category,
+                AnalysisFinding.finding_code,
+            )
+        )
+    )
+    return AnalysisReportResponse(
+        report_id=analysis_run.score.id,
+        analysis_run_id=analysis_run.id,
+        analysis_status=analysis_run.status.value,
+        website={
+            "id": analysis_run.website.id,
+            "name": analysis_run.website.name,
+            "url": analysis_run.website.url,
+        },
+        result=analysis_run.result,
+        score=analysis_run.score,
+        lighthouse_metrics=lighthouse_metrics(analysis_run.result.raw_lighthouse_data),
+        playwright_measurements={
+            key: value
+            for key, value in analysis_run.result.raw_playwright_data.items()
+            if key in SAFE_PLAYWRIGHT_KEYS
         },
         findings=findings,
     )

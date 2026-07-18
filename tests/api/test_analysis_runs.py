@@ -11,6 +11,7 @@ from app.models import (
     AnalysisFinding,
     AnalysisResult,
     AnalysisRun,
+    AnalysisScore,
     AnalysisStatus,
     FindingSeverity,
     FindingSource,
@@ -176,6 +177,43 @@ def test_api_results_response_and_cascade(client: TestClient, db_session: Sessio
             confidence_percent=100,
         )
     )
+    db_session.add(
+        AnalysisScore(
+            analysis_run_id=run.id,
+            formula_version="1.0.0",
+            overall_score=88,
+            performance_score=80,
+            accessibility_score=90,
+            best_practices_score=100,
+            seo_score=95,
+            technical_quality_score=92,
+            confidence_percent=100,
+            available_categories=[
+                "performance",
+                "accessibility",
+                "best_practices",
+                "seo",
+                "technical_quality",
+            ],
+            unavailable_categories=[],
+            weights={
+                "performance": 25,
+                "accessibility": 20,
+                "best_practices": 15,
+                "seo": 20,
+                "technical_quality": 20,
+            },
+            deductions=[
+                {
+                    "finding_code": "MISSING_H1",
+                    "severity": "medium",
+                    "source": "playwright",
+                    "deduction_amount": 8,
+                }
+            ],
+            calculation_details={"rounding": "round-half-up"},
+        )
+    )
     db_session.commit()
 
     status_response = client.get(f"/api/v1/analysis-runs/{run.id}")
@@ -183,11 +221,33 @@ def test_api_results_response_and_cascade(client: TestClient, db_session: Sessio
 
     assert status_response.json()["result_summary"]["performance_score"] == 80
     assert status_response.json()["result_summary"]["finding_count"] == 1
+    assert status_response.json()["result_summary"]["overall_score"] == 88
     assert results_response.status_code == 200
     assert results_response.json()["lighthouse_metrics"]["seo_score"] == 95
     assert results_response.json()["findings"][0]["finding_code"] == "MISSING_H1"
+
+    report_response = client.get(f"/api/v1/analysis-runs/{run.id}/report")
+    assert report_response.status_code == 200
+    assert report_response.json()["score"]["technical_quality_score"] == 92
+    assert report_response.json()["website"]["url"] == website.url
 
     db_session.delete(run)
     db_session.commit()
     assert db_session.scalar(select(func.count()).select_from(AnalysisResult)) == 0
     assert db_session.scalar(select(func.count()).select_from(AnalysisFinding)) == 0
+    assert db_session.scalar(select(func.count()).select_from(AnalysisScore)) == 0
+
+
+def test_missing_report_returns_normalized_errors(client: TestClient, db_session: Session) -> None:
+    website = create_website(db_session)
+    run = AnalysisRun(website_id=website.id)
+    db_session.add(run)
+    db_session.commit()
+
+    unavailable = client.get(f"/api/v1/analysis-runs/{run.id}/report")
+    missing = client.get("/api/v1/analysis-runs/00000000-0000-0000-0000-000000000000/report")
+
+    assert unavailable.status_code == 409
+    assert unavailable.json()["error"]["code"] == "ANALYSIS_REPORT_NOT_AVAILABLE"
+    assert missing.status_code == 404
+    assert missing.json()["error"]["code"] == "ANALYSIS_RUN_NOT_FOUND"

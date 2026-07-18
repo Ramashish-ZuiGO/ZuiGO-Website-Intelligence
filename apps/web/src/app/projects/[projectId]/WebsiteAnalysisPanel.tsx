@@ -138,6 +138,11 @@ export function WebsiteAnalysisPanel({ websiteId }: WebsiteAnalysisPanelProps) {
           {latestRun?.status === "failed" && latestRun.error_message && (
             <p className="mt-1 text-sm text-red-700">{latestRun.error_message}</p>
           )}
+          {latestRun?.result_summary?.overall_score != null && (
+            <p className="mt-1 text-lg font-bold text-slate-950">
+              Overall score: {latestRun.result_summary.overall_score}
+            </p>
+          )}
         </div>
         <button
           className="rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
@@ -199,6 +204,16 @@ export function WebsiteAnalysisPanel({ websiteId }: WebsiteAnalysisPanelProps) {
               <li className="rounded-lg bg-slate-50 p-3 text-sm" key={run.id}>
                 <span className="font-semibold capitalize">{run.status}</span>
                 <span className="text-slate-500"> · {run.progress_percent}% · {new Date(run.created_at).toLocaleString()}</span>
+                {run.status === "completed" && (
+                  <a
+                    className="ml-3 inline-block font-semibold text-slate-900 underline"
+                    href={`/analysis-runs/${run.id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    View Analysis
+                  </a>
+                )}
               </li>
             ))}
           </ul>

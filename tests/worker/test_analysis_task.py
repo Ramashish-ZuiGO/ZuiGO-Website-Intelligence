@@ -111,11 +111,13 @@ def test_successful_result_persistence_and_retry_is_idempotent(
     stored = load_run(session_factory, run_id)
     with session_factory() as session:
         result_count = session.scalar(select(func.count()).select_from(worker_db.analysis_results))
+        score_count = session.scalar(select(func.count()).select_from(worker_db.analysis_scores))
 
     assert first["status"] == "completed"
     assert second["status"] == "completed"
     assert stored["progress_percent"] == 100
     assert result_count == 1
+    assert score_count == 1
 
 
 def test_worker_failure_stores_safe_failed_state(
@@ -134,6 +136,6 @@ def test_worker_failure_stores_safe_failed_state(
 
     assert result["status"] == "failed"
     assert stored["status"] == "failed"
-    assert stored["error_code"] == "PLAYWRIGHT_FAILED"
-    assert stored["error_message"] == "The browser inspection failed."
+    assert stored["error_code"] == "ANALYSIS_PROCESSING_FAILED"
+    assert stored["error_message"] == "The analysis could not be completed."
     assert "secret" not in str(stored["error_message"])

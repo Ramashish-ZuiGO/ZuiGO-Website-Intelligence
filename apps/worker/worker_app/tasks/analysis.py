@@ -13,6 +13,7 @@ from worker_app.analysis.playwright_audit import (
     inspect_page,
     normalize_playwright_error,
 )
+from worker_app.analysis.scoring import FORMULA_VERSION, calculate_score
 from worker_app.analysis.url_safety import UrlSafetyError, validate_public_url
 from worker_app.celery_app import celery_app
 from worker_app.db import (
@@ -20,6 +21,7 @@ from worker_app.db import (
     analysis_findings,
     analysis_results,
     analysis_runs,
+    analysis_scores,
     parse_analysis_run_id,
     utc_now,
     websites,
@@ -59,6 +61,7 @@ def persist_results(
     playwright_data: dict[str, object],
     lighthouse_data: dict[str, object],
     findings: list[dict[str, object]],
+    score: dict[str, object],
     started_at: datetime,
     completed_at: datetime,
 ) -> None:
@@ -68,6 +71,9 @@ def persist_results(
     )
     session.execute(
         delete(analysis_results).where(analysis_results.c.analysis_run_id == analysis_run_id)
+    )
+    session.execute(
+        delete(analysis_scores).where(analysis_scores.c.analysis_run_id == analysis_run_id)
     )
     now = utc_now()
     session.execute(
@@ -102,6 +108,15 @@ def persist_results(
                 for item in findings
             ],
         )
+    session.execute(
+        insert(analysis_scores).values(
+            id=uuid.uuid4(),
+            analysis_run_id=analysis_run_id,
+            created_at=now,
+            updated_at=now,
+            **score,
+        )
+    )
     session.commit()
 
 
@@ -125,8 +140,10 @@ def safe_failure(exception: Exception) -> tuple[str, str]:
         return "ANALYSIS_TIMEOUT", "The website analysis timed out."
     if isinstance(exception, RuntimeError) and str(exception) == "LIGHTHOUSE_FAILED":
         return "LIGHTHOUSE_FAILED", "The Lighthouse audit failed."
-    normalized = normalize_playwright_error(exception)
-    return normalized.code, normalized.safe_message
+    if exception.__class__.__module__.startswith("playwright"):
+        normalized = normalize_playwright_error(exception)
+        return normalized.code, normalized.safe_message
+    return "ANALYSIS_PROCESSING_FAILED", "The analysis could not be completed."
 
 
 @celery_app.task(
@@ -185,6 +202,18 @@ def run_analysis(analysis_run_id: str) -> dict[str, str]:
             stage(session, run_id, 80, "Generating verified findings")
             metrics = parse_lighthouse(lighthouse_data)
             findings = generate_findings(playwright_data, metrics)
+            stage(session, run_id, 88, "Calculating transparent scores")
+            score = calculate_score(
+                metrics,
+                playwright_data,
+                findings,
+                audit_completed=True,
+            )
+            logger.info(
+                "analysis_score analysis_run_id=%s formula_version=%s",
+                run_id,
+                FORMULA_VERSION,
+            )
             stage(session, run_id, 95, "Saving results")
             completed_at = utc_now()
             persist_results(
@@ -194,6 +223,7 @@ def run_analysis(analysis_run_id: str) -> dict[str, str]:
                 playwright_data,
                 lighthouse_data,
                 findings,
+                score,
                 started_at,
                 completed_at,
             )

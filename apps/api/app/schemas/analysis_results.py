@@ -44,6 +44,7 @@ class AnalysisResultsResponse(BaseModel):
     lighthouse_metrics: dict[str, JsonValue]
     playwright_measurements: dict[str, JsonValue]
     findings: list[AnalysisFindingRead]
+    diagnostics: dict[str, JsonValue]
 
 
 class AnalysisScoreRead(BaseModel):
@@ -125,3 +126,4 @@ class AnalysisReportResponse(BaseModel):
     playwright_measurements: dict[str, JsonValue]
     findings: list[AnalysisFindingRead]
     interpretation: AnalysisInterpretationRead | None
+    diagnostics: dict[str, JsonValue]

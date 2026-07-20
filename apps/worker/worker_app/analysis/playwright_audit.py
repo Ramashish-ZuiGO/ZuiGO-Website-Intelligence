@@ -36,6 +36,8 @@ def inspect_page(
     dom_readiness_timeout_ms: int,
     stabilization_ms: int,
     collection_timeout_ms: int,
+    max_resources: int,
+    responsive_viewports: list[tuple[str, int, int]],
 ) -> dict[str, Any]:
     safe_url = validate_public_url(requested_url)
     console_errors: list[str] = []
@@ -43,6 +45,8 @@ def inspect_page(
     failed_requests: list[dict[str, str]] = []
     redirect_urls: list[str] = []
     blocked_navigation: list[UrlSafetyError] = []
+    resource_samples: list[dict[str, Any]] = []
+    network_urls: list[str] = []
 
     with sync_playwright() as playwright:
         try:
@@ -99,14 +103,35 @@ def inspect_page(
                     }
                 ),
             )
-            page.on(
-                "response",
-                lambda response: (
+
+            def record_response(response: Any) -> None:
+                network_urls.append(response.url)
+                if response.request.resource_type == "document":
                     redirect_urls.append(response.url)
-                    if response.request.resource_type == "document"
-                    else None
-                ),
-            )
+                    return
+                if len(resource_samples) >= max_resources:
+                    return
+                response_url = urlsplit(response.url)
+                main_url = urlsplit(safe_url)
+                first_party_hosts = {
+                    main_url.hostname,
+                    *(urlsplit(url).hostname for url in redirect_urls),
+                }
+                if (
+                    response_url.hostname in first_party_hosts
+                    and response.request.resource_type in {"script", "stylesheet", "image", "font"}
+                ):
+                    resource_samples.append(
+                        {
+                            "url": response.url,
+                            "resource_type": response.request.resource_type,
+                            "headers": {
+                                key.lower(): value for key, value in response.headers.items()
+                            },
+                        }
+                    )
+
+            page.on("response", record_response)
             try:
                 response = page.goto(
                     safe_url, wait_until="domcontentloaded", timeout=navigation_timeout_ms
@@ -177,11 +202,48 @@ def inspect_page(
                       generator: document.querySelector('meta[name="generator"]')?.content || null,
                       nextjs: Boolean(document.querySelector('#__next') || window.__NEXT_DATA__),
                     },
+                    viewport_meta: document.querySelector('meta[name="viewport"]')?.content || null,
+                    policy_links: Object.fromEntries(['privacy', 'terms', 'cookie'].map(kind => {
+                      const link = links.find(node => (node.textContent || '').toLowerCase().includes(kind));
+                      return [kind, link?.href || null];
+                    })),
+                    copyright_text: [...document.querySelectorAll('footer, body')].map(node => node.innerText).find(text => /(?:©|copyright).*(?:19|20)[0-9]{2}/i.test(text))?.match(/.{0,80}(?:©|copyright).{0,120}/i)?.[0] || null,
+                    script_evidence: [...document.scripts].map(script => `${script.src || ''} ${script.textContent || ''}`).join('\\n').slice(0, 200000),
+                    mixed_content_count: [...document.querySelectorAll('[src], link[href]')].filter(node => (node.src || node.href || '').startsWith('http://')).length,
+                    consent_ui_detected: [...document.querySelectorAll('button, [role="button"]')].some(node => /accept|allow|consent|cookie/i.test(node.textContent || '')),
                   };
                 }
                     """
                 )
                 user_agent = page.evaluate("() => navigator.userAgent")
+                measurements["responsive_results"] = []
+                for name, width, height in responsive_viewports:
+                    try:
+                        page.set_viewport_size({"width": width, "height": height})
+                        viewport_result = page.evaluate(
+                            """([name, width, height]) => ({
+                              name, width, height, status: 'passed',
+                              horizontal_overflow: document.documentElement.scrollWidth > width,
+                              critical_elements_outside_viewport: [...document.querySelectorAll('nav, main, h1, button, input')].filter(node => { const box = node.getBoundingClientRect(); return box.right > width + 2 || box.left < -2; }).length,
+                              responsive_navigation: Boolean(document.querySelector('nav, [aria-label*="navigation" i]')),
+                              small_tap_targets: [...document.querySelectorAll('button, a, input')].filter(node => { const box = node.getBoundingClientRect(); return box.width > 0 && box.height > 0 && (box.width < 24 || box.height < 24); }).length,
+                            })""",
+                            [name, width, height],
+                        )
+                    except PlaywrightError:
+                        viewport_result = {
+                            "name": name,
+                            "width": width,
+                            "height": height,
+                            "status": "failed",
+                        }
+                    measurements["responsive_results"].append(viewport_result)
+                measurements["main_response_headers"] = {
+                    key.lower(): value for key, value in response.headers.items()
+                }
+                measurements["resource_samples"] = resource_samples
+                measurements["network_urls"] = network_urls[:200]
+                measurements["_html"] = page.content()[:2_000_000]
             except PlaywrightError as exception:
                 raise AnalysisFailure(
                     FailureDetail(

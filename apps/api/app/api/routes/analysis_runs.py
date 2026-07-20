@@ -137,6 +137,7 @@ def get_analysis_run(analysis_run_id: uuid.UUID, db: DatabaseSession) -> Analysi
         select(AnalysisRun)
         .options(
             selectinload(AnalysisRun.result),
+            selectinload(AnalysisRun.diagnostics),
             selectinload(AnalysisRun.findings),
             selectinload(AnalysisRun.score),
         )
@@ -175,7 +176,10 @@ def get_analysis_results(
 ) -> AnalysisResultsResponse:
     analysis_run = db.scalar(
         select(AnalysisRun)
-        .options(selectinload(AnalysisRun.result))
+        .options(
+            selectinload(AnalysisRun.result),
+            selectinload(AnalysisRun.diagnostics),
+        )
         .where(AnalysisRun.id == analysis_run_id)
     )
     if analysis_run is None:
@@ -213,6 +217,7 @@ def get_analysis_results(
             if key in SAFE_PLAYWRIGHT_KEYS
         },
         findings=findings,
+        diagnostics={item.group_name: item.payload for item in analysis_run.diagnostics},
     )
 
 
@@ -225,6 +230,7 @@ def get_analysis_report(analysis_run_id: uuid.UUID, db: DatabaseSession) -> Anal
             selectinload(AnalysisRun.score),
             selectinload(AnalysisRun.website),
             selectinload(AnalysisRun.interpretation),
+            selectinload(AnalysisRun.diagnostics),
         )
         .execution_options(populate_existing=True)
         .where(AnalysisRun.id == analysis_run_id)
@@ -278,4 +284,5 @@ def get_analysis_report(analysis_run_id: uuid.UUID, db: DatabaseSession) -> Anal
         },
         findings=findings,
         interpretation=analysis_run.interpretation,
+        diagnostics={item.group_name: item.payload for item in analysis_run.diagnostics},
     )

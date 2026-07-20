@@ -108,6 +108,19 @@ def generate_interpretation(
     provider: AIProvider | None = None,
 ) -> dict[str, Any]:
     finding_codes = {item["finding_code"] for item in normalized_data["findings"]}
+    for diagnostic in normalized_data.get("diagnostics", {}).values():
+        finding_codes.update(
+            item["code"]
+            for item in diagnostic.get("evidence", [])
+            if isinstance(item, dict) and isinstance(item.get("code"), str)
+        )
+        score = diagnostic.get("score")
+        if isinstance(score, dict):
+            finding_codes.update(
+                item["code"]
+                for item in score.get("deductions", [])
+                if isinstance(item, dict) and isinstance(item.get("code"), str)
+            )
     prompt = build_prompt(normalized_data)
     try:
         selected_provider = provider or create_provider(settings)

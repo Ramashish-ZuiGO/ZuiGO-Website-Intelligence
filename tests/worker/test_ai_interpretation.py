@@ -132,3 +132,17 @@ def test_timeout_and_disabled_provider_trigger_fallback() -> None:
     assert timed_out["fallback_reason"] == "provider_unavailable"
     assert disabled["generation_mode"] == "deterministic_fallback"
     assert disabled["provider"] == "disabled"
+
+
+def test_verified_diagnostic_codes_are_valid_grounding() -> None:
+    data = verified_data()
+    data["diagnostics"] = {
+        "security_diagnostics": {
+            "status": "available",
+            "evidence": [],
+            "score": {"deductions": [{"code": "CSP_MISSING", "points": 20}]},
+        }
+    }
+    result = generate_interpretation(data, settings(), StaticProvider(valid_output("CSP_MISSING")))
+    assert result["generation_mode"] == "ai"
+    assert result["priority_recommendations"][0]["related_finding_codes"] == ["CSP_MISSING"]

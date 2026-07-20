@@ -10,6 +10,7 @@ from sqlalchemy import delete, insert, select, update
 from sqlalchemy.orm import Session
 
 from worker_app.ai import generate_interpretation
+from worker_app.analysis.diagnostics import build_diagnostics
 from worker_app.analysis.errors import AnalysisFailure, FailureDetail
 from worker_app.analysis.findings import generate_findings
 from worker_app.analysis.lighthouse_audit import parse_lighthouse, run_lighthouse
@@ -24,6 +25,7 @@ from worker_app.celery_app import celery_app
 from worker_app.config import get_settings
 from worker_app.db import (
     SessionLocal,
+    analysis_diagnostics,
     analysis_findings,
     analysis_interpretations,
     analysis_results,
@@ -98,6 +100,7 @@ def persist_results(
     lighthouse_data: dict[str, object],
     findings: list[dict[str, object]],
     score: dict[str, object],
+    diagnostics: dict[str, dict[str, object]],
     started_at: datetime,
     completed_at: datetime,
 ) -> None:
@@ -110,6 +113,11 @@ def persist_results(
     )
     session.execute(
         delete(analysis_scores).where(analysis_scores.c.analysis_run_id == analysis_run_id)
+    )
+    session.execute(
+        delete(analysis_diagnostics).where(
+            analysis_diagnostics.c.analysis_run_id == analysis_run_id
+        )
     )
     session.execute(
         delete(analysis_interpretations).where(
@@ -158,6 +166,21 @@ def persist_results(
             **score,
         )
     )
+    if diagnostics:
+        session.execute(
+            insert(analysis_diagnostics),
+            [
+                {
+                    "id": uuid.uuid4(),
+                    "analysis_run_id": analysis_run_id,
+                    "group_name": name,
+                    "payload": payload,
+                    "created_at": now,
+                    "updated_at": now,
+                }
+                for name, payload in diagnostics.items()
+            ],
+        )
     session.commit()
 
 
@@ -221,8 +244,21 @@ def run_with_retries[T](
     max_attempts: int,
     backoff_seconds: float,
     context: dict[str, object],
+    deadline: float | None = None,
+    attempt_budget_seconds: float = 0,
 ) -> tuple[T, int]:
     for attempt in range(1, max_attempts + 1):
+        if deadline is not None and time.monotonic() + attempt_budget_seconds > deadline:
+            raise AnalysisFailure(
+                FailureDetail(
+                    "ANALYSIS_DEADLINE_EXCEEDED",
+                    "The analysis deadline was exceeded.",
+                    "failed",
+                    False,
+                    attempt=attempt,
+                    internal_detail="insufficient time remains for a bounded attempt",
+                )
+            )
         try:
             return operation(), attempt
         except AnalysisFailure as exception:
@@ -239,6 +275,20 @@ def run_with_retries[T](
                 attempt,
                 failure.detail.code,
             )
+            if (
+                deadline is not None
+                and time.monotonic() + backoff_seconds + attempt_budget_seconds >= deadline
+            ):
+                raise AnalysisFailure(
+                    FailureDetail(
+                        "ANALYSIS_DEADLINE_EXCEEDED",
+                        "The analysis deadline was exceeded.",
+                        "failed",
+                        False,
+                        attempt=attempt,
+                        internal_detail="insufficient time remains for a retry",
+                    )
+                ) from exception
             if backoff_seconds:
                 time.sleep(backoff_seconds)
     raise AssertionError("retry loop exhausted")
@@ -254,6 +304,7 @@ def run_analysis(analysis_run_id: str) -> dict[str, str]:
     run_id = parse_analysis_run_id(analysis_run_id)
     settings = get_settings()
     job_started = time.monotonic()
+    job_deadline = job_started + settings.analysis_job_timeout_seconds
     context: dict[str, object] = {"analysis_run_id": run_id, "project_id": None, "website_id": None}
 
     def ensure_deadline() -> None:
@@ -327,10 +378,22 @@ def run_analysis(analysis_run_id: str) -> dict[str, str]:
                     dom_readiness_timeout_ms=settings.dom_readiness_timeout_ms,
                     stabilization_ms=settings.page_stabilization_ms,
                     collection_timeout_ms=settings.evidence_collection_timeout_ms,
+                    max_resources=settings.diagnostic_max_resources,
+                    responsive_viewports=settings.parsed_responsive_viewports,
                 ),
                 max_attempts=settings.analysis_max_attempts,
                 backoff_seconds=settings.analysis_retry_backoff_seconds,
                 context=context,
+                deadline=job_deadline,
+                attempt_budget_seconds=(
+                    settings.browser_launch_timeout_ms
+                    + settings.navigation_timeout_ms
+                    + settings.dom_readiness_timeout_ms
+                    + settings.page_stabilization_ms
+                    + settings.evidence_collection_timeout_ms
+                )
+                / 1000
+                + 5,
             )
             playwright_data = playwright_result
             playwright_data["attempt_count"] = playwright_attempt
@@ -360,6 +423,8 @@ def run_analysis(analysis_run_id: str) -> dict[str, str]:
                 max_attempts=settings.analysis_max_attempts,
                 backoff_seconds=settings.analysis_retry_backoff_seconds,
                 context=context,
+                deadline=job_deadline,
+                attempt_budget_seconds=settings.lighthouse_timeout_seconds + 7,
             )
             lighthouse_data = lighthouse_result
             lighthouse_data.setdefault("_zuigo_execution", {})["attempt_count"] = lighthouse_attempt
@@ -384,6 +449,19 @@ def run_analysis(analysis_run_id: str) -> dict[str, str]:
             stage(session, run_id, 75, "calculating_score")
             metrics = parse_lighthouse(lighthouse_data)
             findings = generate_findings(playwright_data, metrics)
+            try:
+                diagnostics = build_diagnostics(
+                    playwright_data,
+                    settings,
+                    deadline=job_deadline - 10,
+                )
+            except Exception as diagnostics_exception:
+                logger.warning(
+                    "analysis_diagnostics_unavailable analysis_run_id=%s exception_type=%s",
+                    run_id,
+                    type(diagnostics_exception).__name__,
+                )
+                diagnostics = {}
             score = calculate_score(
                 metrics,
                 playwright_data,
@@ -405,12 +483,18 @@ def run_analysis(analysis_run_id: str) -> dict[str, str]:
                 lighthouse_data,
                 findings,
                 score,
+                diagnostics,
                 started_at,
                 completed_at,
             )
-            ensure_deadline()
-            stage(session, run_id, 90, "generating_interpretation")
+            interpretation_deadline_available = (
+                time.monotonic() + settings.ai_timeout_seconds + 5 < job_deadline
+            )
+            if interpretation_deadline_available:
+                stage(session, run_id, 90, "generating_interpretation")
             try:
+                if not interpretation_deadline_available:
+                    raise TimeoutError("No analysis budget remains for interpretation")
                 interpretation = generate_interpretation(
                     {
                         "website": {
@@ -440,6 +524,7 @@ def run_analysis(analysis_run_id: str) -> dict[str, str]:
                             if key in SAFE_AI_PLAYWRIGHT_KEYS
                         },
                         "findings": findings,
+                        "diagnostics": diagnostics,
                     },
                     get_settings(),
                 )

@@ -41,6 +41,16 @@ const measurements = {
   technology_indicators: "Technology indicators",
 };
 
+const diagnosticTitles: Record<string, string> = {
+  standards_diagnostics: "Web Standards",
+  cache_diagnostics: "Cache Efficiency",
+  policy_diagnostics: "Policies and Legal Metadata",
+  security_diagnostics: "Security Posture",
+  analytics_diagnostics: "Analytics and Tracking",
+  responsive_diagnostics: "Responsive Testing",
+  browser_compatibility: "Browser Compatibility",
+};
+
 export default function AnalysisReportPage() {
   const { analysisRunId } = useParams<{ analysisRunId: string }>();
   const [report, setReport] = useState<AnalysisReport | null>(null);
@@ -121,6 +131,21 @@ export default function AnalysisReportPage() {
         <div className="mt-4 grid gap-2 sm:grid-cols-5">{Object.entries(report.score.weights).map(([name, weight]) => <div className="rounded-lg bg-slate-50 p-3 text-sm" key={name}>{name.replaceAll("_", " ")}: {weight}%</div>)}</div>
         <h3 className="mt-5 font-semibold">Technical Quality deductions</h3>
         {report.score.deductions.length ? <ul className="mt-2 grid gap-2">{report.score.deductions.map((item, index) => <li className="rounded-lg bg-slate-50 p-3 text-sm" key={`${String(item.finding_code)}-${index}`}>{String(item.finding_code)} · {String(item.severity)} · −{String(item.deduction_amount)}</li>)}</ul> : <p className="mt-2 text-sm text-slate-600">No eligible deductions.</p>}
+      </section>
+
+      <section className="mt-6 grid gap-5">
+        <h2 className="text-2xl font-bold">Verified diagnostics</h2>
+        {Object.entries(report.diagnostics).map(([name, diagnostic]) => (
+          <details className="rounded-2xl border bg-white p-6" key={name} open={name === "security_diagnostics"}>
+            <summary className="cursor-pointer text-xl font-bold">{diagnosticTitles[name] ?? name.replaceAll("_", " ")}</summary>
+            <p className="mt-3 text-sm capitalize">Status: {diagnostic.status}</p>
+            {diagnostic.score && <div className="mt-3 rounded-xl bg-slate-50 p-4"><p className="text-xs font-bold uppercase">{diagnostic.score.label}</p><p className="text-4xl font-bold">{diagnostic.score.final_score}</p><p className="text-sm">Formula {diagnostic.score.formula_version} · Confidence {diagnostic.score.confidence_percent}%</p></div>}
+            <h3 className="mt-4 font-semibold">Verified observations</h3><pre className="mt-2 overflow-auto whitespace-pre-wrap rounded-lg bg-slate-50 p-3 text-xs">{JSON.stringify(diagnostic.verified_observations, null, 2)}</pre>
+            {diagnostic.score?.deductions.length ? <><h3 className="mt-4 font-semibold">Deductions</h3><ul className="mt-2 grid gap-2 text-sm">{diagnostic.score.deductions.map((item, index) => <li key={`${item.code}-${index}`}>{item.code}: −{item.points} — {item.reason}</li>)}</ul></> : null}
+            <p className="mt-4 text-sm"><strong>Unavailable:</strong> {diagnostic.unavailable_observations.join(", ") || "None"}</p>
+            {diagnostic.limitations.map((item) => <p className="mt-2 text-sm text-slate-600" key={item}>{item}</p>)}
+          </details>
+        ))}
       </section>
 
       <section className="mt-6 grid gap-6 lg:grid-cols-2">

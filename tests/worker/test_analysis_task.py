@@ -64,6 +64,21 @@ def configure_success(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(analysis, "chromium_executable_path", lambda: "/chromium")
     monkeypatch.setattr(
         analysis,
+        "build_diagnostics",
+        lambda data, settings, **kwargs: {
+            "standards_diagnostics": {
+                "status": "unavailable",
+                "verified_observations": {},
+                "unavailable_observations": ["mocked"],
+                "evidence": [],
+                "score": None,
+                "limitations": [],
+                "collected_at": "2026-07-20T00:00:00Z",
+            }
+        },
+    )
+    monkeypatch.setattr(
+        analysis,
         "inspect_page",
         lambda url, **kwargs: {
             "requested_url": url,
@@ -115,6 +130,9 @@ def test_successful_result_persistence_and_retry_is_idempotent(
         interpretation_count = session.scalar(
             select(func.count()).select_from(worker_db.analysis_interpretations)
         )
+        diagnostic_count = session.scalar(
+            select(func.count()).select_from(worker_db.analysis_diagnostics)
+        )
 
     assert first["status"] == "completed"
     assert second["status"] == "completed"
@@ -122,6 +140,7 @@ def test_successful_result_persistence_and_retry_is_idempotent(
     assert result_count == 1
     assert score_count == 1
     assert interpretation_count == 1
+    assert diagnostic_count == 1
     assert stored["status"] == "completed"
 
 
@@ -208,6 +227,33 @@ def test_retry_limit_is_enforced(monkeypatch: pytest.MonkeyPatch) -> None:
             context={"analysis_run_id": "run", "project_id": "project", "website_id": "website"},
         )
     assert error.value.detail.attempt == 2
+
+
+def test_retry_does_not_start_without_remaining_deadline_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts = 0
+
+    def operation() -> None:
+        nonlocal attempts
+        attempts += 1
+        raise analysis.AnalysisFailure(
+            analysis.FailureDetail("LIGHTHOUSE_TIMEOUT", "Timed out.", "running_lighthouse", True)
+        )
+
+    monkeypatch.setattr(analysis.time, "monotonic", lambda: 100.0)
+    with pytest.raises(analysis.AnalysisFailure) as error:
+        analysis.run_with_retries(
+            operation,
+            max_attempts=2,
+            backoff_seconds=1,
+            context={"analysis_run_id": "run", "project_id": "project", "website_id": "website"},
+            deadline=110,
+            attempt_budget_seconds=9,
+        )
+
+    assert attempts == 1
+    assert error.value.detail.code == "ANALYSIS_DEADLINE_EXCEEDED"
 
 
 def test_progress_is_monotonic(session_factory: sessionmaker) -> None:

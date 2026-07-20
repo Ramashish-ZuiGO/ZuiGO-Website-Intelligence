@@ -45,6 +45,13 @@ Backend configuration belongs in the repository-root `.env`:
 - `ANALYSIS_JOB_TIMEOUT_SECONDS`: complete analysis deadline; defaults to 300.
 - `ANALYSIS_MAX_ATTEMPTS`: maximum attempts for retryable stages; defaults to 2 and cannot exceed 3.
 - `ANALYSIS_RETRY_BACKOFF_SECONDS`: bounded delay between retryable attempts; defaults to 1.
+- `W3C_VALIDATION_ENABLED`: enables optional external Nu HTML validation; defaults to `true`.
+- `W3C_VALIDATION_ENDPOINT`: Nu-compatible JSON validation endpoint.
+- `W3C_TIMEOUT_SECONDS`: validator request timeout; defaults to 20.
+- `POLICY_PAGE_TIMEOUT_SECONDS`: same-site privacy-page request timeout; defaults to 15.
+- `DIAGNOSTIC_MAX_RESOURCES`: bounded first-party cache sample; defaults to 20.
+- `DIAGNOSTIC_EVIDENCE_LIMIT`: maximum stored messages per diagnostic; defaults to 20.
+- `RESPONSIVE_VIEWPORTS`: bounded `name:widthxheight` Chromium viewport list.
 
 `DATABASE_URL` is derived once by the typed API settings from the PostgreSQL fields above and
 is shared by SQLAlchemy and Alembic. Do not add a second password-bearing URL to `.env`.

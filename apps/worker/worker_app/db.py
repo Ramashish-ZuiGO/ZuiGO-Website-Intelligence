@@ -61,6 +61,16 @@ analysis_results = Table(
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("updated_at", DateTime(timezone=True), nullable=False),
 )
+analysis_diagnostics = Table(
+    "analysis_diagnostics",
+    metadata,
+    Column("id", Uuid, primary_key=True),
+    Column("analysis_run_id", Uuid, nullable=False),
+    Column("group_name", String(100), nullable=False),
+    Column("payload", JSON, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+)
 analysis_findings = Table(
     "analysis_findings",
     metadata,

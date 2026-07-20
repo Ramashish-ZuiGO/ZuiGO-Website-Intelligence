@@ -81,6 +81,28 @@ export interface AnalysisResults {
   lighthouse_metrics: Record<string, number | string | null>;
   playwright_measurements: Record<string, unknown>;
   findings: AnalysisFinding[];
+  diagnostics: Record<string, DiagnosticGroup>;
+}
+
+export interface DiagnosticScore {
+  label: "ZuiGO-derived";
+  starting_score: number;
+  inputs: Record<string, unknown>;
+  deductions: Array<{ code: string; reason: string; points: number }>;
+  final_score: number;
+  formula_version: string;
+  confidence_percent: number;
+}
+
+export interface DiagnosticGroup {
+  status: "available" | "partial" | "unavailable";
+  verified_observations: Record<string, unknown>;
+  unavailable_observations: string[];
+  evidence: Array<Record<string, unknown>>;
+  score: DiagnosticScore | null;
+  limitations: string[];
+  collected_at: string;
+  copyright?: DiagnosticGroup;
 }
 
 export interface AnalysisScore {
@@ -111,6 +133,7 @@ export interface AnalysisReport {
   playwright_measurements: Record<string, unknown>;
   findings: AnalysisFinding[];
   interpretation: AnalysisInterpretation | null;
+  diagnostics: Record<string, DiagnosticGroup>;
 }
 
 export interface InterpretationObservation {

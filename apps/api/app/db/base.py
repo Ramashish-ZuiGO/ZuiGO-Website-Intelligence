@@ -6,6 +6,7 @@ class Base(DeclarativeBase):
 
 
 # Import models here so Alembic and application code share one complete metadata registry.
+from app.models.analysis_diagnostic import AnalysisDiagnostic  # noqa: E402, F401
 from app.models.analysis_finding import AnalysisFinding  # noqa: E402, F401
 from app.models.analysis_interpretation import AnalysisInterpretation  # noqa: E402, F401
 from app.models.analysis_result import AnalysisResult  # noqa: E402, F401

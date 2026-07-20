@@ -47,6 +47,25 @@ class WorkerSettings(BaseSettings):
     analysis_job_timeout_seconds: int = Field(default=300, ge=60, le=900)
     analysis_max_attempts: int = Field(default=2, ge=1, le=3)
     analysis_retry_backoff_seconds: float = Field(default=1.0, ge=0, le=10)
+    w3c_validation_enabled: bool = True
+    w3c_validation_endpoint: AnyHttpUrl = "https://validator.w3.org/nu/?out=json"
+    w3c_timeout_seconds: int = Field(default=20, ge=1, le=60)
+    policy_page_timeout_seconds: int = Field(default=15, ge=1, le=60)
+    diagnostic_max_resources: int = Field(default=20, ge=1, le=100)
+    diagnostic_evidence_limit: int = Field(default=20, ge=1, le=100)
+    responsive_viewports: str = (
+        "mobile_portrait:390x844,mobile_landscape:844x390,tablet:768x1024,"
+        "laptop:1366x768,desktop:1920x1080"
+    )
+
+    @property
+    def parsed_responsive_viewports(self) -> list[tuple[str, int, int]]:
+        results = []
+        for item in self.responsive_viewports.split(","):
+            name, dimensions = item.split(":", 1)
+            width, height = dimensions.lower().split("x", 1)
+            results.append((name, int(width), int(height)))
+        return results
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

@@ -15,6 +15,9 @@ Safety requirements:
 - Do not change finding severity or stored scores.
 - Every recommendation must cite one or more supplied finding codes.
 - Do not claim legal, certification, or vulnerability status unless explicitly present.
+- Label diagnostic scores as ZuiGO-derived and distinguish unavailable data from passing data.
+- Do not invent policy dates, Google PageRank, analytics metrics, or untested browser support.
+- Missing security headers are passive posture observations, not confirmed vulnerabilities.
 - If evidence is insufficient, use the required safe insufficient-evidence statement.
 - Return only one JSON object matching the required schema. Do not use markdown.
 

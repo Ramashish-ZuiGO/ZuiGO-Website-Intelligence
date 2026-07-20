@@ -38,6 +38,15 @@ class WorkerSettings(BaseSettings):
     ai_model: str = Field(default="not-configured", min_length=1, max_length=200)
     ai_base_url: AnyHttpUrl = "http://host.docker.internal:11434"
     ai_timeout_seconds: int = Field(default=120, ge=1, le=600)
+    browser_launch_timeout_ms: int = Field(default=20_000, ge=1_000, le=120_000)
+    navigation_timeout_ms: int = Field(default=45_000, ge=1_000, le=180_000)
+    dom_readiness_timeout_ms: int = Field(default=15_000, ge=1_000, le=60_000)
+    page_stabilization_ms: int = Field(default=2_000, ge=0, le=10_000)
+    evidence_collection_timeout_ms: int = Field(default=20_000, ge=1_000, le=120_000)
+    lighthouse_timeout_seconds: int = Field(default=120, ge=10, le=300)
+    analysis_job_timeout_seconds: int = Field(default=300, ge=60, le=900)
+    analysis_max_attempts: int = Field(default=2, ge=1, le=3)
+    analysis_retry_backoff_seconds: float = Field(default=1.0, ge=0, le=10)
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

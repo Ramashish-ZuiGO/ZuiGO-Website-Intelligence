@@ -36,6 +36,15 @@ Backend configuration belongs in the repository-root `.env`:
 - `AI_MODEL`: local Ollama model name when Ollama is enabled.
 - `AI_BASE_URL`: Ollama API URL reachable from the worker container.
 - `AI_TIMEOUT_SECONDS`: bounded provider request timeout from 1 through 600 seconds.
+- `BROWSER_LAUNCH_TIMEOUT_MS`: Chromium launch deadline; defaults to 20000.
+- `NAVIGATION_TIMEOUT_MS`: main-document navigation deadline; defaults to 45000.
+- `DOM_READINESS_TIMEOUT_MS`: optional full-load wait after DOM readiness; defaults to 15000.
+- `PAGE_STABILIZATION_MS`: bounded post-DOM stabilization window; defaults to 2000.
+- `EVIDENCE_COLLECTION_TIMEOUT_MS`: page evaluation deadline; defaults to 20000.
+- `LIGHTHOUSE_TIMEOUT_SECONDS`: Lighthouse process deadline; defaults to 120.
+- `ANALYSIS_JOB_TIMEOUT_SECONDS`: complete analysis deadline; defaults to 300.
+- `ANALYSIS_MAX_ATTEMPTS`: maximum attempts for retryable stages; defaults to 2 and cannot exceed 3.
+- `ANALYSIS_RETRY_BACKOFF_SECONDS`: bounded delay between retryable attempts; defaults to 1.
 
 `DATABASE_URL` is derived once by the typed API settings from the PostgreSQL fields above and
 is shared by SQLAlchemy and Alembic. Do not add a second password-bearing URL to `.env`.
@@ -163,6 +172,25 @@ headers, and environment values are not logged. Health requests are logged only 
 docker compose logs api --tail 50
 docker compose logs worker --tail 50
 ```
+
+### Analysis troubleshooting
+
+Playwright navigates to `domcontentloaded` and then allows a bounded stabilization window; it
+does not require `networkidle`, because analytics and other third-party connections may remain
+open. Lighthouse receives a fresh temporary home and debugging port for every attempt. Both
+audits have explicit deadlines and at most `ANALYSIS_MAX_ATTEMPTS` attempts. Do not increase
+timeouts or retries without confirming the worker has adequate memory and inspecting the safe
+stage logs first.
+
+Stable failure codes include `BROWSER_LAUNCH_FAILED`, `NAVIGATION_TIMEOUT`,
+`MAIN_DOCUMENT_FAILED`, `PAGE_CRASHED`, `PLAYWRIGHT_COLLECTION_FAILED`,
+`LIGHTHOUSE_START_FAILED`, `LIGHTHOUSE_TIMEOUT`, `LIGHTHOUSE_INVALID_OUTPUT`,
+`LIGHTHOUSE_PROCESS_FAILED`, `ANALYSIS_DEADLINE_EXCEEDED`, and
+`INTERNAL_ANALYSIS_ERROR`. A mandatory Playwright or Lighthouse failure leaves the run failed;
+missing measurements are never fabricated. Interpretation provider failures continue to use
+the existing deterministic fallback. An unexpected interpretation persistence failure does not
+discard an otherwise completed technical audit, and the report exposes the interpretation as
+unavailable.
 
 ## API errors
 

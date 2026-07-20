@@ -1,6 +1,9 @@
 from worker_app.analysis.findings import generate_findings
 from worker_app.analysis.lighthouse_audit import parse_lighthouse
-from worker_app.analysis.playwright_audit import parse_playwright_measurements
+from worker_app.analysis.playwright_audit import (
+    classify_failed_request,
+    parse_playwright_measurements,
+)
 
 
 def test_playwright_result_parsing_preserves_direct_measurements() -> None:
@@ -74,3 +77,36 @@ def test_deterministic_findings_use_only_verified_values() -> None:
     assert "POOR_LIGHTHOUSE_PERFORMANCE" in codes
     assert "HIGH_LCP" not in codes
     assert all(item["confidence_percent"] == 100 for item in findings)
+
+
+def test_failed_request_classification() -> None:
+    class Request:
+        failure = "net::ERR_ABORTED"
+        url = "https://example.com/app.js"
+        resource_type = "script"
+
+    assert classify_failed_request(Request(), "https://example.com/") == "expected_aborted"
+
+
+def test_expected_aborted_requests_do_not_create_findings() -> None:
+    playwright_data = {
+        "final_url": "https://example.com/",
+        "page_title": "Example",
+        "meta_description": "Description",
+        "canonical_url": "https://example.com/",
+        "html_language": "en",
+        "h1_count": 1,
+        "image_count": 0,
+        "images_missing_alt": 0,
+        "page_javascript_errors": [],
+        "failed_network_requests": [
+            {
+                "url": "https://example.com/video.mp4",
+                "failure": "net::ERR_ABORTED",
+                "classification": "expected_aborted",
+            }
+        ],
+        "https_usage": True,
+    }
+    findings = generate_findings(playwright_data, {})
+    assert "FAILED_NETWORK_REQUESTS" not in {item["finding_code"] for item in findings}

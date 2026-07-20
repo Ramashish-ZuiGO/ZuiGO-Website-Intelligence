@@ -38,6 +38,7 @@ websites = Table(
     "websites",
     metadata,
     Column("id", Uuid, primary_key=True),
+    Column("project_id", Uuid),
     Column("url", String(2048), nullable=False),
     Column("name", String(200)),
 )

@@ -38,6 +38,11 @@ def generate_findings(
 ) -> list[dict[str, Any]]:
     url = str(playwright_data["final_url"])
     results: list[dict[str, Any]] = []
+    actionable_request_failures = [
+        request
+        for request in playwright_data.get("failed_network_requests", [])
+        if request.get("classification") in {"critical", "unknown", None}
+    ]
 
     direct_rules = [
         (
@@ -116,13 +121,13 @@ def generate_findings(
             {"errors": playwright_data.get("page_javascript_errors")},
         ),
         (
-            bool(playwright_data.get("failed_network_requests")),
+            bool(actionable_request_failures),
             "FAILED_NETWORK_REQUESTS",
             "technical",
             "Failed network requests",
             "One or more page requests failed.",
             "medium",
-            {"requests": playwright_data.get("failed_network_requests")},
+            {"requests": actionable_request_failures},
         ),
         (
             not playwright_data.get("https_usage"),

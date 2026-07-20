@@ -7,10 +7,36 @@ from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
 
+from worker_app.analysis.errors import AnalysisFailure, FailureDetail
 from worker_app.analysis.url_safety import UrlSafetyError, validate_public_url
 
 
-def inspect_page(requested_url: str, timeout_ms: int = 30_000) -> dict[str, Any]:
+def classify_failed_request(request: Any, main_document_url: str) -> str:
+    failure = (request.failure or "").lower()
+    if "aborted" in failure or "cancelled" in failure:
+        return "expected_aborted"
+    url = request.url.lower()
+    if any(token in url for token in ("analytics", "doubleclick", "googletagmanager", "video")):
+        return "non_critical"
+    requested = urlsplit(request.url)
+    main = urlsplit(main_document_url)
+    if request.resource_type == "document" or (
+        requested.netloc == main.netloc
+        and request.resource_type in {"script", "stylesheet", "xhr", "fetch"}
+    ):
+        return "critical"
+    return "unknown"
+
+
+def inspect_page(
+    requested_url: str,
+    *,
+    launch_timeout_ms: int,
+    navigation_timeout_ms: int,
+    dom_readiness_timeout_ms: int,
+    stabilization_ms: int,
+    collection_timeout_ms: int,
+) -> dict[str, Any]:
     safe_url = validate_public_url(requested_url)
     console_errors: list[str] = []
     page_errors: list[str] = []
@@ -19,13 +45,30 @@ def inspect_page(requested_url: str, timeout_ms: int = 30_000) -> dict[str, Any]
     blocked_navigation: list[UrlSafetyError] = []
 
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(headless=True)
+        try:
+            browser = playwright.chromium.launch(headless=True, timeout=launch_timeout_ms)
+        except PlaywrightError as exception:
+            raise AnalysisFailure(
+                FailureDetail(
+                    "BROWSER_LAUNCH_FAILED",
+                    "The browser could not start.",
+                    "preparing_browser",
+                    True,
+                    internal_detail=str(exception),
+                )
+            ) from exception
         try:
             context = browser.new_context(
                 viewport={"width": 1440, "height": 900},
                 ignore_https_errors=False,
             )
             page = context.new_page()
+            page.set_default_timeout(collection_timeout_ms)
+            crashed = False
+
+            def record_crash() -> None:
+                nonlocal crashed
+                crashed = True
 
             def validate_request(route: Any) -> None:
                 if route.request.resource_type == "document":
@@ -45,10 +88,15 @@ def inspect_page(requested_url: str, timeout_ms: int = 30_000) -> dict[str, Any]
                 ),
             )
             page.on("pageerror", lambda exception: page_errors.append(str(exception)))
+            page.on("crash", record_crash)
             page.on(
                 "requestfailed",
                 lambda request: failed_requests.append(
-                    {"url": request.url, "failure": request.failure or "Request failed"}
+                    {
+                        "url": request.url,
+                        "failure": request.failure or "Request failed",
+                        "classification": classify_failed_request(request, safe_url),
+                    }
                 ),
             )
             page.on(
@@ -60,19 +108,43 @@ def inspect_page(requested_url: str, timeout_ms: int = 30_000) -> dict[str, Any]
                 ),
             )
             try:
-                response = page.goto(safe_url, wait_until="networkidle", timeout=timeout_ms)
+                response = page.goto(
+                    safe_url, wait_until="domcontentloaded", timeout=navigation_timeout_ms
+                )
+                try:
+                    page.wait_for_load_state("load", timeout=dom_readiness_timeout_ms)
+                except PlaywrightTimeoutError:
+                    pass
+                if stabilization_ms:
+                    page.wait_for_timeout(stabilization_ms)
             except PlaywrightTimeoutError as exception:
                 if blocked_navigation:
                     raise blocked_navigation[0] from exception
                 raise UrlSafetyError(
-                    "ANALYSIS_TIMEOUT", "The website analysis timed out."
+                    "NAVIGATION_TIMEOUT", "The website took too long to load."
                 ) from exception
             except PlaywrightError as exception:
                 if blocked_navigation:
                     raise blocked_navigation[0] from exception
                 raise UrlSafetyError(
-                    "WEBSITE_UNREACHABLE", "The website could not be reached."
+                    "MAIN_DOCUMENT_FAILED", "The website could not be loaded."
                 ) from exception
+            if crashed:
+                raise AnalysisFailure(
+                    FailureDetail(
+                        "PAGE_CRASHED", "The page crashed during analysis.", "loading_website", True
+                    )
+                )
+            if response is None or response.status >= 400:
+                raise AnalysisFailure(
+                    FailureDetail(
+                        "MAIN_DOCUMENT_FAILED",
+                        "The website could not be loaded.",
+                        "loading_website",
+                        response is None or response.status >= 500,
+                        internal_detail=f"status={response.status if response else 'none'}",
+                    )
+                )
             final_url = validate_public_url(page.url)
             for redirect_url in redirect_urls:
                 validate_public_url(redirect_url)
@@ -81,8 +153,9 @@ def inspect_page(requested_url: str, timeout_ms: int = 30_000) -> dict[str, Any]
                     "WEBSITE_UNREACHABLE", "The website redirected too many times."
                 )
 
-            measurements = page.evaluate(
-                """
+            try:
+                measurements = page.evaluate(
+                    """
                 () => {
                   const links = [...document.querySelectorAll('a[href]')];
                   const origin = window.location.origin;
@@ -106,9 +179,19 @@ def inspect_page(requested_url: str, timeout_ms: int = 30_000) -> dict[str, Any]
                     },
                   };
                 }
-                """
-            )
-            user_agent = page.evaluate("() => navigator.userAgent")
+                    """
+                )
+                user_agent = page.evaluate("() => navigator.userAgent")
+            except PlaywrightError as exception:
+                raise AnalysisFailure(
+                    FailureDetail(
+                        "PLAYWRIGHT_COLLECTION_FAILED",
+                        "Page evidence could not be collected.",
+                        "collecting_page_evidence",
+                        False,
+                        internal_detail=str(exception),
+                    )
+                ) from exception
             context.close()
         finally:
             browser.close()

@@ -17,6 +17,9 @@ def test_worker_redis_configuration() -> None:
     assert str(settings.redis_url) == "redis://cache:6379/2"
     assert settings.ai_provider is AIProviderName.DISABLED
     assert settings.ai_timeout_seconds == 120
+    assert settings.navigation_timeout_ms == 45_000
+    assert settings.lighthouse_timeout_seconds == 120
+    assert settings.analysis_max_attempts == 2
     configured_redis_url = str(get_settings().redis_url)
     assert celery_app.conf.broker_url == configured_redis_url
     assert celery_app.conf.result_backend == configured_redis_url

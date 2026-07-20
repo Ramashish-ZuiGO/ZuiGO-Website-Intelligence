@@ -1,12 +1,16 @@
 import logging
+import time
 import uuid
+from collections.abc import Callable
 from datetime import datetime
+from urllib.parse import urlsplit
 
 from billiard.exceptions import SoftTimeLimitExceeded
 from sqlalchemy import delete, insert, select, update
 from sqlalchemy.orm import Session
 
 from worker_app.ai import generate_interpretation
+from worker_app.analysis.errors import AnalysisFailure, FailureDetail
 from worker_app.analysis.findings import generate_findings
 from worker_app.analysis.lighthouse_audit import parse_lighthouse, run_lighthouse
 from worker_app.analysis.playwright_audit import (
@@ -53,6 +57,11 @@ SAFE_AI_PLAYWRIGHT_KEYS = {
 }
 
 
+def safe_log_url(value: str) -> str:
+    parsed = urlsplit(value)
+    return f"{parsed.scheme}://{parsed.hostname or ''}/"
+
+
 def update_run(session: Session, analysis_run_id: uuid.UUID, **values: object) -> None:
     values["updated_at"] = utc_now()
     session.execute(
@@ -62,6 +71,10 @@ def update_run(session: Session, analysis_run_id: uuid.UUID, **values: object) -
 
 
 def stage(session: Session, analysis_run_id: uuid.UUID, progress: int, step: str) -> None:
+    current_progress = session.scalar(
+        select(analysis_runs.c.progress_percent).where(analysis_runs.c.id == analysis_run_id)
+    )
+    progress = max(progress, current_progress or 0)
     update_run(
         session,
         analysis_run_id,
@@ -183,27 +196,79 @@ def mark_failed(analysis_run_id: uuid.UUID, error_code: str, message: str) -> No
         )
 
 
-def safe_failure(exception: Exception) -> tuple[str, str]:
+def safe_failure(exception: Exception) -> FailureDetail:
+    if isinstance(exception, AnalysisFailure):
+        return exception.detail
     if isinstance(exception, UrlSafetyError):
-        return exception.code, exception.safe_message
+        return FailureDetail(exception.code, exception.safe_message, "loading_website", False)
     if isinstance(exception, SoftTimeLimitExceeded):
-        return "ANALYSIS_TIMEOUT", "The website analysis timed out."
-    if isinstance(exception, RuntimeError) and str(exception) == "LIGHTHOUSE_FAILED":
-        return "LIGHTHOUSE_FAILED", "The Lighthouse audit failed."
+        return FailureDetail(
+            "ANALYSIS_DEADLINE_EXCEEDED", "The analysis deadline was exceeded.", "failed", False
+        )
     if exception.__class__.__module__.startswith("playwright"):
         normalized = normalize_playwright_error(exception)
-        return normalized.code, normalized.safe_message
-    return "ANALYSIS_PROCESSING_FAILED", "The analysis could not be completed."
+        return FailureDetail(
+            normalized.code, normalized.safe_message, "collecting_page_evidence", False
+        )
+    return FailureDetail(
+        "INTERNAL_ANALYSIS_ERROR", "The analysis could not be completed.", "failed", False
+    )
+
+
+def run_with_retries[T](
+    operation: Callable[[], T],
+    *,
+    max_attempts: int,
+    backoff_seconds: float,
+    context: dict[str, object],
+) -> tuple[T, int]:
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return operation(), attempt
+        except AnalysisFailure as exception:
+            failure = exception.with_attempt(attempt)
+            if not failure.detail.retryable or attempt >= max_attempts:
+                raise failure from exception
+            logger.warning(
+                "analysis_retry analysis_run_id=%s project_id=%s website_id=%s "
+                "stage=%s attempt=%s failure_code=%s",
+                context["analysis_run_id"],
+                context["project_id"],
+                context["website_id"],
+                failure.detail.stage,
+                attempt,
+                failure.detail.code,
+            )
+            if backoff_seconds:
+                time.sleep(backoff_seconds)
+    raise AssertionError("retry loop exhausted")
 
 
 @celery_app.task(
     name="worker.run_analysis",
-    soft_time_limit=240,
-    time_limit=270,
+    soft_time_limit=305,
+    time_limit=315,
     acks_late=True,
 )
 def run_analysis(analysis_run_id: str) -> dict[str, str]:
     run_id = parse_analysis_run_id(analysis_run_id)
+    settings = get_settings()
+    job_started = time.monotonic()
+    context: dict[str, object] = {"analysis_run_id": run_id, "project_id": None, "website_id": None}
+
+    def ensure_deadline() -> None:
+        elapsed = time.monotonic() - job_started
+        if elapsed >= settings.analysis_job_timeout_seconds:
+            raise AnalysisFailure(
+                FailureDetail(
+                    "ANALYSIS_DEADLINE_EXCEEDED",
+                    "The analysis deadline was exceeded.",
+                    "failed",
+                    False,
+                    internal_detail=f"elapsed_seconds={elapsed:.3f}",
+                )
+            )
+
     try:
         with SessionLocal() as session:
             row = (
@@ -232,6 +297,10 @@ def run_analysis(analysis_run_id: str) -> dict[str, str]:
             if website_row is None:
                 return {"status": "missing", "analysis_run_id": analysis_run_id}
             requested_url = website_row["url"]
+            context["website_id"] = row["website_id"]
+            context["project_id"] = session.scalar(
+                select(websites.c.project_id).where(websites.c.id == row["website_id"])
+            )
 
             started_at = utc_now()
             update_run(
@@ -239,27 +308,82 @@ def run_analysis(analysis_run_id: str) -> dict[str, str]:
                 run_id,
                 status="running",
                 progress_percent=5,
-                current_step="Validating target",
+                current_step="queued",
                 started_at=started_at,
                 completed_at=None,
                 error_code=None,
                 error_message=None,
             )
             validate_public_url(requested_url)
-            stage(session, run_id, 15, "Launching browser")
-            stage(session, run_id, 35, "Inspecting page")
-            playwright_data = inspect_page(requested_url)
-            stage(session, run_id, 60, "Running Lighthouse")
-            lighthouse_data = run_lighthouse(
-                str(playwright_data["final_url"]), chromium_executable_path()
+            ensure_deadline()
+            stage(session, run_id, 10, "preparing_browser")
+            stage(session, run_id, 20, "loading_website")
+            playwright_started = time.monotonic()
+            playwright_result, playwright_attempt = run_with_retries(
+                lambda: inspect_page(
+                    requested_url,
+                    launch_timeout_ms=settings.browser_launch_timeout_ms,
+                    navigation_timeout_ms=settings.navigation_timeout_ms,
+                    dom_readiness_timeout_ms=settings.dom_readiness_timeout_ms,
+                    stabilization_ms=settings.page_stabilization_ms,
+                    collection_timeout_ms=settings.evidence_collection_timeout_ms,
+                ),
+                max_attempts=settings.analysis_max_attempts,
+                backoff_seconds=settings.analysis_retry_backoff_seconds,
+                context=context,
+            )
+            playwright_data = playwright_result
+            playwright_data["attempt_count"] = playwright_attempt
+            logger.info(
+                "analysis_stage_complete analysis_run_id=%s project_id=%s website_id=%s "
+                "stage=collecting_page_evidence attempt=%s requested_url=%s final_url=%s "
+                "elapsed_ms=%s timeout_ms=%s",
+                run_id,
+                context["project_id"],
+                context["website_id"],
+                playwright_attempt,
+                safe_log_url(requested_url),
+                safe_log_url(str(playwright_data["final_url"])),
+                round((time.monotonic() - playwright_started) * 1000),
+                settings.navigation_timeout_ms,
+            )
+            ensure_deadline()
+            stage(session, run_id, 45, "collecting_page_evidence")
+            stage(session, run_id, 55, "running_lighthouse")
+            lighthouse_started = time.monotonic()
+            lighthouse_result, lighthouse_attempt = run_with_retries(
+                lambda: run_lighthouse(
+                    str(playwright_data["final_url"]),
+                    chromium_executable_path(),
+                    settings.lighthouse_timeout_seconds,
+                ),
+                max_attempts=settings.analysis_max_attempts,
+                backoff_seconds=settings.analysis_retry_backoff_seconds,
+                context=context,
+            )
+            lighthouse_data = lighthouse_result
+            lighthouse_data.setdefault("_zuigo_execution", {})["attempt_count"] = lighthouse_attempt
+            logger.info(
+                "analysis_stage_complete analysis_run_id=%s project_id=%s website_id=%s "
+                "stage=running_lighthouse attempt=%s requested_url=%s final_url=%s "
+                "elapsed_ms=%s timeout_ms=%s lighthouse_exit_code=%s",
+                run_id,
+                context["project_id"],
+                context["website_id"],
+                lighthouse_attempt,
+                safe_log_url(requested_url),
+                safe_log_url(str(playwright_data["final_url"])),
+                round((time.monotonic() - lighthouse_started) * 1000),
+                settings.lighthouse_timeout_seconds * 1000,
+                lighthouse_data["_zuigo_execution"].get("exit_code"),
             )
             validate_public_url(
                 str(lighthouse_data.get("finalDisplayedUrl") or playwright_data["final_url"])
             )
-            stage(session, run_id, 80, "Generating verified findings")
+            ensure_deadline()
+            stage(session, run_id, 75, "calculating_score")
             metrics = parse_lighthouse(lighthouse_data)
             findings = generate_findings(playwright_data, metrics)
-            stage(session, run_id, 88, "Calculating transparent scores")
             score = calculate_score(
                 metrics,
                 playwright_data,
@@ -271,7 +395,7 @@ def run_analysis(analysis_run_id: str) -> dict[str, str]:
                 run_id,
                 FORMULA_VERSION,
             )
-            stage(session, run_id, 90, "Saving verified results")
+            stage(session, run_id, 85, "saving_report")
             completed_at = utc_now()
             persist_results(
                 session,
@@ -284,7 +408,8 @@ def run_analysis(analysis_run_id: str) -> dict[str, str]:
                 started_at,
                 completed_at,
             )
-            stage(session, run_id, 92, "Generating evidence-grounded interpretation")
+            ensure_deadline()
+            stage(session, run_id, 90, "generating_interpretation")
             try:
                 interpretation = generate_interpretation(
                     {
@@ -339,7 +464,7 @@ def run_analysis(analysis_run_id: str) -> dict[str, str]:
                 run_id,
                 status="completed",
                 progress_percent=100,
-                current_step="Analysis completed",
+                current_step="completed",
                 completed_at=completed_at,
             )
             logger.info(
@@ -347,14 +472,22 @@ def run_analysis(analysis_run_id: str) -> dict[str, str]:
                 run_id,
             )
     except Exception as exception:
-        error_code, message = safe_failure(exception)
+        failure = safe_failure(exception)
         logger.error(
-            "analysis_failed analysis_run_id=%s error_code=%s exception_type=%s",
+            "analysis_failed analysis_run_id=%s project_id=%s website_id=%s "
+            "stage=%s attempt=%s retryable=%s failure_code=%s "
+            "exception_type=%s elapsed_ms=%s",
             run_id,
-            error_code,
+            context["project_id"],
+            context["website_id"],
+            failure.stage,
+            failure.attempt,
+            failure.retryable,
+            failure.code,
             type(exception).__name__,
+            round((time.monotonic() - job_started) * 1000),
         )
-        mark_failed(run_id, error_code, message)
+        mark_failed(run_id, failure.code, failure.safe_message)
         return {"status": "failed", "analysis_run_id": analysis_run_id}
 
     return {"status": "completed", "analysis_run_id": analysis_run_id}

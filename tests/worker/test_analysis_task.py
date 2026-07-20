@@ -65,7 +65,7 @@ def configure_success(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         analysis,
         "inspect_page",
-        lambda url: {
+        lambda url, **kwargs: {
             "requested_url": url,
             "final_url": url,
             "http_status_code": 200,
@@ -86,7 +86,7 @@ def configure_success(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         analysis,
         "run_lighthouse",
-        lambda url, chrome: {
+        lambda url, chrome, timeout: {
             "lighthouseVersion": "13.3.0",
             "finalDisplayedUrl": url,
             "categories": {
@@ -141,7 +141,7 @@ def test_worker_failure_stores_safe_failed_state(
 
     assert result["status"] == "failed"
     assert stored["status"] == "failed"
-    assert stored["error_code"] == "ANALYSIS_PROCESSING_FAILED"
+    assert stored["error_code"] == "INTERNAL_ANALYSIS_ERROR"
     assert stored["error_message"] == "The analysis could not be completed."
     assert "secret" not in str(stored["error_message"])
 
@@ -167,3 +167,53 @@ def test_unexpected_interpretation_failure_keeps_technical_audit_completed(
     assert result["status"] == "completed"
     assert stored["status"] == "completed"
     assert interpretation_count == 0
+
+
+def test_transient_retry_succeeds_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    attempts = 0
+
+    def operation() -> str:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise analysis.AnalysisFailure(
+                analysis.FailureDetail("NAVIGATION_TIMEOUT", "Timed out.", "loading_website", True)
+            )
+        return "ok"
+
+    monkeypatch.setattr(analysis.time, "sleep", lambda seconds: None)
+    result, attempt = analysis.run_with_retries(
+        operation,
+        max_attempts=2,
+        backoff_seconds=1,
+        context={"analysis_run_id": "run", "project_id": "project", "website_id": "website"},
+    )
+    assert result == "ok"
+    assert attempt == 2
+
+
+def test_retry_limit_is_enforced(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(analysis.time, "sleep", lambda seconds: None)
+
+    def operation() -> None:
+        raise analysis.AnalysisFailure(
+            analysis.FailureDetail("BROWSER_LAUNCH_FAILED", "Failed.", "preparing_browser", True)
+        )
+
+    with pytest.raises(analysis.AnalysisFailure) as error:
+        analysis.run_with_retries(
+            operation,
+            max_attempts=2,
+            backoff_seconds=1,
+            context={"analysis_run_id": "run", "project_id": "project", "website_id": "website"},
+        )
+    assert error.value.detail.attempt == 2
+
+
+def test_progress_is_monotonic(session_factory: sessionmaker) -> None:
+    run_id = insert_queued_run(session_factory)
+    with session_factory() as session:
+        analysis.stage(session, run_id, 40, "running_lighthouse")
+        analysis.stage(session, run_id, 20, "loading_website")
+    stored = load_run(session_factory, run_id)
+    assert stored["progress_percent"] == 40

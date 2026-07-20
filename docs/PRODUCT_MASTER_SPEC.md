@@ -359,6 +359,149 @@ Each report must have its own unique ID.
 
 WEBSITE ANALYSIS CATEGORIES
 
+### WEB STANDARDS AND CACHE
+
+
+W3C HTML validation errors
+
+W3C HTML validation warnings
+
+ZuiGO Markup Standards Score
+
+Cache-Control
+
+ETag
+
+Last-Modified
+
+Expires
+
+Compression
+
+Immutable static assets
+
+CDN indicators
+
+Cache Efficiency Score
+
+
+
+### POLICY AND LEGAL METADATA
+
+
+
+Privacy Policy presence
+
+Privacy Policy URL
+
+Explicit last-updated or effective date
+
+Privacy Policy freshness indicator
+
+Copyright year or year range
+
+Current-year copyright indicator
+
+Terms and Conditions presence
+
+Cookie Policy presence
+
+
+
+### ANALYTICS AND TRACKING
+
+
+
+Google Analytics 4 detection
+
+Google Tag Manager detection
+
+Public GA4 measurement IDs
+
+GTM container IDs
+
+Duplicate analytics installations
+
+Analytics request observations
+
+Consent Mode indicators
+
+Trackers loaded before consent
+
+Third-party analytics inventory
+
+
+
+### SECURITY POSTURE
+
+
+
+Security response headers
+
+Security-header configuration quality
+
+TLS certificate details
+
+TLS certificate expiry
+
+Mixed content
+
+HTTP-to-HTTPS redirect
+
+security.txt
+
+Server-information exposure
+
+Passive Page Security Posture Score
+
+
+
+The Passive Page Security Posture Score must be based only on passive,
+
+verified observations.
+
+
+
+Do not represent the score as proof that a page is vulnerability-free.
+
+Use CVSS only when a specific vulnerability is actually verified.
+
+
+
+### BROWSER AND RESPONSIVE COMPATIBILITY
+
+
+
+Chromium test result
+
+Firefox test result
+
+WebKit test result
+
+Mobile portrait
+
+Mobile landscape
+
+Tablet
+
+Laptop
+
+Desktop
+
+Viewport metadata
+
+Horizontal overflow
+
+Clipped or overlapping elements
+
+Responsive navigation
+
+Tap-target usability
+
+Tested Browser Compatibility Matrix
+
+Responsive Design Result
+
 
 
 Analyse everything that can realistically be measured.
@@ -897,6 +1040,48 @@ Every score must be reproducible.
 
 
 
+### Derived Score Labelling
+
+
+
+Every non-authoritative score must be clearly labelled as ZuiGO-derived.
+
+
+
+For each ZuiGO-derived score, publish the transparent formula, measured inputs,
+deductions, missing measurements, formula version, and confidence. This requirement
+applies to:
+
+
+
+ZuiGO Markup Standards Score
+
+Cache Efficiency Score
+
+Page Security Posture Score
+
+Responsive Design Score
+
+Tested Browser Compatibility Score
+
+
+
+Never call a ZuiGO-derived markup score an official W3C score.
+
+Never claim a passive security score proves a website is vulnerability-free.
+
+Never claim policy freshness proves legal compliance.
+
+Never claim copyright detection proves legal ownership.
+
+Never invent or display a public Google PageRank value.
+
+Never claim browser support for a browser that was not tested.
+
+Never fabricate missing dates, metrics, headers, or analytics information.
+
+
+
 ────────────────────────────────────────
 
 
@@ -942,6 +1127,24 @@ Generate executive reports
 
 
 Never hallucinate technical findings.
+
+
+
+The AI must not:
+
+
+
+Invent Google PageRank.
+
+Treat a detected analytics ID as access to analytics data.
+
+Claim legal compliance from policy dates.
+
+Claim a website is vulnerability-free.
+
+Claim support for untested browsers.
+
+Convert uncertain dates into factual dates.
 
 
 

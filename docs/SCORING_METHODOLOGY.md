@@ -50,3 +50,21 @@ Use the stored formula version, original category scores, original weights,
 available/unavailable category lists, deduction records, and calculation details.
 Deduct each eligible unique finding from 100, normalize weights across available
 categories, calculate the weighted mean, and apply the documented rounding rule.
+
+## Planned Scoring Extensions
+
+Future scoring methodology will include:
+
+- ZuiGO Markup Standards Score
+- Cache Efficiency Score
+- Page Security Posture Score
+- Responsive Design Score
+- Tested Browser Compatibility Score
+- Privacy Policy Freshness Indicator
+- Copyright Currency Indicator
+
+The exact formulas, deductions, confidence rules, and version numbers will be
+documented only after implementation and verification in Task 015.
+
+No planned score should be treated as active until its formula is implemented,
+tested, versioned, and persisted.

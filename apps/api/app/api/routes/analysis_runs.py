@@ -224,7 +224,9 @@ def get_analysis_report(analysis_run_id: uuid.UUID, db: DatabaseSession) -> Anal
             selectinload(AnalysisRun.result),
             selectinload(AnalysisRun.score),
             selectinload(AnalysisRun.website),
+            selectinload(AnalysisRun.interpretation),
         )
+        .execution_options(populate_existing=True)
         .where(AnalysisRun.id == analysis_run_id)
     )
     if analysis_run is None:
@@ -275,4 +277,5 @@ def get_analysis_report(analysis_run_id: uuid.UUID, db: DatabaseSession) -> Anal
             if key in SAFE_PLAYWRIGHT_KEYS
         },
         findings=findings,
+        interpretation=analysis_run.interpretation,
     )

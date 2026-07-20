@@ -50,7 +50,7 @@ services:
           "CMD",
           "python",
           "-c",
-          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3).read()",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).read()",
         ]
       interval: 10s
       timeout: 5s
@@ -76,6 +76,10 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-website_intelligence}
       POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
       POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      AI_PROVIDER: ${AI_PROVIDER:-disabled}
+      AI_MODEL: ${AI_MODEL:-not-configured}
+      AI_BASE_URL: ${AI_BASE_URL:-http://host.docker.internal:11434}
+      AI_TIMEOUT_SECONDS: ${AI_TIMEOUT_SECONDS:-120}
     healthcheck:
       test:
         [

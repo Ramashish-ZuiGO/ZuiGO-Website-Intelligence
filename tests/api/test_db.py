@@ -6,6 +6,7 @@ def test_database_foundation_uses_psycopg_with_mvp_tables() -> None:
     assert SessionLocal.kw["bind"] is engine
     assert set(Base.metadata.tables) == {
         "analysis_findings",
+        "analysis_interpretations",
         "analysis_results",
         "analysis_runs",
         "analysis_scores",

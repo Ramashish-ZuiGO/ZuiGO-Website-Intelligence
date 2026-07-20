@@ -2,7 +2,7 @@ from enum import StrEnum
 from functools import lru_cache
 from urllib.parse import quote
 
-from pydantic import RedisDsn, SecretStr
+from pydantic import AnyHttpUrl, Field, RedisDsn, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -20,6 +20,11 @@ class LogLevel(StrEnum):
     CRITICAL = "CRITICAL"
 
 
+class AIProviderName(StrEnum):
+    DISABLED = "disabled"
+    OLLAMA = "ollama"
+
+
 class WorkerSettings(BaseSettings):
     app_env: AppEnvironment = AppEnvironment.DEVELOPMENT
     log_level: LogLevel = LogLevel.INFO
@@ -29,6 +34,10 @@ class WorkerSettings(BaseSettings):
     postgres_db: str = "website_intelligence"
     postgres_host: str = "postgres"
     postgres_port: int = 5432
+    ai_provider: AIProviderName = AIProviderName.DISABLED
+    ai_model: str = Field(default="not-configured", min_length=1, max_length=200)
+    ai_base_url: AnyHttpUrl = "http://host.docker.internal:11434"
+    ai_timeout_seconds: int = Field(default=120, ge=1, le=600)
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

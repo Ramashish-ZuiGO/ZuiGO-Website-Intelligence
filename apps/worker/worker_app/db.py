@@ -39,6 +39,7 @@ websites = Table(
     metadata,
     Column("id", Uuid, primary_key=True),
     Column("url", String(2048), nullable=False),
+    Column("name", String(200)),
 )
 analysis_results = Table(
     "analysis_results",
@@ -93,6 +94,27 @@ analysis_scores = Table(
     Column("weights", JSON, nullable=False),
     Column("deductions", JSON, nullable=False),
     Column("calculation_details", JSON, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+)
+analysis_interpretations = Table(
+    "analysis_interpretations",
+    metadata,
+    Column("id", Uuid, primary_key=True),
+    Column("analysis_run_id", Uuid, nullable=False, unique=True),
+    Column("generation_mode", String(30), nullable=False),
+    Column("provider", String(50), nullable=False),
+    Column("model", String(200), nullable=False),
+    Column("prompt_version", String(50), nullable=False),
+    Column("executive_summary", Text, nullable=False),
+    Column("overall_assessment", Text, nullable=False),
+    Column("strengths", JSON, nullable=False),
+    Column("weaknesses", JSON, nullable=False),
+    Column("priority_recommendations", JSON, nullable=False),
+    Column("action_plan", JSON, nullable=False),
+    Column("limitations", JSON, nullable=False),
+    Column("fallback_reason", String(100)),
+    Column("generated_at", DateTime(timezone=True), nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("updated_at", DateTime(timezone=True), nullable=False),
 )

@@ -6,6 +6,7 @@ from billiard.exceptions import SoftTimeLimitExceeded
 from sqlalchemy import delete, insert, select, update
 from sqlalchemy.orm import Session
 
+from worker_app.ai import generate_interpretation
 from worker_app.analysis.findings import generate_findings
 from worker_app.analysis.lighthouse_audit import parse_lighthouse, run_lighthouse
 from worker_app.analysis.playwright_audit import (
@@ -16,9 +17,11 @@ from worker_app.analysis.playwright_audit import (
 from worker_app.analysis.scoring import FORMULA_VERSION, calculate_score
 from worker_app.analysis.url_safety import UrlSafetyError, validate_public_url
 from worker_app.celery_app import celery_app
+from worker_app.config import get_settings
 from worker_app.db import (
     SessionLocal,
     analysis_findings,
+    analysis_interpretations,
     analysis_results,
     analysis_runs,
     analysis_scores,
@@ -28,6 +31,26 @@ from worker_app.db import (
 )
 
 logger = logging.getLogger(__name__)
+SAFE_AI_PLAYWRIGHT_KEYS = {
+    "canonical_url",
+    "html_language",
+    "h1_count",
+    "image_count",
+    "images_missing_alt",
+    "internal_link_count",
+    "external_link_count",
+    "form_count",
+    "button_count",
+    "console_errors",
+    "page_javascript_errors",
+    "failed_network_requests",
+    "https_usage",
+    "responsive_viewport",
+    "technology_indicators",
+    "http_status_code",
+    "page_title",
+    "meta_description",
+}
 
 
 def update_run(session: Session, analysis_run_id: uuid.UUID, **values: object) -> None:
@@ -75,6 +98,11 @@ def persist_results(
     session.execute(
         delete(analysis_scores).where(analysis_scores.c.analysis_run_id == analysis_run_id)
     )
+    session.execute(
+        delete(analysis_interpretations).where(
+            analysis_interpretations.c.analysis_run_id == analysis_run_id
+        )
+    )
     now = utc_now()
     session.execute(
         insert(analysis_results).values(
@@ -120,6 +148,28 @@ def persist_results(
     session.commit()
 
 
+def persist_interpretation(
+    session: Session, analysis_run_id: uuid.UUID, interpretation: dict[str, object]
+) -> None:
+    now = utc_now()
+    session.execute(
+        delete(analysis_interpretations).where(
+            analysis_interpretations.c.analysis_run_id == analysis_run_id
+        )
+    )
+    session.execute(
+        insert(analysis_interpretations).values(
+            id=uuid.uuid4(),
+            analysis_run_id=analysis_run_id,
+            generated_at=now,
+            created_at=now,
+            updated_at=now,
+            **interpretation,
+        )
+    )
+    session.commit()
+
+
 def mark_failed(analysis_run_id: uuid.UUID, error_code: str, message: str) -> None:
     with SessionLocal() as session:
         update_run(
@@ -148,8 +198,8 @@ def safe_failure(exception: Exception) -> tuple[str, str]:
 
 @celery_app.task(
     name="worker.run_analysis",
-    soft_time_limit=120,
-    time_limit=150,
+    soft_time_limit=240,
+    time_limit=270,
     acks_late=True,
 )
 def run_analysis(analysis_run_id: str) -> dict[str, str]:
@@ -170,11 +220,18 @@ def run_analysis(analysis_run_id: str) -> dict[str, str]:
                 return {"status": "missing", "analysis_run_id": analysis_run_id}
             if row["status"] == "completed":
                 return {"status": "completed", "analysis_run_id": analysis_run_id}
-            requested_url = session.scalar(
-                select(websites.c.url).where(websites.c.id == row["website_id"])
+            website_row = (
+                session.execute(
+                    select(websites.c.url, websites.c.name).where(
+                        websites.c.id == row["website_id"]
+                    )
+                )
+                .mappings()
+                .one_or_none()
             )
-            if requested_url is None:
+            if website_row is None:
                 return {"status": "missing", "analysis_run_id": analysis_run_id}
+            requested_url = website_row["url"]
 
             started_at = utc_now()
             update_run(
@@ -214,7 +271,7 @@ def run_analysis(analysis_run_id: str) -> dict[str, str]:
                 run_id,
                 FORMULA_VERSION,
             )
-            stage(session, run_id, 95, "Saving results")
+            stage(session, run_id, 90, "Saving verified results")
             completed_at = utc_now()
             persist_results(
                 session,
@@ -227,6 +284,56 @@ def run_analysis(analysis_run_id: str) -> dict[str, str]:
                 started_at,
                 completed_at,
             )
+            stage(session, run_id, 92, "Generating evidence-grounded interpretation")
+            try:
+                interpretation = generate_interpretation(
+                    {
+                        "website": {
+                            "name": website_row["name"],
+                            "requested_url": requested_url,
+                            "final_url": playwright_data["final_url"],
+                            "analysis_date": completed_at.isoformat(),
+                        },
+                        "scores": {
+                            key: score[key]
+                            for key in (
+                                "overall_score",
+                                "performance_score",
+                                "accessibility_score",
+                                "best_practices_score",
+                                "seo_score",
+                                "technical_quality_score",
+                                "confidence_percent",
+                                "formula_version",
+                            )
+                        },
+                        "deductions": score["deductions"],
+                        "lighthouse_metrics": metrics,
+                        "playwright_measurements": {
+                            key: value
+                            for key, value in playwright_data.items()
+                            if key in SAFE_AI_PLAYWRIGHT_KEYS
+                        },
+                        "findings": findings,
+                    },
+                    get_settings(),
+                )
+                persist_interpretation(session, run_id, interpretation)
+                logger.info(
+                    "analysis_interpretation analysis_run_id=%s provider=%s model=%s "
+                    "generation_mode=%s prompt_version=%s",
+                    run_id,
+                    interpretation["provider"],
+                    interpretation["model"],
+                    interpretation["generation_mode"],
+                    interpretation["prompt_version"],
+                )
+            except Exception as interpretation_exception:
+                logger.warning(
+                    "analysis_interpretation_unavailable analysis_run_id=%s exception_type=%s",
+                    run_id,
+                    type(interpretation_exception).__name__,
+                )
             update_run(
                 session,
                 run_id,

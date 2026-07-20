@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, JsonValue
 
@@ -70,6 +71,49 @@ class ReportWebsiteRead(BaseModel):
     url: str
 
 
+class InterpretationObservationRead(BaseModel):
+    text: str
+    related_finding_codes: list[str]
+
+
+class InterpretationRecommendationRead(BaseModel):
+    recommendation_id: str
+    title: str
+    explanation: str
+    related_finding_codes: list[str]
+    priority: Literal["critical", "high", "medium", "low"]
+    business_impact: str
+    recommended_fix: str
+    estimated_effort: str
+    responsible_role: str
+    expected_improvement: str
+    confidence_percent: int
+
+
+class InterpretationActionPlanRead(BaseModel):
+    timeframe: Literal["immediate", "short_term", "medium_term"]
+    recommendation_ids: list[str]
+
+
+class AnalysisInterpretationRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    generation_mode: Literal["ai", "deterministic_fallback"]
+    provider: str
+    model: str
+    prompt_version: str
+    executive_summary: str
+    overall_assessment: str
+    strengths: list[InterpretationObservationRead]
+    weaknesses: list[InterpretationObservationRead]
+    priority_recommendations: list[InterpretationRecommendationRead]
+    action_plan: list[InterpretationActionPlanRead]
+    limitations: list[str]
+    fallback_reason: str | None
+    generated_at: datetime
+
+
 class AnalysisReportResponse(BaseModel):
     report_id: uuid.UUID
     analysis_run_id: uuid.UUID
@@ -80,3 +124,4 @@ class AnalysisReportResponse(BaseModel):
     lighthouse_metrics: dict[str, JsonValue]
     playwright_measurements: dict[str, JsonValue]
     findings: list[AnalysisFindingRead]
+    interpretation: AnalysisInterpretationRead | None

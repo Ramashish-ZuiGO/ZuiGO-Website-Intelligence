@@ -83,6 +83,31 @@ export default function AnalysisReportPage() {
         </dl>
       </header>
 
+      {report.interpretation && (
+        <section className="mt-6 grid gap-6">
+          <div className="rounded-2xl border bg-white p-6">
+            <div className="flex flex-wrap items-center gap-3">
+              <h2 className="text-xl font-bold">Executive Summary</h2>
+              <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold uppercase">
+                {report.interpretation.generation_mode === "ai" ? "AI generated" : "Deterministic fallback"}
+              </span>
+            </div>
+            <p className="mt-4 text-slate-700">{report.interpretation.executive_summary}</p>
+            <h3 className="mt-5 font-semibold">Overall assessment</h3>
+            <p className="mt-2 text-slate-700">{report.interpretation.overall_assessment}</p>
+          </div>
+
+          <div className="grid gap-6 lg:grid-cols-2">
+            <div className="rounded-2xl border bg-white p-6"><h2 className="text-xl font-bold">Key Strengths</h2>{report.interpretation.strengths.length ? <ul className="mt-4 grid gap-3">{report.interpretation.strengths.map((item, index) => <li className="rounded-lg bg-emerald-50 p-3 text-sm" key={`${item.text}-${index}`}>{item.text}{item.related_finding_codes.length > 0 && <p className="mt-1 font-mono text-xs">{item.related_finding_codes.join(", ")}</p>}</li>)}</ul> : <p className="mt-3 text-sm text-slate-600">Insufficient verified evidence is available for this conclusion.</p>}</div>
+            <div className="rounded-2xl border bg-white p-6"><h2 className="text-xl font-bold">Priority Weaknesses</h2>{report.interpretation.weaknesses.length ? <ul className="mt-4 grid gap-3">{report.interpretation.weaknesses.map((item, index) => <li className="rounded-lg bg-amber-50 p-3 text-sm" key={`${item.text}-${index}`}><p>{item.text}</p><p className="mt-1 font-mono text-xs">{item.related_finding_codes.join(", ")}</p></li>)}</ul> : <p className="mt-3 text-sm text-slate-600">No verified weaknesses were available.</p>}</div>
+          </div>
+
+          <div className="rounded-2xl border bg-white p-6"><h2 className="text-xl font-bold">Recommended Actions</h2>{report.interpretation.priority_recommendations.length ? <ul className="mt-4 grid gap-4">{report.interpretation.priority_recommendations.map((item) => <li className="rounded-xl border p-4" key={item.recommendation_id}><p className="text-xs font-bold uppercase">{item.priority} · {item.related_finding_codes.join(", ")}</p><h3 className="mt-2 font-bold">{item.title}</h3><p className="mt-2 text-sm text-slate-600">{item.explanation}</p><dl className="mt-3 grid gap-2 text-sm sm:grid-cols-2"><div><dt className="text-slate-500">Business impact</dt><dd>{item.business_impact}</dd></div><div><dt className="text-slate-500">Recommended fix</dt><dd>{item.recommended_fix}</dd></div><div><dt className="text-slate-500">Estimated effort</dt><dd>{item.estimated_effort}</dd></div><div><dt className="text-slate-500">Responsible role</dt><dd>{item.responsible_role}</dd></div><div><dt className="text-slate-500">Expected improvement</dt><dd>{item.expected_improvement}</dd></div><div><dt className="text-slate-500">Confidence</dt><dd>{item.confidence_percent}%</dd></div></dl></li>)}</ul> : <p className="mt-3 text-sm text-slate-600">No evidence-grounded actions were generated.</p>}</div>
+
+          <div className="grid gap-6 lg:grid-cols-2"><div className="rounded-2xl border bg-white p-6"><h2 className="text-xl font-bold">Action Plan</h2>{(["immediate", "short_term", "medium_term"] as const).map((timeframe) => <div className="mt-4" key={timeframe}><h3 className="font-semibold capitalize">{timeframe.replace("_", " ")}</h3><p className="mt-1 text-sm text-slate-600">{report.interpretation?.action_plan.filter((item) => item.timeframe === timeframe).flatMap((item) => item.recommendation_ids).join(", ") || "No actions"}</p></div>)}</div><div className="rounded-2xl border bg-white p-6"><h2 className="text-xl font-bold">Limitations</h2><ul className="mt-4 grid gap-2 text-sm text-slate-600">{report.interpretation.limitations.map((item) => <li key={item}>• {item}</li>)}</ul></div></div>
+        </section>
+      )}
+
       <section className="mt-6 grid gap-4 md:grid-cols-3">
         <div className="rounded-2xl border bg-white p-6"><p className="text-sm text-slate-500">Overall score</p><p className="mt-2 text-6xl font-bold">{display(report.score.overall_score)}</p><p className="mt-3 text-sm">Confidence: {report.score.confidence_percent}%</p><p className="text-sm">Formula: {report.score.formula_version}</p></div>
         <div className="grid gap-3 sm:grid-cols-2 md:col-span-2">{Object.entries(categoryScores).map(([label, score]) => <div className="rounded-xl border bg-white p-4" key={label}><p className="text-sm text-slate-500">{label}</p><p className="mt-1 text-3xl font-bold">{display(score)}</p></div>)}</div>

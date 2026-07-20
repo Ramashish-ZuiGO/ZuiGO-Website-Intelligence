@@ -32,6 +32,10 @@ Backend configuration belongs in the repository-root `.env`:
 - `POSTGRES_PORT`: PostgreSQL port used to construct `DATABASE_URL`.
 - `REDIS_URL`: required Redis URL used by the API and as Celery's broker and result backend.
 - `BACKEND_CORS_ORIGINS`: comma-separated HTTP origins allowed to call the API.
+- `AI_PROVIDER`: worker interpretation provider; `disabled` (default) or `ollama`.
+- `AI_MODEL`: local Ollama model name when Ollama is enabled.
+- `AI_BASE_URL`: Ollama API URL reachable from the worker container.
+- `AI_TIMEOUT_SECONDS`: bounded provider request timeout from 1 through 600 seconds.
 
 `DATABASE_URL` is derived once by the typed API settings from the PostgreSQL fields above and
 is shared by SQLAlchemy and Alembic. Do not add a second password-bearing URL to `.env`.
@@ -43,8 +47,29 @@ Copy-Item apps/web/.env.local.example apps/web/.env.local
 ```
 
 Next.js loads `apps/web/.env.local`; it does not automatically load the repository-root
-`.env`. `NEXT_PUBLIC_API_URL` is the browser-visible API base URL. Do not place secrets in
+`.env`. `NEXT_PUBLIC_API_URL` is the browser-visible API base URL. The example uses
+`http://127.0.0.1:8000` to avoid Windows resolving `localhost` to IPv6 while Docker Desktop
+publishes the API through its IPv4 forwarding path. Do not place secrets in
 frontend variables or in any variable beginning with `NEXT_PUBLIC_`.
+
+### Optional local AI interpretation
+
+AI is optional. With `AI_PROVIDER=disabled`, each completed audit receives a deterministic,
+evidence-grounded interpretation. To use an existing local Ollama installation, configure:
+
+```dotenv
+AI_PROVIDER=ollama
+AI_MODEL=<configured-local-model>
+AI_BASE_URL=http://host.docker.internal:11434
+AI_TIMEOUT_SECONDS=120
+```
+
+Install and start Ollama on the host and install the selected model yourself. The application
+does not download models, expose Ollama publicly, or require Ollama to start. If the worker
+cannot reach Ollama, the model is missing, the request times out, or output fails validation,
+the verified technical audit remains completed and the deterministic fallback is stored.
+Every generated recommendation must cite a persisted finding code; prompts and raw provider
+responses are not stored or logged.
 
 Install the pinned Python development tools and service dependencies:
 
@@ -116,7 +141,8 @@ Start the frontend in a separate terminal:
 npm.cmd run dev
 ```
 
-Open `http://localhost:3000`. The API health endpoint is available at `http://localhost:8000/health`.
+Open `http://localhost:3000`. The API health endpoint is available at
+`http://127.0.0.1:8000/health`.
 
 Stop the services:
 

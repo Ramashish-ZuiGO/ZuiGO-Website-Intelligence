@@ -9,6 +9,7 @@ from app.db.session import get_db
 from app.main import app
 from app.models import (
     AnalysisFinding,
+    AnalysisInterpretation,
     AnalysisResult,
     AnalysisRun,
     AnalysisScore,
@@ -230,12 +231,55 @@ def test_api_results_response_and_cascade(client: TestClient, db_session: Sessio
     assert report_response.status_code == 200
     assert report_response.json()["score"]["technical_quality_score"] == 92
     assert report_response.json()["website"]["url"] == website.url
+    assert report_response.json()["interpretation"] is None
+
+    db_session.add(
+        AnalysisInterpretation(
+            analysis_run_id=run.id,
+            generation_mode="deterministic_fallback",
+            provider="disabled",
+            model="not-configured",
+            prompt_version="1.0.0",
+            executive_summary="Verified summary.",
+            overall_assessment="Verified assessment.",
+            strengths=[],
+            weaknesses=[{"text": "Missing H1.", "related_finding_codes": ["MISSING_H1"]}],
+            priority_recommendations=[
+                {
+                    "recommendation_id": "REC-1",
+                    "title": "Add H1",
+                    "explanation": "Address the finding.",
+                    "related_finding_codes": ["MISSING_H1"],
+                    "priority": "medium",
+                    "business_impact": "Improves structure.",
+                    "recommended_fix": "Add one H1.",
+                    "estimated_effort": "Small",
+                    "responsible_role": "Developer",
+                    "expected_improvement": "Resolves finding.",
+                    "confidence_percent": 100,
+                }
+            ],
+            action_plan=[{"timeframe": "short_term", "recommendation_ids": ["REC-1"]}],
+            limitations=["Homepage only."],
+            fallback_reason="provider_unavailable",
+            generated_at=now,
+        )
+    )
+    db_session.commit()
+    interpreted_report = client.get(f"/api/v1/analysis-runs/{run.id}/report")
+    assert interpreted_report.json()["interpretation"]["generation_mode"] == (
+        "deterministic_fallback"
+    )
+    assert interpreted_report.json()["interpretation"]["priority_recommendations"][0][
+        "related_finding_codes"
+    ] == ["MISSING_H1"]
 
     db_session.delete(run)
     db_session.commit()
     assert db_session.scalar(select(func.count()).select_from(AnalysisResult)) == 0
     assert db_session.scalar(select(func.count()).select_from(AnalysisFinding)) == 0
     assert db_session.scalar(select(func.count()).select_from(AnalysisScore)) == 0
+    assert db_session.scalar(select(func.count()).select_from(AnalysisInterpretation)) == 0
 
 
 def test_missing_report_returns_normalized_errors(client: TestClient, db_session: Session) -> None:

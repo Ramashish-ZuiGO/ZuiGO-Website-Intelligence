@@ -110,4 +110,44 @@ export interface AnalysisReport {
   lighthouse_metrics: Record<string, number | string | null>;
   playwright_measurements: Record<string, unknown>;
   findings: AnalysisFinding[];
+  interpretation: AnalysisInterpretation | null;
+}
+
+export interface InterpretationObservation {
+  text: string;
+  related_finding_codes: string[];
+}
+
+export interface InterpretationRecommendation {
+  recommendation_id: string;
+  title: string;
+  explanation: string;
+  related_finding_codes: string[];
+  priority: "critical" | "high" | "medium" | "low";
+  business_impact: string;
+  recommended_fix: string;
+  estimated_effort: string;
+  responsible_role: string;
+  expected_improvement: string;
+  confidence_percent: number;
+}
+
+export interface AnalysisInterpretation {
+  id: string;
+  generation_mode: "ai" | "deterministic_fallback";
+  provider: string;
+  model: string;
+  prompt_version: string;
+  executive_summary: string;
+  overall_assessment: string;
+  strengths: InterpretationObservation[];
+  weaknesses: InterpretationObservation[];
+  priority_recommendations: InterpretationRecommendation[];
+  action_plan: Array<{
+    timeframe: "immediate" | "short_term" | "medium_term";
+    recommendation_ids: string[];
+  }>;
+  limitations: string[];
+  fallback_reason: string | null;
+  generated_at: string;
 }

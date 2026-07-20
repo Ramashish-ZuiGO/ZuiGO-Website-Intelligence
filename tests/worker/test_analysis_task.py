@@ -112,12 +112,17 @@ def test_successful_result_persistence_and_retry_is_idempotent(
     with session_factory() as session:
         result_count = session.scalar(select(func.count()).select_from(worker_db.analysis_results))
         score_count = session.scalar(select(func.count()).select_from(worker_db.analysis_scores))
+        interpretation_count = session.scalar(
+            select(func.count()).select_from(worker_db.analysis_interpretations)
+        )
 
     assert first["status"] == "completed"
     assert second["status"] == "completed"
     assert stored["progress_percent"] == 100
     assert result_count == 1
     assert score_count == 1
+    assert interpretation_count == 1
+    assert stored["status"] == "completed"
 
 
 def test_worker_failure_stores_safe_failed_state(
@@ -139,3 +144,26 @@ def test_worker_failure_stores_safe_failed_state(
     assert stored["error_code"] == "ANALYSIS_PROCESSING_FAILED"
     assert stored["error_message"] == "The analysis could not be completed."
     assert "secret" not in str(stored["error_message"])
+
+
+def test_unexpected_interpretation_failure_keeps_technical_audit_completed(
+    session_factory: sessionmaker, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_id = insert_queued_run(session_factory)
+    configure_success(monkeypatch)
+    monkeypatch.setattr(
+        analysis,
+        "generate_interpretation",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("provider secret")),
+    )
+
+    result = analysis.run_analysis.run(str(run_id))
+    stored = load_run(session_factory, run_id)
+    with session_factory() as session:
+        interpretation_count = session.scalar(
+            select(func.count()).select_from(worker_db.analysis_interpretations)
+        )
+
+    assert result["status"] == "completed"
+    assert stored["status"] == "completed"
+    assert interpretation_count == 0

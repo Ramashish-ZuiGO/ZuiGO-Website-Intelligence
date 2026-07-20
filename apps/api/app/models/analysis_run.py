@@ -10,6 +10,7 @@ from app.db.base import Base
 
 if TYPE_CHECKING:
     from app.models.analysis_finding import AnalysisFinding
+    from app.models.analysis_interpretation import AnalysisInterpretation
     from app.models.analysis_result import AnalysisResult
     from app.models.analysis_score import AnalysisScore
     from app.models.website import Website
@@ -67,6 +68,9 @@ class AnalysisRun(Base):
         back_populates="analysis_run", cascade="all, delete-orphan", passive_deletes=True
     )
     score: Mapped["AnalysisScore | None"] = relationship(
+        back_populates="analysis_run", cascade="all, delete-orphan", passive_deletes=True
+    )
+    interpretation: Mapped["AnalysisInterpretation | None"] = relationship(
         back_populates="analysis_run", cascade="all, delete-orphan", passive_deletes=True
     )
     findings: Mapped[list["AnalysisFinding"]] = relationship(

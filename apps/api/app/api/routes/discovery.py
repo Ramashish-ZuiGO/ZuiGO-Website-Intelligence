@@ -239,6 +239,19 @@ def coverage(website_id: uuid.UUID, db: DatabaseSession) -> CoverageSummary:
         else set()
     )
     denominator = len(eligible)
+    l1_attempted = sum(
+        1 for p in eligible if p.page_analysis_level_1_status in ("completed", "partial", "failed")
+    )
+    l1_successful = sum(1 for p in eligible if p.page_analysis_level_1_status == "completed")
+    l1_failed = sum(1 for p in eligible if p.page_analysis_level_1_status == "failed")
+    l1_partial = sum(1 for p in eligible if p.page_analysis_level_1_status == "partial")
+    l2_attempted = sum(
+        1 for p in eligible if p.page_analysis_level_2_status in ("completed", "partial", "failed")
+    )
+    l2_successful = sum(1 for p in eligible if p.page_analysis_level_2_status == "completed")
+    l2_failed = sum(1 for p in eligible if p.page_analysis_level_2_status == "failed")
+    l2_partial = sum(1 for p in eligible if p.page_analysis_level_2_status == "partial")
+
     return CoverageSummary(
         website_id=website_id,
         discovery_run_id=run.id,
@@ -260,5 +273,13 @@ def coverage(website_id: uuid.UUID, db: DatabaseSession) -> CoverageSummary:
         analyzed_coverage_percent=(round(analyzed / denominator * 100, 1) if denominator else None),
         crawl_limit_reached=run.crawl_limit_reached,
         maximum_depth_reached=run.maximum_depth_reached,
+        level_1_attempted=l1_attempted,
+        level_1_successful=l1_successful,
+        level_1_failed=l1_failed,
+        level_1_partial=l1_partial,
+        level_2_attempted=l2_attempted,
+        level_2_successful=l2_successful,
+        level_2_failed=l2_failed,
+        level_2_partial=l2_partial,
         calculated_at=datetime.now(UTC),
     )

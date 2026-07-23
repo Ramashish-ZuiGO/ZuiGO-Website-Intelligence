@@ -107,6 +107,79 @@ discovery-source, robots, and latest-analysis-status filters. Discovery remains
 single-engine lightweight HTTP collection; full page-level audits and browser/viewport
 matrices are intentionally deferred.
 
+### Site-wide page analysis
+
+After discovery, the platform supports two-level page analysis:
+
+**Level 1 — Lightweight analysis** collects page-level evidence via HTTP requests for every
+eligible page within configured limits. No browser is launched. Collected evidence includes:
+
+- requested URL, final URL, canonical URL, HTTP status, redirect chain
+- page title, meta description, heading structure, robots directives
+- content type, language, structured-data presence
+- internal/external link counts, image count, images missing alt text, form count
+- basic accessibility signals, basic SEO signals, security/header observations
+- elapsed analysis time, analysis status, failure or skip reason
+
+**Level 2 — Deep Lighthouse analysis** runs Playwright inspection and Lighthouse for a
+bounded deterministic subset of pages. Selection prioritizes homepage, navigation, contact,
+about, product/service pages, and pages with high internal link counts.
+
+Configured limits include:
+- `PAGE_ANALYSIS_MAX_LEVEL_1`: maximum Level 1 analyzed pages (default 50)
+- `PAGE_ANALYSIS_MAX_LEVEL_2`: maximum Level 2 Lighthouse pages (default 10)
+- `PAGE_ANALYSIS_PER_PAGE_TIMEOUT_SECONDS`: per-page timeout (default 15)
+- `PAGE_ANALYSIS_TOTAL_TIMEOUT_SECONDS`: total analysis timeout (default 300)
+
+Every finding, audit, recommendation and evidence record includes page ID, requested URL,
+final URL, page title, analysis level, analyzer/source, and analysis status. Anonymous
+findings are not returned.
+
+Page analysis endpoints:
+
+- `POST /api/v1/websites/{website_id}/page-analysis/run`
+- `GET /api/v1/websites/{website_id}/page-analysis/summary`
+- `GET /api/v1/websites/{website_id}/page-analysis/runs`
+- `GET /api/v1/websites/{website_id}/page-analysis/runs/{run_id}`
+- `GET /api/v1/websites/{website_id}/page-analysis/coverage`
+- `GET /api/v1/websites/{website_id}/page-analysis/scores`
+- `GET /api/v1/websites/{website_id}/page-analysis/recommendations`
+- `GET /api/v1/websites/{website_id}/page-analysis/failed-skipped`
+- `GET /api/v1/websites/{website_id}/page-analysis/pages-with-issues`
+
+#### Page analysis statuses
+
+- `pending` — not yet analyzed
+- `running` — analysis in progress
+- `completed` — analysis finished successfully
+- `partial` — analysis completed with some limitations
+- `failed` — analysis could not complete
+- `skipped` — analysis was intentionally skipped
+
+Every failed or skipped page includes a machine-readable reason code:
+
+- `unsupported_content_type` — Content-Type is not HTML
+- `blocked_by_robots` — robots.txt disallowed
+- `outside_allowed_origin` — URL redirects outside the approved origin
+- `duplicate_canonical` — canonical URL duplicates another page
+- `page_limit_reached` — configured page limit was reached
+- `timeout` — request timed out
+- `navigation_failure` — page could not be navigated to
+- `lighthouse_failure` — Lighthouse audit failed
+- `unsafe_url` — URL failed safety validation
+- `redirect_outside_origin` — redirect chain left the approved origin
+- `http_error` — HTTP error status received
+- `connection_error` — network connection error
+
+#### Action location and remediation
+
+Every recommendation includes the affected page, issue title, category, severity,
+evidence, responsible area, responsible role, action location, concrete remediation,
+verification method, source/audit reference, and confidence.
+
+Supported responsible areas: frontend, backend, CMS/content, design, accessibility, SEO,
+analytics, CDN/server, security, legal/compliance, DevOps/infrastructure.
+
 Create the frontend environment file:
 
 ```powershell

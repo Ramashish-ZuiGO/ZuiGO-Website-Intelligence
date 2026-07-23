@@ -6,6 +6,14 @@ from app.schemas.discovery import (
     WebsitePageList,
     WebsitePageRead,
 )
+from app.schemas.page_analysis import (
+    PageAnalysisActionRecommendation,
+    PageAnalysisRunList,
+    PageAnalysisRunRead,
+    PageAnalysisSummary,
+    PageLevelScore,
+    SiteCoverageDetail,
+)
 from app.schemas.project import ProjectCreate, ProjectDetail, ProjectRead
 from app.schemas.website import WebsiteCreate, WebsiteRead
 
@@ -16,9 +24,15 @@ __all__ = [
     "AnalysisRunRead",
     "CoverageSummary",
     "DiscoveryRunRead",
+    "PageAnalysisActionRecommendation",
+    "PageAnalysisRunList",
+    "PageAnalysisRunRead",
+    "PageAnalysisSummary",
+    "PageLevelScore",
     "ProjectCreate",
     "ProjectDetail",
     "ProjectRead",
+    "SiteCoverageDetail",
     "WebsiteCreate",
     "WebsitePageList",
     "WebsitePageRead",

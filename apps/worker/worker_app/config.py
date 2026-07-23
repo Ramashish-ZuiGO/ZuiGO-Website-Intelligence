@@ -64,6 +64,10 @@ class WorkerSettings(BaseSettings):
     discovery_deadline_seconds: int = Field(default=180, ge=10, le=600)
     discovery_max_response_bytes: int = Field(default=2_000_000, ge=10_000, le=10_000_000)
     discovery_include_verified_subdomains: bool = False
+    page_analysis_max_level_1: int = Field(default=50, ge=1, le=500)
+    page_analysis_max_level_2: int = Field(default=10, ge=0, le=50)
+    page_analysis_per_page_timeout_seconds: int = Field(default=15, ge=5, le=60)
+    page_analysis_total_timeout_seconds: int = Field(default=300, ge=60, le=900)
     responsive_viewports: str = (
         "mobile_portrait:390x844,mobile_landscape:844x390,tablet:768x1024,"
         "laptop:1366x768,desktop:1920x1080"

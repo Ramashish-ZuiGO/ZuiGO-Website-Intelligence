@@ -44,6 +44,26 @@ Confidence measures report completeness, not website quality:
 The result is rounded using the same round-half-up rule. Missing evidence reduces
 confidence rather than creating substitute values.
 
+## Page-level scoring
+
+Page-level scores are available only for pages that received Level 2 (Lighthouse) analysis.
+A page score uses the same formula version 1.0.0 as the site score when Lighthouse
+categories are available. If only Level 1 analysis was performed, no page-level score is
+computed — the report displays "unavailable" or "—/100" rather than fabricating a value.
+
+Page scores are clearly distinguished from the site score:
+
+- **Site score**: the overall analysis-run score for the homepage or primary URL.
+- **Page score**: a per-page score for pages that received Level 2 deep analysis.
+- **Category score**: a per-category breakdown for pages with Lighthouse data.
+- **Coverage**: the percentage of eligible pages that received Level 1 analysis, not a
+  quality metric.
+- **Confidence**: reported separately from score for each page (high, medium, low, or
+  unavailable).
+
+Missing data is never averaged as zero. If insufficient evidence exists, the score is
+marked unavailable or partial.
+
 ## Reproduction
 
 Use the stored formula version, original category scores, original weights,

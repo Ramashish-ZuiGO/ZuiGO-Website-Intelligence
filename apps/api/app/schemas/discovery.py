@@ -59,6 +59,12 @@ class WebsitePageRead(BaseModel):
     skip_reason: str | None
     latest_analysis_run_id: uuid.UUID | None
     latest_analysis_status: str
+    page_analysis_level_1_status: str
+    page_analysis_level_2_status: str
+    page_analysis_level_1_run_id: uuid.UUID | None
+    page_analysis_level_2_run_id: uuid.UUID | None
+    page_analysis_level_1_at: datetime | None
+    page_analysis_level_2_at: datetime | None
     first_discovered_at: datetime
     last_discovered_at: datetime
 
@@ -92,4 +98,12 @@ class CoverageSummary(BaseModel):
     analyzed_coverage_percent: float | None
     crawl_limit_reached: bool
     maximum_depth_reached: int
+    level_1_attempted: int = 0
+    level_1_successful: int = 0
+    level_1_failed: int = 0
+    level_1_partial: int = 0
+    level_2_attempted: int = 0
+    level_2_successful: int = 0
+    level_2_failed: int = 0
+    level_2_partial: int = 0
     calculated_at: datetime

@@ -351,6 +351,22 @@ Every website must have its own report.
 
 Each report must have its own unique ID.
 
+### Site-wide page analysis
+
+The platform must support two-level page analysis:
+
+**Level 1 — Lightweight analysis**: Every eligible page within configured limits receives
+HTTP-based analysis collecting page metadata, SEO signals, accessibility signals, security
+headers, and content structure. No browser is launched.
+
+**Level 2 — Deep Lighthouse analysis**: A bounded deterministic subset of pages receives
+full Playwright inspection and Lighthouse audit. Selection prioritizes homepage,
+navigation, contact, about, product/service pages, and high-link-count pages.
+
+Every finding must be attributed to a specific page. Anonymous findings without page
+attribution are not permitted. Coverage metrics must show numerator and denominator
+explicitly and never claim 100% coverage when limits were applied.
+
 
 
 ────────────────────────────────────────

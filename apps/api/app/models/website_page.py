@@ -21,6 +21,7 @@ from app.db.base import Base
 json_type = JSON().with_variant(JSONB(), "postgresql")
 
 if TYPE_CHECKING:
+    from app.models.page_analysis_run import PageAnalysisRun
     from app.models.website import Website
 
 
@@ -33,6 +34,8 @@ class WebsitePage(Base):
         Index("ix_website_pages_website_robots", "website_id", "robots_status"),
         Index("ix_website_pages_latest_analysis_run_id", "latest_analysis_run_id"),
         Index("ix_website_pages_last_discovery_run_id", "last_discovery_run_id"),
+        Index("ix_website_pages_l1_status", "website_id", "page_analysis_level_1_status"),
+        Index("ix_website_pages_l2_status", "website_id", "page_analysis_level_2_status"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
@@ -70,6 +73,20 @@ class WebsitePage(Base):
     latest_analysis_status: Mapped[str] = mapped_column(
         String(30), default="pending", nullable=False
     )
+    page_analysis_level_1_status: Mapped[str] = mapped_column(
+        String(30), default="pending", nullable=False
+    )
+    page_analysis_level_2_status: Mapped[str] = mapped_column(
+        String(30), default="pending", nullable=False
+    )
+    page_analysis_level_1_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("page_analysis_runs.id", ondelete="SET NULL", use_alter=True)
+    )
+    page_analysis_level_2_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("page_analysis_runs.id", ondelete="SET NULL", use_alter=True)
+    )
+    page_analysis_level_1_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    page_analysis_level_2_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     first_discovered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     last_discovered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
@@ -79,3 +96,9 @@ class WebsitePage(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
     website: Mapped["Website"] = relationship(back_populates="pages")
+    page_analysis_runs: Mapped[list["PageAnalysisRun"]] = relationship(
+        back_populates="website_page",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        foreign_keys="PageAnalysisRun.website_page_id",
+    )

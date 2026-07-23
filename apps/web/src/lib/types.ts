@@ -43,6 +43,12 @@ export interface WebsitePage {
   latest_analysis_status: "pending" | "completed" | "partial" | "failed";
   exclusion_reason: string | null;
   skip_reason: string | null;
+  page_analysis_level_1_status: string;
+  page_analysis_level_2_status: string;
+  page_analysis_level_1_run_id: string | null;
+  page_analysis_level_2_run_id: string | null;
+  page_analysis_level_1_at: string | null;
+  page_analysis_level_2_at: string | null;
 }
 
 export interface WebsitePageList {
@@ -66,11 +72,21 @@ export interface CoverageSummary {
   partial_analyses: number;
   failed_analyses: number;
   pending_analyses: number;
+  pages_requiring_action: number;
+  pages_without_findings: number;
   analyzed_coverage_numerator: number;
   analyzed_coverage_denominator: number;
   analyzed_coverage_percent: number | null;
   crawl_limit_reached: boolean;
   maximum_depth_reached: number;
+  level_1_attempted: number;
+  level_1_successful: number;
+  level_1_failed: number;
+  level_1_partial: number;
+  level_2_attempted: number;
+  level_2_successful: number;
+  level_2_failed: number;
+  level_2_partial: number;
 }
 
 export type AnalysisStatus = "queued" | "running" | "completed" | "failed";
@@ -209,6 +225,103 @@ export interface InterpretationRecommendation {
   responsible_role: string;
   expected_improvement: string;
   confidence_percent: number;
+}
+
+export interface PageAnalysisRun {
+  id: string;
+  website_page_id: string;
+  analysis_level: number;
+  status: string;
+  failure_reason_code: string | null;
+  failure_reason_text: string | null;
+  analysis_started_at: string | null;
+  analysis_completed_at: string | null;
+  requested_url: string | null;
+  final_url: string | null;
+  canonical_url: string | null;
+  http_status_code: number | null;
+  page_title: string | null;
+  meta_description: string | null;
+  internal_link_count: number | null;
+  external_link_count: number | null;
+  image_count: number | null;
+  images_missing_alt: number | null;
+  form_count: number | null;
+  language: string | null;
+  content_type: string | null;
+  structured_data_present: boolean | null;
+  elapsed_ms: number | null;
+  deep_analysis_run_id: string | null;
+}
+
+export interface PageAnalysisSummary {
+  website_id: string;
+  total_pages: number;
+  eligible_pages: number;
+  level_1_completed: number;
+  level_1_partial: number;
+  level_1_failed: number;
+  level_1_skipped: number;
+  level_1_pending: number;
+  level_2_completed: number;
+  level_2_partial: number;
+  level_2_failed: number;
+  level_2_skipped: number;
+  level_2_pending: number;
+  pages_with_findings: number;
+  pages_without_findings: number;
+  coverage_percent: number | null;
+}
+
+export interface SiteCoverageDetail {
+  website_id: string;
+  discovery_run_id: string | null;
+  discovered_page_count: number;
+  eligible_page_count: number;
+  selected_page_count: number;
+  level_1_attempted: number;
+  level_1_successful: number;
+  level_1_failed: number;
+  level_1_partial: number;
+  level_2_attempted: number;
+  level_2_successful: number;
+  level_2_failed: number;
+  level_2_partial: number;
+  skipped_page_count: number;
+  unanalyzed_eligible_count: number;
+  coverage_percent: number | null;
+  clean_pass_percent: number | null;
+  partial_result_status: boolean;
+  coverage_limitations: string[];
+}
+
+export interface PageAnalysisActionRecommendation {
+  page_id: string;
+  page_url: string;
+  page_title: string | null;
+  issue_title: string;
+  issue_category: string;
+  severity: string;
+  evidence: Record<string, unknown>;
+  responsible_area: string;
+  responsible_role: string;
+  action_location: string;
+  remediation: string;
+  verification_method: string;
+  source: string;
+  confidence: string;
+  analysis_level: number;
+}
+
+export interface PageLevelScore {
+  page_id: string;
+  page_url: string;
+  page_title: string | null;
+  analysis_level: number;
+  analysis_status: string;
+  score: number | null;
+  confidence: string;
+  score_available: boolean;
 }
 
 export interface AnalysisInterpretation {

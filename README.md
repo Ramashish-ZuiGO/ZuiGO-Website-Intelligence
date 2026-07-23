@@ -171,14 +171,86 @@ Every failed or skipped page includes a machine-readable reason code:
 - `http_error` — HTTP error status received
 - `connection_error` — network connection error
 
-#### Action location and remediation
+### Actionable Remediation Engine
 
-Every recommendation includes the affected page, issue title, category, severity,
-evidence, responsible area, responsible role, action location, concrete remediation,
-verification method, source/audit reference, and confidence.
+After page analysis completes, the Actionable Remediation Engine converts page-analysis
+findings and recommendations into persistent, grouped, prioritised action items with
+full status tracking.
 
-Supported responsible areas: frontend, backend, CMS/content, design, accessibility, SEO,
+**Action generation** is triggered via API by providing a completed page-analysis
+execution ID. The service:
+
+1. Collects all findings from every page-analysis run in the execution.
+2. Matches each finding code against a deterministic map of 21 finding codes
+   (MISSING_PAGE_TITLE, MISSING_H1, HIGH_LCP, etc.) and 3 failure-reason codes
+   (unsupported_content_type, timeout, http_error).
+3. Skips findings with no matching mapping (unsupported) or empty evidence
+   (insufficient evidence).
+4. Groups identical issues across pages into a single ActionGroup.
+5. Calculates a deterministic priority score (0-100) for each item using
+   Priority Formula v1.0.0.
+6. Assigns a responsible area, responsible role, and action location to every item.
+7. Stores an initial "open" status with status-history entry.
+8. Records the execution (generation_execution_id) for audit and retry idempotency.
+
+**Action Plan frontend** displays an Action Plan panel on the project page with:
+
+- Summary cards showing total, open, acknowledged, in-progress, resolved, ignored,
+  reopened counts, plus critical/high counts and average priority.
+- Grouped-action table sorted by priority score with status, severity, confidence,
+  category, and affected-page-count columns.
+- Group detail view showing all affected pages within a group.
+- Action detail view with full remediation text, evidence, and chronological
+  status-history timeline.
+- Status update buttons (acknowledge, start progress, resolve, reopen, ignore).
+- Sort, filter (by status, severity, category, responsible area, confidence, page URL,
+  priority range), and pagination on both groups and actions lists.
+- Accessible info buttons (`aria-label` "What does this mean?") for context.
+- Loading, empty, and error states.
+- Generation start button when no action plan exists.
+
+Responsible areas: frontend, backend, CMS/content, design, accessibility, SEO,
 analytics, CDN/server, security, legal/compliance, DevOps/infrastructure.
+
+#### Action Plan API endpoints
+
+All endpoints are under `/api/v1/websites/{website_id}/action-plan`:
+
+- `POST /generate` — start action generation for a page-analysis execution (202 Accepted)
+- `GET /generation-executions/{execution_id}` — get execution status
+- `GET /summary` — aggregated counts, average priority, generation coverage
+- `GET /groups` — paginated, filterable, sortable group list
+- `GET /groups/{group_id}` — group detail with its action items
+- `GET /actions` — paginated, filterable, sortable action-item list
+- `GET /actions/{action_id}` — action detail with status history
+- `PATCH /actions/{action_id}/status` — single status transition
+- `POST /actions/bulk-status` — bulk status update
+- `GET /actions/{action_id}/history` — chronological status-change log
+
+**Action statuses** and valid transitions:
+
+- `open` → acknowledged, in_progress, ignored
+- `acknowledged` → in_progress, ignored
+- `in_progress` → resolved, ignored
+- `resolved` → reopened
+- `ignored` → reopened
+- `reopened` → in_progress, acknowledged, ignored
+
+Every status change records the previous and new status, reason, actor, and source
+(system or manual) in the `action_status_history` table.
+
+**Priority Formula v1.0.0** is a separate deterministic formula (0-100) independent
+of the Overall Score Formula v1.0.0. See `docs/SCORING_METHODOLOGY.md` for details.
+
+**Local usage and limitations:**
+- Action generation requires a completed page-analysis execution.
+- Unsupported finding codes are counted but produce no action items.
+- Insufficient-evidence findings are counted but produce no action items.
+- Duplicate prevention uses `(generation_execution_id, source_finding_identity, website_page_id)`.
+- Re-running with the same `generation_execution_id` is idempotent.
+- Action generation is not a mandatory prerequisite for page analysis or reports.
+
+#### Action location and remediation
 
 Create the frontend environment file:
 

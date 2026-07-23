@@ -367,6 +367,123 @@ Every finding must be attributed to a specific page. Anonymous findings without 
 attribution are not permitted. Coverage metrics must show numerator and denominator
 explicitly and never claim 100% coverage when limits were applied.
 
+### Actionable Remediation Engine
+
+The platform must support persistent, grouped, prioritised action items generated from
+page-analysis findings and recommendations.
+
+#### Persistent action entities
+
+Four database tables implement the remediation engine:
+
+- **`action_generation_executions`** — tracks each generation run with its status
+  (pending, running, completed, failed), counts of processed findings, generated actions,
+  unsupported codes, insufficient evidence, duplicates, and historical equivalents.
+- **`action_groups`** — groups identical issues across pages under one issue title,
+  with determined severity, priority score, responsible area, role, action location,
+  remediation text, verification steps, evidence summary, source audit, and affected
+  page count.
+- **`action_items`** — individual per-page action items linked to a group, with
+  page URL, page title, finding identity, source audit, priority score with components,
+  confidence, evidence, and current status.
+- **`action_status_history`** — chronological log of every status change with previous
+  and new status, optional reason and actor, and source (system or manual).
+
+#### Execution UUID and retry idempotency
+
+Every generation call must supply its own `generation_execution_id` (UUID) or one is
+generated. The same execution ID replayed against the same database returns the existing
+record without duplicating actions. This supports safe retries.
+
+#### Grouping and affected-page expansion
+
+Action items sharing the same `grouping_key` within one execution are collected under a
+single ActionGroup. The group's `affected_page_count` reflects the number of action items
+in the group. When all items share the same status the group inherits it; otherwise the
+group status is `mixed`.
+
+#### Responsible area, role and action location
+
+Every action item and group must store:
+- `responsible_area`: frontend, backend, CMS/content, design, accessibility, SEO,
+  analytics, CDN/server, security, legal/compliance, DevOps/infrastructure.
+- `responsible_role`: Developer, Content editor, DevOps, etc.
+- `action_location`: where in the codebase or configuration the fix applies.
+
+#### Remediation and verification structure
+
+Every action includes:
+- `why_this_matters`: user-facing explanation of the issue's impact.
+- `exact_correction`: what specifically must be done to fix the issue.
+- `implementation_steps`: ordered steps to implement the correction.
+- `verification_steps`: ordered steps to confirm the fix works.
+- `expected_result`: what outcome the fix produces.
+- `limitations`: what the check does not cover.
+
+#### Status history
+
+Every status change must be recorded in `action_status_history` with previous status,
+new status, reason, actor, and source. The initial "open" status is recorded as a
+system-generated entry with an empty previous status.
+
+Action statuses: `open`, `acknowledged`, `in_progress`, `resolved`, `ignored`, `reopened`.
+
+Valid transitions:
+- open → acknowledged, in_progress, ignored
+- acknowledged → in_progress, ignored
+- in_progress → resolved, ignored
+- resolved → reopened
+- ignored → reopened
+- reopened → in_progress, acknowledged, ignored
+
+#### Summary metrics
+
+The Action Plan summary endpoint must return:
+- `total_actions`, `total_open`, `total_acknowledged`, `total_in_progress`,
+  `total_resolved`, `total_ignored`, `total_reopened`
+- `critical_actions`, `high_priority_actions` (priority_score >= 70)
+- `pages_requiring_correction` (distinct affected pages)
+- `grouped_issues` (total groups)
+- `average_priority` (mean of all scores, or null when empty)
+- `generation_status` and `generation_coverage` (actions_generated / findings_processed %)
+
+When no action plan exists, all counts default to 0 and averages to null.
+
+#### Filtering, sorting and pagination
+
+Groups and actions list endpoints must support:
+- Filtering by: status, severity, category, responsible_area, responsible_role,
+  confidence, page URL, priority range (min/max).
+- Sorting by: any column (default priority_score desc).
+- Pagination: page number and page size (default 25, max 100).
+- Optional generation_execution_id parameter; defaults to the latest execution.
+
+#### Frontend Action Plan requirements
+
+The Action Plan panel must include:
+- Summary cards with counts for each status, critical count, high-priority count,
+  average priority, generation coverage.
+- Grouped-action table with sort (by sortable column headers) and filter controls
+  (status, severity, category, search by page URL).
+- Group detail view listing all action items within a group with page URLs.
+- Action detail view with full remediation text (why_this_matters, exact_correction,
+  implementation_steps, verification_steps, limitations) and chronological
+  status-history timeline.
+- Status update buttons respecting valid transitions.
+- Accessible info buttons with `aria-label` for each section.
+- Loading, empty, and error states.
+- Generation trigger button when summary is empty.
+
+#### Unsupported-finding and insufficient-evidence behaviour
+
+Finding codes not present in the FINDING_TO_ACTION_MAP (21 deterministic codes) or
+FAILURE_REASON_ACTION_MAP (3 failure codes) are counted as unsupported and produce no
+action items. Findings with empty evidence dictionaries are counted as insufficient
+evidence and also produce no action items. Both counters appear on the generation
+execution record.
+
+
+
 
 
 ────────────────────────────────────────

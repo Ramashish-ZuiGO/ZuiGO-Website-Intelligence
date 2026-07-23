@@ -1,3 +1,13 @@
+from app.models.action_plan import (
+    ACTION_STATUS_TRANSITIONS,
+    ActionGenerationExecution,
+    ActionGroup,
+    ActionItem,
+    ActionResponsibleArea,
+    ActionStatus,
+    ActionStatusHistory,
+    validate_action_transition,
+)
 from app.models.analysis_diagnostic import AnalysisDiagnostic
 from app.models.analysis_finding import AnalysisFinding, FindingSeverity, FindingSource
 from app.models.analysis_interpretation import AnalysisInterpretation
@@ -11,6 +21,13 @@ from app.models.website import Website
 from app.models.website_page import WebsitePage
 
 __all__ = [
+    "ACTION_STATUS_TRANSITIONS",
+    "ActionGenerationExecution",
+    "ActionGroup",
+    "ActionItem",
+    "ActionResponsibleArea",
+    "ActionStatus",
+    "ActionStatusHistory",
     "AnalysisDiagnostic",
     "AnalysisFinding",
     "AnalysisInterpretation",
@@ -27,4 +44,5 @@ __all__ = [
     "Project",
     "Website",
     "WebsitePage",
+    "validate_action_transition",
 ]

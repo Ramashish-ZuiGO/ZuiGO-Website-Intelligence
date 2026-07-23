@@ -324,6 +324,153 @@ export interface PageLevelScore {
   score_available: boolean;
 }
 
+export interface ActionGenerationExecution {
+  id: string;
+  website_id: string;
+  discovery_run_id: string | null;
+  page_analysis_execution_id: string;
+  status: string;
+  total_findings_processed: number;
+  total_actions_generated: number;
+  unsupported_finding_count: number;
+  insufficient_evidence_count: number;
+  duplicate_within_execution_count: number;
+  historical_equivalent_count: number;
+  error_message: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ActionGroup {
+  id: string;
+  generation_execution_id: string;
+  website_id: string;
+  grouping_key: string;
+  issue_title: string;
+  category: string;
+  severity: string;
+  priority_score: number;
+  priority_formula_version: string;
+  confidence: string;
+  estimated_effort: string;
+  business_impact: string;
+  responsible_area: string;
+  responsible_role: string;
+  action_location: string;
+  why_this_matters: string;
+  exact_correction: string;
+  implementation_steps: string;
+  verification_steps: string;
+  expected_result: string;
+  limitations: string;
+  evidence_summary: Record<string, unknown>;
+  source_audit: string;
+  priority_components: Record<string, unknown>;
+  affected_page_count: number;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ActionItem {
+  id: string;
+  generation_execution_id: string;
+  action_group_id: string | null;
+  website_id: string;
+  page_analysis_run_id: string | null;
+  website_page_id: string;
+  source_finding_identity: string;
+  source_page_analysis_run_id: string | null;
+  requested_url: string | null;
+  final_url: string | null;
+  page_title: string | null;
+  issue_title: string;
+  issue_category: string;
+  severity: string;
+  priority_score: number;
+  priority_formula_version: string;
+  priority_components: Record<string, unknown>;
+  confidence: string;
+  confidence_percent: number;
+  estimated_effort: string;
+  business_impact: string;
+  responsible_area: string;
+  responsible_role: string;
+  action_location: string;
+  why_this_matters: string;
+  exact_correction: string;
+  implementation_steps: string;
+  verification_steps: string;
+  expected_result: string;
+  limitations: string;
+  evidence_summary: Record<string, unknown>;
+  source_audit: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ActionStatusHistory {
+  id: string;
+  action_item_id: string;
+  previous_status: string;
+  new_status: string;
+  reason: string | null;
+  actor: string | null;
+  source: string;
+  changed_at: string;
+}
+
+export interface ActionGroupDetail extends ActionGroup {
+  actions: ActionItem[];
+}
+
+export interface ActionItemDetail extends ActionItem {
+  status_history: ActionStatusHistory[];
+}
+
+export interface ActionPlanSummary {
+  website_id: string;
+  generation_execution_id: string | null;
+  total_actions: number;
+  total_open: number;
+  total_acknowledged: number;
+  total_in_progress: number;
+  total_resolved: number;
+  total_ignored: number;
+  total_reopened: number;
+  critical_actions: number;
+  high_priority_actions: number;
+  pages_requiring_correction: number;
+  grouped_issues: number;
+  average_priority: number | null;
+  generation_status: string | null;
+  generation_coverage: number | null;
+}
+
+export interface ActionGenerationStartResponse {
+  status: string;
+  generation_execution_id: string;
+  page_analysis_execution_id: string;
+}
+
+export interface PaginatedResponse<T = unknown> {
+  items: T[];
+  page: number;
+  page_size: number;
+  total: number;
+  total_pages: number;
+}
+
+export interface BulkStatusUpdateResult {
+  total: number;
+  succeeded: number;
+  failed: number;
+  failures: Array<{action_id: string; error: string}>;
+}
+
 export interface AnalysisInterpretation {
   id: string;
   generation_mode: "ai" | "deterministic_fallback";

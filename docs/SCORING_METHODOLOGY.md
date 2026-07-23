@@ -148,3 +148,63 @@ Privacy Policy Freshness is a non-numeric indicator: current means an explicit d
 is no more than 365 days old, stale means older than 365 days, and unknown means no
 reliable explicit date was found. Copyright currency and the tested-browser matrix are
 also non-numeric. Firefox and WebKit remain explicitly not tested in Task 015.
+
+## Priority Formula v1.0.0
+
+The Priority Formula is a separate deterministic formula (0-100) used by the
+Actionable Remediation Engine to score action items. It does not modify the
+Overall Score Formula v1.0.0, overall scores, page scores, category scores,
+confidence, or any diagnostic scoring formula.
+
+### Inputs
+
+| Input | Type | Values |
+|---|---|---|
+| `severity` | string | `critical`, `high`, `medium`, `low`, `informational` |
+| `affected_page_count` | integer | number of pages affected by the issue |
+| `estimated_score_impact` | integer | 0-100, estimated improvement if fixed |
+| `confidence_percent` | integer | 0-100, evidence-confidence percentage |
+| `implementation_effort` | string | `low`, `medium`, `high`, `very_high` |
+| `business_impact` | string | `critical`, `major`, `moderate`, `minor`, `negligible` |
+
+### Component weights
+
+1. **Severity base** (0-35): `critical`=35, `high`=25, `medium`=15, `low`=5, `informational`=0
+2. **Affected pages** (0-25): ≥50 pages=25, ≥20=20, ≥10=15, ≥5=10, ≥2=5, 1 page=0
+3. **Score impact** (0-15): `round(score_impact / 100 * 15)`, clamped to 0-15
+4. **Confidence** (0-10): ≥90%=10, ≥70%=7, ≥50%=5, ≥30%=3, ≥10%=1, <10%=0
+5. **Effort penalty** (0-15, inverted — lower effort = higher priority): `low`=15, `medium`=10, `high`=5, `very_high`=0
+6. **Business impact boost** (0-15): `critical`=15, `major`=10, `moderate`=6, `minor`=3, `negligible`=0
+
+### Formula
+
+```
+raw = severity_base + pages_score + impact_score + confidence_score
+      - effort_penalty + business_boost
+priority = max(0, min(100, raw))
+```
+
+Clamped to 0-100. Missing or unknown inputs default to zero instead of failing.
+
+### Missing-evidence and default behaviour
+
+- Unknown severity, effort, or business impact: component defaults to 0.
+- `confidence_percent` out of range: clamped to 0-100 before scoring.
+- `estimated_score_impact` out of range: clamped to 0-100 before scoring.
+- `affected_page_count` less than 1: pages score defaults to 0.
+
+### Representative calculation
+
+Input: severity=critical (35), pages=12 (15), score_impact=60 (round(60/100*15)=9),
+confidence=85 (7), effort=low (15), business_impact=major (10)
+
+```
+raw = 35 + 15 + 9 + 7 + 15 + 10 = 91
+priority = min(100, max(0, 91)) = 91
+```
+
+### Formula version
+
+The version string `1.0.0` is stored on every action item and action group.
+The `priority_components` JSONB column stores each component value and the raw
+total for audit and reproduction.

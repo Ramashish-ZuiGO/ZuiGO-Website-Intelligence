@@ -6,6 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 
 import { apiRequest } from "@/lib/api";
 import type { ProjectDetail, Website } from "@/lib/types";
+import { ActionPlanPanel } from "./ActionPlanPanel";
 import { PageAnalysisPanel } from "./PageAnalysisPanel";
 import { WebsiteAnalysisPanel } from "./WebsiteAnalysisPanel";
 import { WebsiteCoveragePanel } from "./WebsiteCoveragePanel";
@@ -108,7 +109,7 @@ export default function ProjectDetailsPage() {
 
           <section className="mt-10"><h2 className="text-2xl font-semibold">Websites</h2>
             {project.websites.length === 0 ? <div className="mt-5 rounded-xl border border-dashed border-slate-300 p-8 text-center text-slate-600">No websites yet. Add the first URL above.</div> : (
-              <ul className="mt-5 grid gap-4">{project.websites.map((website) => <li className="rounded-xl border border-slate-200 bg-white p-5" key={website.id}><p className="font-semibold">{website.name || "Unnamed website"}</p><a className="mt-1 block break-all text-slate-600 underline" href={website.url} target="_blank" rel="noreferrer">{website.url}</a><WebsiteAnalysisPanel websiteId={website.id} /><WebsiteCoveragePanel websiteId={website.id} /><PageAnalysisPanel websiteId={website.id} /></li>)}</ul>
+              <ul className="mt-5 grid gap-4">{project.websites.map((website) => <li className="rounded-xl border border-slate-200 bg-white p-5" key={website.id}><p className="font-semibold">{website.name || "Unnamed website"}</p><a className="mt-1 block break-all text-slate-600 underline" href={website.url} target="_blank" rel="noreferrer">{website.url}</a><WebsiteAnalysisPanel websiteId={website.id} /><WebsiteCoveragePanel websiteId={website.id} /><PageAnalysisPanel websiteId={website.id} /><ActionPlanPanel websiteId={website.id} /></li>)}</ul>
             )}
           </section>
         </>

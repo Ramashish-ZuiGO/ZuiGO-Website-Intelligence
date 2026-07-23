@@ -17,6 +17,62 @@ from worker_app.ai.schemas import (
 from worker_app.config import WorkerSettings
 
 
+def _deterministic_recommendation(finding: dict[str, Any]) -> tuple[str, str]:
+    code = finding["finding_code"]
+    evidence = finding.get("evidence", {})
+    if code == "HIGH_LCP":
+        value = evidence.get("value")
+        threshold = evidence.get("threshold")
+        element = evidence.get("lcp_element")
+        element_label = (
+            element.get("nodeLabel") or element.get("selector") or element.get("snippet")
+            if isinstance(element, dict)
+            else None
+        )
+        blockers = evidence.get("render_blocking_resources") or []
+        explanation = (
+            f"Largest Contentful Paint measured {value} ms against the {threshold} ms "
+            f"needs-improvement threshold."
+        )
+        if element_label:
+            explanation += f" Lighthouse identified the bounded LCP element as {element_label}."
+        fix = "Prioritize delivery and rendering of the identified LCP element" + (
+            " and review the recorded render-blocking resources." if blockers else "."
+        )
+        return explanation, fix
+    if code == "HIGH_TOTAL_BLOCKING_TIME":
+        value = evidence.get("value")
+        threshold = evidence.get("threshold")
+        scripts = evidence.get("script_execution") or []
+        tasks = evidence.get("long_tasks") or evidence.get("main_thread_work") or []
+        explanation = (
+            f"Total Blocking Time measured {value} ms against the {threshold} ms "
+            "needs-improvement threshold."
+        )
+        if scripts or tasks:
+            explanation += " Lighthouse supplied bounded script or main-thread task evidence."
+        fix = "Reduce the recorded long tasks" + (
+            " and defer, split, or shorten only the scripts identified in the evidence."
+            if scripts
+            else " by splitting synchronous work where the recorded task groups support it."
+        )
+        return explanation, fix
+    if code == "CSS_MIME_TYPE_FAILURE":
+        requests = evidence.get("requests") or []
+        resource = requests[0].get("url") if requests else "the affected stylesheet"
+        return (
+            f"Chromium rejected the first-party stylesheet {resource} because console evidence "
+            "reported an invalid MIME type.",
+            "Configure the affected CSS response to return a valid text/css Content-Type and "
+            "verify that redirects or error pages are not being served at that URL.",
+        )
+    return (
+        finding["description"],
+        "Review the recorded evidence and implement the correction indicated by the "
+        "verified finding.",
+    )
+
+
 def deterministic_fallback(data: dict[str, Any]) -> InterpretationContent:
     findings = data["findings"]
     scores = data["scores"]
@@ -39,21 +95,19 @@ def deterministic_fallback(data: dict[str, Any]) -> InterpretationContent:
     for index, finding in enumerate(findings, start=1):
         severity = finding["severity"]
         priority = severity if severity in {"critical", "high", "medium", "low"} else "low"
+        explanation, recommended_fix = _deterministic_recommendation(finding)
         recommendations.append(
             Recommendation(
                 recommendation_id=f"REC-{index:03d}",
                 title=f"Address {finding['title']}",
-                explanation=finding["description"],
+                explanation=explanation,
                 related_finding_codes=[finding["finding_code"]],
                 priority=priority,
                 business_impact=(
                     "Resolving this verified issue can reduce the user or search impact "
                     "identified by the deterministic audit."
                 ),
-                recommended_fix=(
-                    "Review the recorded evidence and implement the correction indicated "
-                    "by the verified finding."
-                ),
+                recommended_fix=recommended_fix,
                 estimated_effort="Requires engineering review",
                 responsible_role="Web development team",
                 expected_improvement="Removes or mitigates the referenced verified finding.",

@@ -173,9 +173,10 @@ export function WebsiteAnalysisPanel({ websiteId }: WebsiteAnalysisPanelProps) {
             <div><dt className="text-slate-500">Final URL</dt><dd className="break-all font-medium">{results.result.final_url}</dd></div>
             <div><dt className="text-slate-500">HTTP status</dt><dd className="font-medium">{results.result.http_status_code ?? "Unavailable"}</dd></div>
             <div><dt className="text-slate-500">Page title</dt><dd className="font-medium">{results.result.page_title || "Missing"}</dd></div>
-            {(["performance_score", "accessibility_score", "best_practices_score", "seo_score"] as const).map((key) => (
-              <div key={key}><dt className="capitalize text-slate-500">{key.replaceAll("_", " ")}</dt><dd className="font-medium">{results.lighthouse_metrics[key] ?? "Unavailable"}</dd></div>
-            ))}
+            {(["performance_score", "accessibility_score", "best_practices_score", "seo_score"] as const).map((key) => {
+              const value = results.lighthouse_metrics[key];
+              return <div key={key}><dt className="capitalize text-slate-500">{key.replaceAll("_", " ")}</dt><dd className="font-medium">{typeof value === "number" || typeof value === "string" ? value : "Unavailable"}</dd></div>;
+            })}
             <div><dt className="text-slate-500">Total findings</dt><dd className="font-medium">{results.findings.length}</dd></div>
           </dl>
           <h4 className="mt-5 font-semibold">Findings</h4>

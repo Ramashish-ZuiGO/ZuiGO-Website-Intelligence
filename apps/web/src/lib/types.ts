@@ -78,7 +78,7 @@ export interface AnalysisResults {
     analysis_started_at: string;
     analysis_completed_at: string;
   };
-  lighthouse_metrics: Record<string, number | string | null>;
+  lighthouse_metrics: Record<string, unknown>;
   playwright_measurements: Record<string, unknown>;
   findings: AnalysisFinding[];
   diagnostics: Record<string, DiagnosticGroup>;
@@ -102,6 +102,8 @@ export interface DiagnosticGroup {
   score: DiagnosticScore | null;
   limitations: string[];
   collected_at: string;
+  evidence_completeness?: string;
+  why_it_matters?: string | null;
   copyright?: DiagnosticGroup;
 }
 
@@ -129,7 +131,7 @@ export interface AnalysisReport {
   website: { id: string; name: string | null; url: string };
   result: AnalysisResults["result"];
   score: AnalysisScore;
-  lighthouse_metrics: Record<string, number | string | null>;
+  lighthouse_metrics: Record<string, unknown>;
   playwright_measurements: Record<string, unknown>;
   findings: AnalysisFinding[];
   interpretation: AnalysisInterpretation | null;

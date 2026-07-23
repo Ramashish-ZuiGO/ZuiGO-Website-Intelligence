@@ -1,7 +1,7 @@
 import json
 
 from worker_app.ai.prompt_builder import build_prompt
-from worker_app.ai.service import generate_interpretation
+from worker_app.ai.service import deterministic_fallback, generate_interpretation
 from worker_app.config import WorkerSettings
 
 
@@ -146,3 +146,72 @@ def test_verified_diagnostic_codes_are_valid_grounding() -> None:
     result = generate_interpretation(data, settings(), StaticProvider(valid_output("CSP_MISSING")))
     assert result["generation_mode"] == "ai"
     assert result["priority_recommendations"][0]["related_finding_codes"] == ["CSP_MISSING"]
+
+
+def test_deterministic_recommendations_use_specific_lighthouse_evidence() -> None:
+    data = verified_data()
+    data["findings"] = [
+        {
+            "finding_code": "HIGH_LCP",
+            "title": "Largest Contentful Paint is high",
+            "description": "The measured value exceeds the documented threshold.",
+            "severity": "high",
+            "source": "lighthouse",
+            "evidence": {
+                "value": 3200,
+                "threshold": 2500,
+                "lcp_element": {"nodeLabel": "Hero image"},
+                "render_blocking_resources": [{"url": "https://example.com/site.css"}],
+            },
+            "confidence_percent": 100,
+        },
+        {
+            "finding_code": "HIGH_TOTAL_BLOCKING_TIME",
+            "title": "Total Blocking Time is high",
+            "description": "The measured value exceeds the documented threshold.",
+            "severity": "high",
+            "source": "lighthouse",
+            "evidence": {
+                "value": 650,
+                "threshold": 200,
+                "script_execution": [{"url": "https://example.com/app.js", "total": 400}],
+            },
+            "confidence_percent": 100,
+        },
+    ]
+    result = deterministic_fallback(data)
+    lcp, tbt = result.priority_recommendations
+    assert "3200 ms" in lcp.explanation
+    assert "Hero image" in lcp.explanation
+    assert "render-blocking" in lcp.recommended_fix
+    assert "650 ms" in tbt.explanation
+    assert "defer, split, or shorten" in tbt.recommended_fix
+
+
+def test_deterministic_css_mime_and_generic_fallback_recommendations() -> None:
+    data = verified_data()
+    data["findings"] = [
+        {
+            "finding_code": "CSS_MIME_TYPE_FAILURE",
+            "title": "Stylesheet rejected",
+            "description": "A stylesheet failed.",
+            "severity": "high",
+            "source": "playwright",
+            "evidence": {"requests": [{"url": "https://example.com/site.css"}]},
+            "confidence_percent": 100,
+        },
+        {
+            "finding_code": "MISSING_H1",
+            "title": "Missing H1",
+            "description": "The homepage has no H1.",
+            "severity": "medium",
+            "source": "playwright",
+            "evidence": {},
+            "confidence_percent": 100,
+        },
+    ]
+    result = deterministic_fallback(data)
+    css, fallback = result.priority_recommendations
+    assert "site.css" in css.explanation
+    assert "text/css" in css.recommended_fix
+    assert "recorded evidence" in fallback.recommended_fix

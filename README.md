@@ -56,6 +56,14 @@ Backend configuration belongs in the repository-root `.env`:
 `DATABASE_URL` is derived once by the typed API settings from the PostgreSQL fields above and
 is shared by SQLAlchemy and Alembic. Do not add a second password-bearing URL to `.env`.
 
+Completed reports qualify diagnostic evidence rather than treating every numeric result as
+fully verified. An HTML-only cache score is explicitly provisional, CSP is classified from
+`absent` through `strong`, and 24 by 24 CSS-pixel tap-target observations distinguish spacing
+exceptions from confirmed usability failures. Reports also retain bounded validator messages,
+copyright evidence, confidence-based Next.js indicators, Lighthouse execution context, and
+failed/manual audit summaries. Time to Interactive is labelled legacy/supplementary, and the
+Lighthouse accessibility section always calls out the need for manual testing.
+
 Create the frontend environment file:
 
 ```powershell

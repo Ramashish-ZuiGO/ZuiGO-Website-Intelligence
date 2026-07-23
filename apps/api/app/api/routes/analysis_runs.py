@@ -1,3 +1,4 @@
+import re
 import uuid
 from typing import Annotated, Any
 
@@ -63,6 +64,67 @@ def lighthouse_metrics(data: dict[str, Any]) -> dict[str, Any]:
         value = audit.get("numericValue") if isinstance(audit, dict) else None
         return float(value) if isinstance(value, (int, float)) else None
 
+    def bounded_items(name: str, keys: tuple[str, ...], limit: int = 10) -> list[dict[str, Any]]:
+        audit = audits.get(name)
+        details = audit.get("details", {}) if isinstance(audit, dict) else {}
+        items = details.get("items", []) if isinstance(details, dict) else []
+        return [
+            {key: item.get(key) for key in keys if item.get(key) is not None}
+            for item in items[:limit]
+            if isinstance(item, dict)
+        ]
+
+    breakdown: list[dict[str, Any]] = []
+    for category_name in ("performance", "accessibility", "best-practices", "seo"):
+        category = categories.get(category_name, {})
+        refs = category.get("auditRefs", []) if isinstance(category, dict) else []
+        for audit_ref in refs:
+            audit_id = audit_ref.get("id")
+            audit = audits.get(audit_id, {})
+            audit_score = audit.get("score")
+            manual = audit.get("scoreDisplayMode") == "manual"
+            if not manual and not (isinstance(audit_score, (int, float)) and audit_score < 1):
+                continue
+            details = audit.get("details", {})
+            breakdown.append(
+                {
+                    "audit_id": str(audit_id)[:120],
+                    "title": str(audit.get("title") or audit_id)[:300],
+                    "score": audit_score,
+                    "display_value": str(audit.get("displayValue") or "")[:300] or None,
+                    "explanation": str(audit.get("explanation") or audit.get("description") or "")[
+                        :600
+                    ]
+                    or None,
+                    "category": category_name,
+                    "evidence_summary": (
+                        {
+                            "detail_type": details.get("type"),
+                            "item_count": (
+                                len(details.get("items", []))
+                                if isinstance(details.get("items"), list)
+                                else None
+                            ),
+                        }
+                        if isinstance(details, dict)
+                        else None
+                    ),
+                    "manual_check": manual,
+                }
+            )
+            if len(breakdown) >= 40:
+                break
+        if len(breakdown) >= 40:
+            break
+
+    config = data.get("configSettings", {})
+    environment = data.get("environment", {})
+    user_agent = str(environment.get("networkUserAgent") or environment.get("hostUserAgent") or "")
+    chromium_match = re.search(r"(?:Chrome|Chromium)/([0-9.]+)", user_agent)
+    lcp_items = bounded_items(
+        "largest-contentful-paint-element", ("nodeLabel", "snippet", "selector"), 1
+    )
+
     return {
         "performance_score": score("performance"),
         "accessibility_score": score("accessibility"),
@@ -74,6 +136,38 @@ def lighthouse_metrics(data: dict[str, Any]) -> dict[str, Any]:
         "cumulative_layout_shift": metric("cumulative-layout-shift"),
         "speed_index_ms": metric("speed-index"),
         "time_to_interactive_ms": metric("interactive"),
+        "time_to_interactive_context": {
+            "status": "legacy_supplementary",
+            "core_web_vital": False,
+            "included_in_performance_score": False,
+        },
+        "lighthouse_context": {
+            "lighthouse_version": data.get("lighthouseVersion"),
+            "chromium_version": chromium_match.group(1) if chromium_match else None,
+            "form_factor": config.get("formFactor"),
+            "throttling_method": config.get("throttlingMethod"),
+            "screen_emulation": config.get("screenEmulation"),
+            "audit_timestamp": data.get("fetchTime"),
+        },
+        "lighthouse_audit_breakdown": breakdown,
+        "accessibility_context": {
+            "automated_checks_completed": score("accessibility") is not None,
+            "score_100_proves_compliance": False,
+            "manual_testing_required": True,
+        },
+        "performance_evidence": {
+            "lcp_element": lcp_items[0] if lcp_items else None,
+            "render_blocking_resources": bounded_items(
+                "render-blocking-resources", ("url", "totalBytes", "wastedMs")
+            ),
+            "long_tasks": bounded_items("long-tasks", ("url", "duration", "startTime")),
+            "main_thread_work": bounded_items(
+                "mainthread-work-breakdown", ("group", "groupLabel", "duration")
+            ),
+            "script_execution": bounded_items(
+                "bootup-time", ("url", "total", "scripting", "scriptParseCompile")
+            ),
+        },
     }
 
 

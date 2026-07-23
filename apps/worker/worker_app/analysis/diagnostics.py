@@ -1,5 +1,6 @@
 # ruff: noqa: E501
 
+import html
 import json
 import re
 import socket
@@ -15,6 +16,9 @@ from urllib.parse import urlsplit
 from worker_app.analysis.url_safety import UrlSafetyError, validate_public_url
 
 FORMULA_VERSION = "1.0.0"
+SECURITY_FORMULA_VERSION = "1.1.0"
+TAP_TARGET_MINIMUM_CSS_PX = 24
+TAP_TARGET_EVIDENCE_LIMIT = 20
 SECURITY_DISCLAIMER = (
     "This passive security posture score is not a penetration-test result and does not "
     "prove the absence of vulnerabilities."
@@ -22,7 +26,11 @@ SECURITY_DISCLAIMER = (
 
 
 def score_result(
-    inputs: dict[str, Any], deductions: list[dict[str, Any]], confidence: int
+    inputs: dict[str, Any],
+    deductions: list[dict[str, Any]],
+    confidence: int,
+    *,
+    formula_version: str = FORMULA_VERSION,
 ) -> dict[str, Any]:
     return {
         "label": "ZuiGO-derived",
@@ -30,7 +38,7 @@ def score_result(
         "inputs": inputs,
         "deductions": deductions,
         "final_score": max(0, 100 - sum(item["points"] for item in deductions)),
-        "formula_version": FORMULA_VERSION,
+        "formula_version": formula_version,
         "confidence_percent": confidence,
     }
 
@@ -43,6 +51,8 @@ def group(
     evidence: list[dict[str, Any]] | None = None,
     score: dict[str, Any] | None = None,
     limitations: list[str] | None = None,
+    evidence_completeness: str | None = None,
+    why_it_matters: str | None = None,
 ) -> dict[str, Any]:
     return {
         "status": status,
@@ -51,6 +61,8 @@ def group(
         "evidence": evidence or [],
         "score": score,
         "limitations": limitations or [],
+        "evidence_completeness": evidence_completeness or status,
+        "why_it_matters": why_it_matters,
         "collected_at": datetime.now(UTC).isoformat(),
     }
 
@@ -79,16 +91,33 @@ def parse_w3c_response(payload: dict[str, Any], evidence_limit: int) -> dict[str
             }
         )
     observations = {"error_count": len(errors), "warning_count": len(warnings)}
-    evidence = [
-        {"type": item.get("type"), "message": str(item.get("message", ""))[:300]}
-        for item in messages[:evidence_limit]
-    ]
+    evidence = []
+    for item in messages[: max(0, evidence_limit)]:
+        severity = "error" if item.get("type") == "error" else "warning"
+        evidence.append(
+            {
+                "severity": severity,
+                "validator_message": html.escape(str(item.get("message", ""))[:500]),
+                "affected_element": html.escape(str(item.get("firstLine", ""))[:200]) or None,
+                "line": item.get("lastLine") or item.get("firstLineNumber"),
+                "column": item.get("lastColumn") or item.get("firstColumn"),
+                "extract": html.escape(str(item.get("extract", ""))[:300]) or None,
+                "diagnostic_code": html.escape(
+                    str(item.get("subType") or f"W3C_{severity.upper()}")[:100]
+                ),
+                "evidence_source": "W3C validator",
+            }
+        )
     return group(
         "available",
         observations,
         evidence=evidence,
         score=score_result(observations, deductions, 100),
         limitations=["This is a ZuiGO-derived score, not an official W3C score."],
+        evidence_completeness=(
+            "bounded_complete" if len(messages) <= evidence_limit else "bounded_sample"
+        ),
+        why_it_matters="Validator messages identify the exact markup defects behind the derived deduction.",
     )
 
 
@@ -183,13 +212,65 @@ def cache_diagnostics(playwright: dict[str, Any]) -> dict[str, Any]:
                 }
             )
     deductions = deductions[:10]
-    inputs = {"html": html, "sampled_resources": len(resources)}
+    sampled_count = len(resources)
+    candidate_count = max(
+        sampled_count, int(playwright.get("resource_sample_candidates") or sampled_count)
+    )
+    sample_limit = int(playwright.get("resource_sample_limit") or candidate_count or 0)
+    if sampled_count == 0:
+        completeness = "html_only"
+        status = "partial"
+        unavailable = ["static_asset_analysis"]
+        evidence = [
+            {
+                "code": "STATIC_ASSET_ANALYSIS_UNAVAILABLE",
+                "message": "Static asset analysis unavailable; the score is provisional.",
+            }
+        ]
+    elif candidate_count > sampled_count:
+        completeness = "partial_static_sample"
+        status = "partial"
+        unavailable = ["remaining_static_assets"]
+        evidence = [
+            {
+                "code": "STATIC_ASSET_SAMPLE_BOUNDED",
+                "sampled": sampled_count,
+                "observed_candidates": candidate_count,
+                "sample_limit": sample_limit,
+            }
+        ]
+    else:
+        completeness = "complete_observed_sample"
+        status = "available"
+        unavailable = []
+        evidence = []
+    inputs = {
+        "html": html,
+        "sampled_resources": sampled_count,
+        "observed_static_resources": candidate_count,
+    }
     confidence = min(100, 20 + len(resources) * 16)
     return group(
-        "available",
-        {**inputs, "resources": resources, "cdn_indicators": playwright.get("cdn_indicators", [])},
+        status,
+        {
+            **inputs,
+            "resources": resources,
+            "cdn_indicators": playwright.get("cdn_indicators", []),
+            "evidence_completeness": completeness,
+            "score_qualification": (
+                "provisional_html_only"
+                if sampled_count == 0
+                else "bounded_sample"
+                if status == "partial"
+                else "verified_observed_sample"
+            ),
+        },
+        unavailable=unavailable,
+        evidence=evidence,
         score=score_result(inputs, deductions, confidence),
         limitations=["Only a bounded first-party resource sample is evaluated."],
+        evidence_completeness=completeness,
+        why_it_matters="Cache evidence shows whether repeat visits can reuse HTML and static assets efficiently.",
     )
 
 
@@ -278,8 +359,18 @@ def copyright_diagnostics(playwright: dict[str, Any]) -> dict[str, Any]:
         else "possibly_outdated"
     )
     evidence = (
-        [{"code": "COPYRIGHT_YEAR_OUTDATED", "detected_years": years}]
-        if years and current not in years
+        [
+            {
+                "code": (
+                    "COPYRIGHT_CURRENT_YEAR"
+                    if current in years
+                    else "COPYRIGHT_YEAR_POSSIBLY_OUTDATED"
+                ),
+                "detected_text": text,
+                "detected_years": years,
+            }
+        ]
+        if years
         else []
     )
     return group(
@@ -295,7 +386,92 @@ def copyright_diagnostics(playwright: dict[str, Any]) -> dict[str, Any]:
         unavailable=[] if years else ["visible_copyright_year"],
         evidence=evidence,
         limitations=["Copyright detection does not prove legal ownership."],
+        evidence_completeness="visible_text_match" if years else "no_reliable_match",
+        why_it_matters="A current visible year can reassure visitors that site metadata is maintained.",
     )
+
+
+def classify_csp(csp: str | None) -> dict[str, Any]:
+    if not csp or not csp.strip():
+        return {
+            "quality": "absent",
+            "reason": "No enforced Content-Security-Policy header was observed.",
+            "directives": [],
+            "strengths": [],
+            "risks": ["policy_absent"],
+        }
+    directives: dict[str, list[str]] = {}
+    for raw_directive in csp.split(";"):
+        parts = raw_directive.strip().split()
+        if parts:
+            directives[parts[0].lower()] = [value.lower() for value in parts[1:]]
+    names = set(directives)
+    upgrade_only = names == {"upgrade-insecure-requests"}
+    all_sources = [
+        source
+        for name, sources in directives.items()
+        if name.endswith("-src") or name == "default-src"
+        for source in sources
+    ]
+    wildcard = any(source == "*" or source.startswith("*") for source in all_sources)
+    unsafe_inline = "'unsafe-inline'" in all_sources
+    unsafe_eval = "'unsafe-eval'" in all_sources
+    nonce_or_hash = any(
+        source.startswith(("'nonce-", "'sha256-", "'sha384-", "'sha512-")) for source in all_sources
+    )
+    source_controls = names & {"default-src", "script-src", "style-src"}
+    hardening = names & {"object-src", "base-uri", "frame-ancestors"}
+    strengths = sorted(
+        [
+            *(["restrictive_source_controls"] if source_controls else []),
+            *(["object_restriction"] if "object-src" in names else []),
+            *(["base_uri_restriction"] if "base-uri" in names else []),
+            *(["frame_ancestor_restriction"] if "frame-ancestors" in names else []),
+            *(["nonce_or_hash_sources"] if nonce_or_hash else []),
+            *(["insecure_request_upgrade"] if "upgrade-insecure-requests" in names else []),
+        ]
+    )
+    risks = sorted(
+        [
+            *(["wildcard_source"] if wildcard else []),
+            *(["unsafe_inline"] if unsafe_inline else []),
+            *(["unsafe_eval"] if unsafe_eval else []),
+            *(["missing_source_controls"] if not source_controls else []),
+        ]
+    )
+    if upgrade_only:
+        quality = "upgrade_only"
+        reason = (
+            "The policy only upgrades insecure requests and does not restrict script, style, "
+            "object, frame, or other content sources."
+        )
+    elif wildcard or unsafe_eval or (unsafe_inline and not nonce_or_hash):
+        quality = "weak"
+        reason = (
+            "The policy has source controls, but broad or unsafe source expressions weaken them."
+        )
+    elif (
+        ("default-src" in names or {"script-src", "style-src"} <= names)
+        and {"object-src", "base-uri", "frame-ancestors"} <= hardening
+        and not risks
+    ):
+        quality = "strong"
+        reason = "Restrictive source controls and key object, base-URI, and framing protections were observed."
+    elif source_controls:
+        quality = "moderate"
+        reason = (
+            "Useful source restrictions were observed, but key hardening directives are incomplete."
+        )
+    else:
+        quality = "weak"
+        reason = "The policy is present but does not define meaningful content source restrictions."
+    return {
+        "quality": quality,
+        "reason": reason,
+        "directives": sorted(names),
+        "strengths": strengths,
+        "risks": risks,
+    }
 
 
 def security_diagnostics(playwright: dict[str, Any]) -> dict[str, Any]:
@@ -303,16 +479,20 @@ def security_diagnostics(playwright: dict[str, Any]) -> dict[str, Any]:
         key.lower(): value for key, value in playwright.get("main_response_headers", {}).items()
     }
     csp = headers.get("content-security-policy")
-    weak_csp = bool(csp and ("*" in csp or ("'unsafe-inline'" in csp and "nonce-" not in csp)))
+    csp_classification = classify_csp(csp)
     mixed = playwright.get("mixed_content_count", 0)
     deductions = []
     if not csp:
         deductions.append(
             {"code": "CSP_MISSING", "reason": "Content-Security-Policy is absent", "points": 20}
         )
-    elif weak_csp:
+    elif csp_classification["quality"] in {"upgrade_only", "weak"}:
         deductions.append(
-            {"code": "CSP_WEAK", "reason": "CSP contains broad or unsafe directives", "points": 10}
+            {
+                "code": "CSP_WEAK",
+                "reason": csp_classification["reason"],
+                "points": 10,
+            }
         )
     if playwright.get("https_usage") and not headers.get("strict-transport-security"):
         deductions.append(
@@ -373,7 +553,8 @@ def security_diagnostics(playwright: dict[str, Any]) -> dict[str, Any]:
                 "x-powered-by",
             )
         },
-        "csp_quality": "missing" if not csp else "weak" if weak_csp else "strong",
+        "csp_quality": csp_classification["quality"],
+        "csp_classification": csp_classification,
     }
     unavailable = []
     if playwright.get("https_usage") and not playwright.get("tls_metadata"):
@@ -382,8 +563,14 @@ def security_diagnostics(playwright: dict[str, Any]) -> dict[str, Any]:
         "partial" if unavailable else "available",
         observations,
         unavailable=unavailable,
-        score=score_result(observations, deductions, 75 if unavailable else 90),
+        score=score_result(
+            observations,
+            deductions,
+            75 if unavailable else 90,
+            formula_version=SECURITY_FORMULA_VERSION,
+        ),
         limitations=[SECURITY_DISCLAIMER],
+        why_it_matters="Response headers reduce common browser-side attack exposure when configured restrictively.",
     )
 
 
@@ -496,8 +683,55 @@ def analytics_diagnostics(playwright: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def _tap_target_evidence(viewports: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int, int]:
+    evidence: list[dict[str, Any]] = []
+    seen: set[tuple[Any, ...]] = set()
+    informational = 0
+    confirmed = 0
+    for viewport in viewports:
+        for target in viewport.get("tap_target_samples", []):
+            if target.get("hidden"):
+                continue
+            desktop_only = (
+                bool(target.get("desktop_only"))
+                and "desktop" in str(viewport.get("name", "")).lower()
+            )
+            item = {
+                "element_type": str(target.get("element_type") or "unknown")[:40],
+                "accessible_label": str(target.get("accessible_label") or "")[:120] or None,
+                "width_css_px": round(float(target.get("width") or 0), 1),
+                "height_css_px": round(float(target.get("height") or 0), 1),
+                "viewport": str(viewport.get("name") or "unknown")[:80],
+                "spacing_exception": bool(target.get("spacing_exception")),
+                "desktop_only": desktop_only,
+            }
+            item["classification"] = (
+                "informational_small_target"
+                if item["spacing_exception"] or desktop_only
+                else "confirmed_usability_failure"
+            )
+            key = (
+                item["element_type"],
+                item["accessible_label"],
+                item["width_css_px"],
+                item["height_css_px"],
+                item["viewport"],
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            if item["spacing_exception"] or desktop_only:
+                informational += 1
+            else:
+                confirmed += 1
+            if len(evidence) < TAP_TARGET_EVIDENCE_LIMIT:
+                evidence.append(item)
+    return evidence, informational, confirmed
+
+
 def responsive_diagnostics(playwright: dict[str, Any]) -> dict[str, Any]:
     viewports = playwright.get("responsive_results", [])
+    tap_evidence, informational_targets, confirmed_targets = _tap_target_evidence(viewports)
     deductions = []
     for item in viewports:
         if item.get("status") == "failed":
@@ -528,13 +762,33 @@ def responsive_diagnostics(playwright: dict[str, Any]) -> dict[str, Any]:
         "successful_viewports": successful,
         "viewport_meta": playwright.get("viewport_meta"),
         "viewports": viewports,
+        "tap_target_threshold_css_px": {
+            "minimum_width": TAP_TARGET_MINIMUM_CSS_PX,
+            "minimum_height": TAP_TARGET_MINIMUM_CSS_PX,
+        },
+        "spacing_exception_considered": True,
+        "informational_small_targets": informational_targets,
+        "confirmed_tap_target_failures": confirmed_targets,
+        "tap_target_scoring_behavior": (
+            "Observed small targets do not reduce responsive formula 1.0.0; only failed "
+            "viewports, horizontal overflow, and missing viewport metadata are deducted."
+        ),
     }
+    unavailable = [item["name"] for item in viewports if item.get("status") == "failed"]
+    if not viewports:
+        unavailable.append("tap_target_measurements")
     return group(
-        "available" if successful == len(viewports) else "partial",
+        "available" if viewports and successful == len(viewports) else "partial",
         inputs,
-        unavailable=[item["name"] for item in viewports if item.get("status") == "failed"],
+        unavailable=unavailable,
+        evidence=tap_evidence,
         score=score_result(inputs, deductions, round(successful / max(1, len(viewports)) * 100)),
-        limitations=["Results apply only to the tested Chromium viewports, not all devices."],
+        limitations=[
+            "Results apply only to the tested Chromium viewports, not all devices.",
+            "A small target is informational when its 24 CSS-pixel spacing exclusion area does not overlap another target.",
+        ],
+        evidence_completeness="tested_viewports" if viewports else "unavailable",
+        why_it_matters="Adequate target size or spacing helps touch and motor-impaired users activate controls reliably.",
     )
 
 

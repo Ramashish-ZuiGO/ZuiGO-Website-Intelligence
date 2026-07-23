@@ -53,8 +53,8 @@ categories, calculate the weighted mean, and apply the documented rounding rule.
 
 ## Separate diagnostic scores
 
-The following scores use formula version 1.0.0 independently. They are labelled
-ZuiGO-derived and never contribute to overall scoring formula 1.0.0. Each starts at
+The following scores use their displayed diagnostic formula version independently. They are
+labelled ZuiGO-derived and never contribute to overall scoring formula 1.0.0. Each starts at
 100 and is constrained to 0–100 after the documented deductions.
 
 ### ZuiGO Markup Standards Score
@@ -72,7 +72,12 @@ ZuiGO-derived and never contribute to overall scoring formula 1.0.0. Each starts
 - At most ten resource deductions are applied. Explicit `no-store` is not treated as
   a short-lifetime failure. Confidence is `min(100, 20 + 16 × sampled resources)`.
 
-### Page Security Posture Score
+When no static resource is sampled, the deterministic HTML-only result is retained
+for reproduction but its status is `partial`, evidence completeness is `html_only`,
+and the UI labels the score provisional. A truncated bounded sample is also partial.
+This changes qualification, not cache formula 1.0.0.
+
+### Page Security Posture Score 1.1.0
 
 - Missing CSP: 20; weak CSP: 10; missing HSTS on HTTPS: 15.
 - Missing frame protection: 10; missing `nosniff`: 10.
@@ -82,12 +87,42 @@ ZuiGO-derived and never contribute to overall scoring formula 1.0.0. Each starts
 This passive security posture score is not a penetration-test result and does not
 prove the absence of vulnerabilities.
 
+Security diagnostic formula 1.1.0 classifies CSP as `absent`, `upgrade_only`, `weak`,
+`moderate`, or `strong`. An `upgrade-insecure-requests`-only policy receives the weak-policy
+deduction because it does not restrict content sources. Weak also covers wildcard sources,
+`unsafe-eval`, or unmitigated `unsafe-inline`. Moderate requires useful source restrictions
+but lacks one or more key hardening directives. Strong requires restrictive source controls
+without those unsafe expressions plus `object-src`, `base-uri`, and `frame-ancestors`.
+This diagnostic-only version change does not affect overall formula 1.0.0.
+
 ### Responsive Design Score
 
 - Deduct 20 for each failed tested viewport.
 - Deduct 10 for horizontal overflow in each tested viewport.
 - Deduct 15 when the viewport meta tag is absent.
 - Confidence is the percentage of configured Chromium viewports successfully tested.
+
+Tap targets are measured against a 24 by 24 CSS-pixel threshold. Targets smaller in either
+dimension are informational when the target's expanded 24-pixel exclusion area does not
+overlap another interactive target; otherwise they are confirmed usability observations.
+Hidden and zero-size elements are excluded. Tap-target observations do not create deductions
+in responsive formula 1.0.0, so the report explains them separately.
+
+### Lighthouse interpretation context
+
+Reports retain Lighthouse and Chromium versions when available, mobile/desktop form factor,
+throttling method, screen emulation, audit timestamp, and a bounded list of failed or manual
+audits. Time to Interactive is retained as a legacy supplementary metric: it is not a
+current Core Web Vital and is not necessarily part of the Lighthouse performance score.
+Lighthouse accessibility is automated evidence only; a score of 100 does not establish
+complete accessibility compliance and manual testing remains required.
+
+### Technology detection
+
+Next.js detection uses bounded, verified indicators such as `/_next/` assets,
+`__NEXT_DATA__`, build identifiers, framework root markers, and relevant response headers.
+A framework-specific or corroborated signal returns `detected`; a lone weak asset-path or
+DOM signal returns `uncertain`; no observed indicators returns `not_detected`.
 
 Privacy Policy Freshness is a non-numeric indicator: current means an explicit date
 is no more than 365 days old, stale means older than 365 days, and unknown means no

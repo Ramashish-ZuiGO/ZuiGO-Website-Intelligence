@@ -11,21 +11,142 @@ from worker_app.analysis.errors import AnalysisFailure, FailureDetail
 from worker_app.analysis.url_safety import UrlSafetyError, validate_public_url
 
 
-def classify_failed_request(request: Any, main_document_url: str) -> str:
-    failure = (request.failure or "").lower()
-    if "aborted" in failure or "cancelled" in failure:
-        return "expected_aborted"
-    url = request.url.lower()
-    if any(token in url for token in ("analytics", "doubleclick", "googletagmanager", "video")):
-        return "non_critical"
-    requested = urlsplit(request.url)
+def _classify_failed_request(
+    url: str,
+    failure: str,
+    resource_type: str,
+    main_document_url: str,
+    *,
+    console_errors: list[str] | None = None,
+    navigation_shutting_down: bool = False,
+) -> str:
+    failure_lower = failure.lower()
+    url_lower = url.lower()
+    console_text = "\n".join(console_errors or []).lower()
+    requested = urlsplit(url)
     main = urlsplit(main_document_url)
-    if request.resource_type == "document" or (
-        requested.netloc == main.netloc
-        and request.resource_type in {"script", "stylesheet", "xhr", "fetch"}
+    first_party = requested.hostname == main.hostname
+    mime_rejection = "mime" in console_text and (
+        url_lower in console_text or requested.path.lower() in console_text
+    )
+    if any(
+        token in url_lower
+        for token in ("google-analytics", "doubleclick", "googletagmanager", "/collect?")
     ):
+        return "non_critical"
+    if resource_type in {"media", "video"} or any(
+        token in url_lower for token in (".mp4", ".webm", "autoplay")
+    ):
+        return "expected_aborted" if "abort" in failure_lower else "non_critical"
+    if navigation_shutting_down and ("aborted" in failure_lower or "cancelled" in failure_lower):
+        return "expected_aborted"
+    if resource_type == "document":
+        return "critical"
+    if first_party and resource_type == "script":
+        return "critical"
+    if first_party and resource_type == "stylesheet":
+        return "critical" if mime_rejection else "warning"
+    if first_party and resource_type in {"xhr", "fetch"}:
         return "critical"
     return "unknown"
+
+
+def classify_failed_request(
+    request: Any,
+    main_document_url: str,
+    *,
+    console_errors: list[str] | None = None,
+    navigation_shutting_down: bool = False,
+) -> str:
+    return _classify_failed_request(
+        request.url,
+        request.failure or "",
+        request.resource_type,
+        main_document_url,
+        console_errors=console_errors,
+        navigation_shutting_down=navigation_shutting_down,
+    )
+
+
+def normalize_failed_requests(
+    failed_requests: list[dict[str, Any]],
+    main_document_url: str,
+    console_errors: list[str],
+) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for request in failed_requests:
+        url = str(request.get("url") or "")
+        failure = str(request.get("failure") or "Request failed")
+        resource_type = str(request.get("resource_type") or "other")
+        related_console = [
+            message[:500]
+            for message in console_errors
+            if url.lower() in message.lower()
+            or (urlsplit(url).path and urlsplit(url).path.lower() in message.lower())
+        ][:3]
+        classification = _classify_failed_request(
+            url,
+            failure,
+            resource_type,
+            main_document_url,
+            console_errors=related_console,
+            navigation_shutting_down=bool(request.get("navigation_shutting_down")),
+        )
+        key = (url, classification)
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(
+            {
+                "url": url,
+                "failure": failure,
+                "resource_type": resource_type,
+                "first_party": urlsplit(url).hostname == urlsplit(main_document_url).hostname,
+                "classification": classification,
+                "console_evidence": related_console,
+                "navigation_shutting_down": bool(request.get("navigation_shutting_down")),
+            }
+        )
+    return normalized
+
+
+def detect_technology(measurements: dict[str, Any]) -> dict[str, Any]:
+    raw = measurements.get("technology_evidence", {})
+    indicators: list[dict[str, str]] = []
+    for code, value in (
+        ("next_asset_path", raw.get("next_asset_path")),
+        ("next_data", raw.get("next_data")),
+        ("next_build_id", raw.get("next_build_id")),
+        ("next_root", raw.get("next_root")),
+        ("next_header", raw.get("next_header")),
+    ):
+        if value:
+            indicators.append({"code": code, "evidence": str(value)[:200]})
+    strong_codes = {"next_data", "next_build_id", "next_header"}
+    strong_count = sum(item["code"] in strong_codes for item in indicators)
+    path_and_marker = {"next_asset_path", "next_root"} <= {item["code"] for item in indicators}
+    if strong_count or path_and_marker:
+        status = "detected"
+        confidence = min(100, 75 + max(0, len(indicators) - 1) * 8)
+    elif indicators:
+        status = "uncertain"
+        confidence = 45
+    else:
+        status = "not_detected"
+        confidence = 80
+    return {
+        "status": status,
+        "confidence_percent": confidence,
+        "indicators": indicators[:10],
+        "explanation": (
+            "Multiple or framework-specific Next.js indicators were verified."
+            if status == "detected"
+            else "A weak Next.js-related signal was observed without corroboration."
+            if status == "uncertain"
+            else "No verified Next.js indicators were observed in the bounded homepage inspection."
+        ),
+    }
 
 
 def inspect_page(
@@ -42,10 +163,11 @@ def inspect_page(
     safe_url = validate_public_url(requested_url)
     console_errors: list[str] = []
     page_errors: list[str] = []
-    failed_requests: list[dict[str, str]] = []
+    failed_requests: list[dict[str, Any]] = []
     redirect_urls: list[str] = []
     blocked_navigation: list[UrlSafetyError] = []
     resource_samples: list[dict[str, Any]] = []
+    resource_sample_candidates = 0
     network_urls: list[str] = []
 
     with sync_playwright() as playwright:
@@ -69,6 +191,7 @@ def inspect_page(
             page = context.new_page()
             page.set_default_timeout(collection_timeout_ms)
             crashed = False
+            navigation_shutting_down = False
 
             def record_crash() -> None:
                 nonlocal crashed
@@ -99,17 +222,17 @@ def inspect_page(
                     {
                         "url": request.url,
                         "failure": request.failure or "Request failed",
-                        "classification": classify_failed_request(request, safe_url),
+                        "resource_type": request.resource_type,
+                        "navigation_shutting_down": navigation_shutting_down,
                     }
                 ),
             )
 
             def record_response(response: Any) -> None:
+                nonlocal resource_sample_candidates
                 network_urls.append(response.url)
                 if response.request.resource_type == "document":
                     redirect_urls.append(response.url)
-                    return
-                if len(resource_samples) >= max_resources:
                     return
                 response_url = urlsplit(response.url)
                 main_url = urlsplit(safe_url)
@@ -121,6 +244,9 @@ def inspect_page(
                     response_url.hostname in first_party_hosts
                     and response.request.resource_type in {"script", "stylesheet", "image", "font"}
                 ):
+                    resource_sample_candidates += 1
+                    if len(resource_samples) >= max_resources:
+                        return
                     resource_samples.append(
                         {
                             "url": response.url,
@@ -200,7 +326,12 @@ def inspect_page(
                     responsive_viewport: document.documentElement.scrollWidth <= window.innerWidth,
                     technology_indicators: {
                       generator: document.querySelector('meta[name="generator"]')?.content || null,
-                      nextjs: Boolean(document.querySelector('#__next') || window.__NEXT_DATA__),
+                    },
+                    technology_evidence: {
+                      next_asset_path: [...document.querySelectorAll('script[src], link[href]')].map(node => node.src || node.href).find(url => /\\/_next\\//.test(url)) || null,
+                      next_data: Boolean(window.__NEXT_DATA__ || document.querySelector('script#__NEXT_DATA__')),
+                      next_build_id: window.__NEXT_DATA__?.buildId || document.querySelector('script#__NEXT_DATA__')?.textContent?.match(/"buildId"\\s*:\\s*"([^"]+)"/)?.[1] || null,
+                      next_root: Boolean(document.querySelector('#__next')),
                     },
                     viewport_meta: document.querySelector('meta[name="viewport"]')?.content || null,
                     policy_links: Object.fromEntries(['privacy', 'terms', 'cookie'].map(kind => {
@@ -221,13 +352,36 @@ def inspect_page(
                     try:
                         page.set_viewport_size({"width": width, "height": height})
                         viewport_result = page.evaluate(
-                            """([name, width, height]) => ({
-                              name, width, height, status: 'passed',
-                              horizontal_overflow: document.documentElement.scrollWidth > width,
-                              critical_elements_outside_viewport: [...document.querySelectorAll('nav, main, h1, button, input')].filter(node => { const box = node.getBoundingClientRect(); return box.right > width + 2 || box.left < -2; }).length,
-                              responsive_navigation: Boolean(document.querySelector('nav, [aria-label*="navigation" i]')),
-                              small_tap_targets: [...document.querySelectorAll('button, a, input')].filter(node => { const box = node.getBoundingClientRect(); return box.width > 0 && box.height > 0 && (box.width < 24 || box.height < 24); }).length,
-                            })""",
+                            """([name, width, height]) => {
+                              const targets = [...document.querySelectorAll('button, a[href], input, select, textarea, [role="button"]')]
+                                .map(node => ({ node, box: node.getBoundingClientRect() }))
+                                .filter(item => {
+                                  const style = getComputedStyle(item.node);
+                                  return item.box.width > 0 && item.box.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+                                });
+                              const small = targets.filter(item => item.box.width < 24 || item.box.height < 24);
+                              const samples = small.slice(0, 20).map(item => {
+                                const padX = Math.max(0, (24 - item.box.width) / 2);
+                                const padY = Math.max(0, (24 - item.box.height) / 2);
+                                const expanded = { left: item.box.left - padX, right: item.box.right + padX, top: item.box.top - padY, bottom: item.box.bottom + padY };
+                                const overlaps = targets.some(other => other.node !== item.node && !(other.box.right <= expanded.left || other.box.left >= expanded.right || other.box.bottom <= expanded.top || other.box.top >= expanded.bottom));
+                                return {
+                                  element_type: item.node.tagName.toLowerCase(),
+                                  accessible_label: (item.node.getAttribute('aria-label') || item.node.getAttribute('title') || item.node.textContent || item.node.value || '').trim().slice(0, 120),
+                                  width: item.box.width,
+                                  height: item.box.height,
+                                  spacing_exception: !overlaps,
+                                };
+                              });
+                              return {
+                                name, width, height, status: 'passed',
+                                horizontal_overflow: document.documentElement.scrollWidth > width,
+                                critical_elements_outside_viewport: [...document.querySelectorAll('nav, main, h1, button, input')].filter(node => { const box = node.getBoundingClientRect(); return box.right > width + 2 || box.left < -2; }).length,
+                                responsive_navigation: Boolean(document.querySelector('nav, [aria-label*="navigation" i]')),
+                                small_tap_targets: small.length,
+                                tap_target_samples: samples,
+                              };
+                            }""",
                             [name, width, height],
                         )
                     except PlaywrightError:
@@ -241,7 +395,23 @@ def inspect_page(
                 measurements["main_response_headers"] = {
                     key.lower(): value for key, value in response.headers.items()
                 }
+                next_header = next(
+                    (
+                        f"{key}: {value}"
+                        for key, value in measurements["main_response_headers"].items()
+                        if key in {"x-nextjs-cache", "x-powered-by"} and "next" in value.lower()
+                    ),
+                    None,
+                )
+                measurements["technology_evidence"]["next_header"] = next_header
+                nextjs_detection = detect_technology(measurements)
+                measurements["technology_indicators"]["nextjs_detection"] = nextjs_detection
+                measurements["technology_indicators"]["nextjs"] = (
+                    nextjs_detection["status"] == "detected"
+                )
                 measurements["resource_samples"] = resource_samples
+                measurements["resource_sample_candidates"] = resource_sample_candidates
+                measurements["resource_sample_limit"] = max_resources
                 measurements["network_urls"] = network_urls[:200]
                 measurements["_html"] = page.content()[:2_000_000]
             except PlaywrightError as exception:
@@ -254,6 +424,7 @@ def inspect_page(
                         internal_detail=str(exception),
                     )
                 ) from exception
+            navigation_shutting_down = True
             context.close()
         finally:
             browser.close()
@@ -279,7 +450,7 @@ def parse_playwright_measurements(
     user_agent: str,
     console_errors: list[str],
     page_errors: list[str],
-    failed_requests: list[dict[str, str]],
+    failed_requests: list[dict[str, Any]],
 ) -> dict[str, Any]:
     return {
         **measurements,
@@ -289,7 +460,9 @@ def parse_playwright_measurements(
         "user_agent": user_agent,
         "console_errors": console_errors,
         "page_javascript_errors": page_errors,
-        "failed_network_requests": failed_requests,
+        "failed_network_requests": normalize_failed_requests(
+            failed_requests, final_url, console_errors
+        ),
         "https_usage": urlsplit(final_url).scheme == "https",
         "h1_count": len(measurements.get("h1_texts", [])),
     }

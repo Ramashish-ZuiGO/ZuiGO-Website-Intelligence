@@ -38,10 +38,29 @@ def generate_findings(
 ) -> list[dict[str, Any]]:
     url = str(playwright_data["final_url"])
     results: list[dict[str, Any]] = []
+    failed_requests = playwright_data.get("failed_network_requests", [])
+    css_mime_failures = [
+        request
+        for request in failed_requests
+        if request.get("resource_type") == "stylesheet"
+        and request.get("first_party")
+        and any("mime" in str(message).lower() for message in request.get("console_evidence", []))
+    ]
+    script_failures = [
+        request
+        for request in failed_requests
+        if request.get("resource_type") == "script"
+        and request.get("first_party")
+        and request.get("classification") == "critical"
+    ]
+    handled_request_urls = {
+        str(request.get("url")) for request in [*css_mime_failures, *script_failures]
+    }
     actionable_request_failures = [
         request
-        for request in playwright_data.get("failed_network_requests", [])
-        if request.get("classification") in {"critical", "unknown", None}
+        for request in failed_requests
+        if request.get("classification") in {"critical", "warning", "unknown", None}
+        and str(request.get("url")) not in handled_request_urls
     ]
 
     direct_rules = [
@@ -121,15 +140,6 @@ def generate_findings(
             {"errors": playwright_data.get("page_javascript_errors")},
         ),
         (
-            bool(actionable_request_failures),
-            "FAILED_NETWORK_REQUESTS",
-            "technical",
-            "Failed network requests",
-            "One or more page requests failed.",
-            "medium",
-            {"requests": actionable_request_failures},
-        ),
-        (
             not playwright_data.get("https_usage"),
             "NON_HTTPS_WEBSITE",
             "security",
@@ -143,6 +153,44 @@ def generate_findings(
         if matched:
             results.append(
                 finding(code, category, title, description, severity, url, evidence, "playwright")
+            )
+
+    request_rules = [
+        (
+            css_mime_failures,
+            "CSS_MIME_TYPE_FAILURE",
+            "Stylesheet rejected because of its response content type",
+            "A first-party stylesheet was rejected by Chromium because its MIME type was invalid.",
+            "high",
+        ),
+        (
+            script_failures,
+            "FIRST_PARTY_JAVASCRIPT_FAILURE",
+            "First-party rendering JavaScript failed",
+            "A first-party script required by the page failed to load.",
+            "critical",
+        ),
+        (
+            actionable_request_failures,
+            "FAILED_NETWORK_REQUESTS",
+            "Failed network requests",
+            "One or more actionable page requests failed.",
+            "medium",
+        ),
+    ]
+    for requests, code, title, description, severity in request_rules:
+        if requests:
+            results.append(
+                finding(
+                    code,
+                    "technical",
+                    title,
+                    description,
+                    severity,
+                    url,
+                    {"requests": requests[:20]},
+                    "playwright",
+                )
             )
 
     score_rules = [
@@ -218,6 +266,29 @@ def generate_findings(
         value = lighthouse_metrics.get(key)
         if isinstance(value, (int, float)) and value > medium_threshold:
             severity = "high" if value > high_threshold else "medium"
+            metric_evidence: dict[str, Any] = {
+                "value": value,
+                "threshold": medium_threshold,
+            }
+            performance_evidence = lighthouse_metrics.get("performance_evidence")
+            if isinstance(performance_evidence, dict):
+                if code == "HIGH_LCP":
+                    metric_evidence.update(
+                        {
+                            "lcp_element": performance_evidence.get("lcp_element"),
+                            "render_blocking_resources": performance_evidence.get(
+                                "render_blocking_resources", []
+                            ),
+                        }
+                    )
+                elif code == "HIGH_TOTAL_BLOCKING_TIME":
+                    metric_evidence.update(
+                        {
+                            "long_tasks": performance_evidence.get("long_tasks", []),
+                            "main_thread_work": performance_evidence.get("main_thread_work", []),
+                            "script_execution": performance_evidence.get("script_execution", []),
+                        }
+                    )
             results.append(
                 finding(
                     code,
@@ -226,7 +297,7 @@ def generate_findings(
                     "The measured value exceeds the documented threshold.",
                     severity,
                     url,
-                    {"value": value, "threshold": medium_threshold},
+                    metric_evidence,
                     "lighthouse",
                 )
             )

@@ -8,6 +8,7 @@ from app.db.base import Base
 from app.db.session import get_db
 from app.main import app
 from app.models import (
+    AnalysisDiagnostic,
     AnalysisFinding,
     AnalysisInterpretation,
     AnalysisResult,
@@ -156,12 +157,58 @@ def test_api_results_response_and_cascade(client: TestClient, db_session: Sessio
                 "categories": {
                     "performance": {"score": 0.8},
                     "accessibility": {"score": 0.9},
-                    "best-practices": {"score": 1.0},
+                    "best-practices": {
+                        "score": 1.0,
+                        "auditRefs": [{"id": "manual-security"}],
+                    },
                     "seo": {"score": 0.95},
                 },
-                "audits": {},
+                "audits": {
+                    "manual-security": {
+                        "title": "Manual security review",
+                        "score": None,
+                        "scoreDisplayMode": "manual",
+                    }
+                },
+                "lighthouseVersion": "13.3.0",
+                "fetchTime": now.isoformat(),
+                "configSettings": {
+                    "formFactor": "desktop",
+                    "throttlingMethod": "provided",
+                    "screenEmulation": {"disabled": True},
+                },
+                "environment": {"hostUserAgent": "Chromium/140.0.0.0"},
             },
             raw_playwright_data={"h1_count": 0, "html_language": "en"},
+        )
+    )
+    db_session.add(
+        AnalysisDiagnostic(
+            analysis_run_id=run.id,
+            group_name="policy_diagnostics",
+            payload={
+                "status": "available",
+                "verified_observations": {},
+                "unavailable_observations": [],
+                "evidence": [],
+                "score": None,
+                "limitations": [],
+                "collected_at": now.isoformat(),
+                "copyright": {
+                    "status": "available",
+                    "verified_observations": {
+                        "detected_text": f"Copyright {now.year} Example",
+                        "current_year_present": True,
+                        "result": "current_year_detected",
+                        "confidence_percent": 90,
+                    },
+                    "unavailable_observations": [],
+                    "evidence": [{"code": "COPYRIGHT_CURRENT_YEAR"}],
+                    "score": None,
+                    "limitations": ["Copyright detection does not prove legal ownership."],
+                    "collected_at": now.isoformat(),
+                },
+            },
         )
     )
     db_session.add(
@@ -225,7 +272,20 @@ def test_api_results_response_and_cascade(client: TestClient, db_session: Sessio
     assert status_response.json()["result_summary"]["overall_score"] == 88
     assert results_response.status_code == 200
     assert results_response.json()["lighthouse_metrics"]["seo_score"] == 95
+    assert (
+        results_response.json()["lighthouse_metrics"]["lighthouse_context"]["form_factor"]
+        == "desktop"
+    )
+    assert results_response.json()["lighthouse_metrics"]["lighthouse_audit_breakdown"][0][
+        "manual_check"
+    ]
     assert results_response.json()["findings"][0]["finding_code"] == "MISSING_H1"
+    assert (
+        results_response.json()["diagnostics"]["policy_diagnostics"]["copyright"][
+            "verified_observations"
+        ]["result"]
+        == "current_year_detected"
+    )
 
     report_response = client.get(f"/api/v1/analysis-runs/{run.id}/report")
     assert report_response.status_code == 200
@@ -280,6 +340,7 @@ def test_api_results_response_and_cascade(client: TestClient, db_session: Sessio
     assert db_session.scalar(select(func.count()).select_from(AnalysisFinding)) == 0
     assert db_session.scalar(select(func.count()).select_from(AnalysisScore)) == 0
     assert db_session.scalar(select(func.count()).select_from(AnalysisInterpretation)) == 0
+    assert db_session.scalar(select(func.count()).select_from(AnalysisDiagnostic)) == 0
 
 
 def test_missing_report_returns_normalized_errors(client: TestClient, db_session: Session) -> None:

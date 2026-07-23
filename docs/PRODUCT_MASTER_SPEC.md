@@ -2189,3 +2189,256 @@ Analyzed coverage is the number of analyzed eligible pages divided by the number
 pages. Every display must include numerator, denominator, and percentage. Excluded, skipped,
 external, destructive, and robots-disallowed pages are outside the denominator. Coverage is
 not an analysis-quality score.
+
+## PERMANENT PRODUCT REQUIREMENTS — ADDED BEFORE TASK 017
+
+### 1. SITE-WIDE ANALYSIS
+
+The product must analyze websites at page level, not only the homepage.
+
+Reports must clearly show:
+
+- discovered pages
+- eligible pages
+- selected pages
+- analyzed pages
+- successful pages
+- partial pages
+- failed pages
+- skipped pages
+- unanalyzed eligible pages
+- pages requiring correction
+- reasons for failures and skips
+
+Analysis must remain bounded, safe and configurable.
+
+### 2. PAGE ATTRIBUTION
+
+Every finding, score, audit, recommendation and evidence record must identify:
+
+- affected page ID
+- requested URL
+- final URL
+- page title when available
+- analysis level
+- analyzer or evidence source
+- analysis status
+
+Do not display anonymous findings that cannot be connected to a page.
+
+### 3. ACTIONABLE CORRECTIONS
+
+Every identified issue must clearly state:
+
+- what is wrong
+- why it matters
+- affected page
+- severity
+- evidence
+- responsible area
+- responsible role
+- exact action location
+- concrete remediation
+- verification procedure
+- confidence
+- source or audit reference
+
+Supported action areas include:
+
+- frontend
+- backend
+- CMS/content
+- design
+- accessibility
+- SEO
+- analytics
+- CDN/server
+- security
+- legal/compliance
+- DevOps/infrastructure
+
+Avoid generic recommendations such as "improve the website."
+
+### 4. SCORE PRESENTATION
+
+All scores must be displayed in x/100 format.
+
+Examples:
+
+- Overall Score: 84/100
+- Performance: 46/100
+- Priority: 87/100
+
+Always distinguish:
+
+- overall site score
+- page score
+- category score
+- coverage percentage
+- confidence
+- compatibility percentage
+
+Confidence must be shown separately from score.
+
+Do not treat missing evidence as a score of zero unless the documented
+methodology explicitly requires it.
+
+### 5. INFORMATION AND EXPLAINABILITY
+
+Important report sections and metrics must include an accessible information
+icon or explanation.
+
+Each explanation must describe:
+
+- what is measured
+- evidence source
+- unit or scale
+- interpretation
+- thresholds
+- limitations
+- applicable standards or profile
+
+Information must be keyboard accessible and screen-reader friendly.
+Do not rely only on hover.
+
+### 6. STANDARD AND THRESHOLD PROFILES
+
+The platform must support documented threshold/source profiles suitable for:
+
+- general global websites
+- Indian websites
+- Indian government websites
+- enterprise websites
+- configurable future profiles
+
+Profiles must identify the standards and versions used.
+
+Do not silently apply one universal threshold to every website category.
+
+### 7. MODERN PERFORMANCE METRICS
+
+Performance reporting should distinguish field and laboratory evidence.
+
+Supported metrics should include, where evidence is available:
+
+- Largest Contentful Paint
+- Interaction to Next Paint
+- Cumulative Layout Shift
+- First Contentful Paint
+- Speed Index
+- Total Blocking Time
+- Time to Interactive where still available
+- server response timing
+- resource and network diagnostics
+
+Field Core Web Vitals must be interpreted at the 75th percentile when field
+data is available.
+
+Do not present Lighthouse laboratory data as real-user field data.
+
+### 8. ACCESSIBILITY AND COMPLIANCE
+
+Accessibility analysis must progressively support:
+
+- WCAG 2.2
+- Level A and AA classification
+- automated-test limitations
+- manual verification requirements
+- affected elements and pages
+- remediation and verification guidance
+
+Indian government profiles should support GIGW requirements where applicable.
+
+Do not claim complete accessibility compliance from automated checks alone.
+
+### 9. RESPONSIVE AND CROSS-BROWSER ANALYSIS
+
+Responsive analysis must support a page × browser × viewport test matrix.
+
+Current baseline viewports:
+
+- 390×844 mobile portrait
+- 844×390 mobile landscape
+- 768×1024 tablet
+- 1366×768 laptop
+- 1920×1080 desktop
+
+Future supported viewports should include:
+
+- 360×800
+- 1024×768
+- 2560×1440
+- user-defined custom viewport
+
+Browser-engine roadmap:
+
+- Chromium
+- Firefox
+- WebKit
+
+Branded browser roadmap:
+
+- Google Chrome
+- Microsoft Edge
+
+Actual Safari validation must only be claimed when tested on macOS or a
+supported cloud-browser environment.
+
+Never claim support for an untested browser or viewport.
+
+### 10. COMPATIBILITY COVERAGE
+
+Cross-browser and responsive reports must distinguish:
+
+Test coverage:
+tested combinations / planned combinations × 100
+
+Clean-pass percentage:
+passed combinations / tested combinations × 100
+
+Functional compatibility:
+(passed combinations + warning combinations) / tested combinations × 100
+
+Reports must show:
+
+- tested browser
+- browser engine
+- viewport
+- page
+- pass, warning or failure status
+- observed issue
+- correction location
+- remediation
+- verification method
+
+### 11. REPORT STRUCTURE
+
+The final report must progressively include:
+
+- executive summary
+- overall and category scores
+- page inventory
+- coverage
+- page-level findings
+- pages requiring correction
+- action plan
+- performance
+- accessibility
+- SEO
+- security
+- technical quality
+- responsive compatibility
+- browser compatibility
+- failed and skipped analyses
+- evidence and limitations
+- verification guidance
+
+### 12. PRODUCT INTEGRITY
+
+- Preserve historical analyses.
+- Clearly identify partial or unavailable data.
+- Never fabricate evidence.
+- Never hide analysis limitations.
+- Never claim 100% coverage when configured limits prevented full analysis.
+- Do not change Overall Score Formula v1.0.0 without an explicitly approved,
+  documented and versioned decision.

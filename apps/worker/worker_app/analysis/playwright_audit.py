@@ -321,6 +321,7 @@ def inspect_page(
                     images_missing_alt: images.filter((image) => !image.hasAttribute('alt') || !image.alt.trim()).length,
                     internal_link_count: links.filter((link) => { try { return new URL(link.href).origin === origin; } catch { return false; } }).length,
                     external_link_count: links.filter((link) => { try { return new URL(link.href).origin !== origin; } catch { return false; } }).length,
+                    rendered_dom_links: links.map(link => link.href).filter(Boolean).slice(0, 500),
                     form_count: document.forms.length,
                     button_count: document.querySelectorAll('button, input[type="button"], input[type="submit"]').length,
                     responsive_viewport: document.documentElement.scrollWidth <= window.innerWidth,

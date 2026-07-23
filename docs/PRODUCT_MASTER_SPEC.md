@@ -2159,3 +2159,17 @@ Assume the reader is learning enterprise software architecture while building th
 
 
 The final output should be detailed enough that an engineering team could build the platform directly from the generated documentation without needing major architectural clarification.
+
+## Safe website discovery and analysis coverage
+
+Website discovery is a separate bounded lifecycle that records normalized pages, discovery
+sources, scope, robots eligibility, safety exclusions, crawl depth, page classification, and
+latest analysis status. It may use the submitted homepage, sitemap declarations and indexes,
+bounded same-site HTML links, canonical links, and already-visible rendered DOM links. It
+must not submit forms, authenticate, activate state-changing URLs, crawl private networks,
+follow unsafe redirects, or run a full Lighthouse audit for every page during discovery.
+
+Analyzed coverage is the number of analyzed eligible pages divided by the number of eligible
+pages. Every display must include numerator, denominator, and percentage. Excluded, skipped,
+external, destructive, and robots-disallowed pages are outside the denominator. Coverage is
+not an analysis-quality score.

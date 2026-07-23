@@ -19,6 +19,60 @@ export interface ProjectDetail extends Project {
   websites: Website[];
 }
 
+export interface DiscoveryRun {
+  id: string;
+  website_id: string;
+  status: "queued" | "running" | "partial" | "completed" | "failed";
+  current_stage: string | null;
+  progress_percent: number;
+  crawl_limit_reached: boolean;
+  failure_code: string | null;
+  failure_message: string | null;
+}
+
+export interface WebsitePage {
+  id: string;
+  normalized_url: string;
+  page_title: string | null;
+  page_type: string;
+  page_type_confidence: number;
+  discovery_source: string;
+  crawl_depth: number;
+  eligibility_status: "eligible" | "excluded" | "skipped";
+  robots_status: "allowed" | "disallowed" | "unknown";
+  latest_analysis_status: "pending" | "completed" | "partial" | "failed";
+  exclusion_reason: string | null;
+  skip_reason: string | null;
+}
+
+export interface WebsitePageList {
+  items: WebsitePage[];
+  page: number;
+  page_size: number;
+  total: number;
+  total_pages: number;
+}
+
+export interface CoverageSummary {
+  discovery_run_id: string | null;
+  discovered_urls: number;
+  unique_pages: number;
+  eligible_pages: number;
+  excluded_pages: number;
+  skipped_pages: number;
+  robots_disallowed_pages: number;
+  analyzed_pages: number;
+  completed_analyses: number;
+  partial_analyses: number;
+  failed_analyses: number;
+  pending_analyses: number;
+  analyzed_coverage_numerator: number;
+  analyzed_coverage_denominator: number;
+  analyzed_coverage_percent: number | null;
+  crawl_limit_reached: boolean;
+  maximum_depth_reached: number;
+}
+
 export type AnalysisStatus = "queued" | "running" | "completed" | "failed";
 
 export interface AnalysisRun {

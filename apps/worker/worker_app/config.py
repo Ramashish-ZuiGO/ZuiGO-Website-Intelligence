@@ -53,6 +53,17 @@ class WorkerSettings(BaseSettings):
     policy_page_timeout_seconds: int = Field(default=15, ge=1, le=60)
     diagnostic_max_resources: int = Field(default=20, ge=1, le=100)
     diagnostic_evidence_limit: int = Field(default=20, ge=1, le=100)
+    discovery_max_urls: int = Field(default=500, ge=1, le=5000)
+    discovery_max_html_pages: int = Field(default=50, ge=1, le=500)
+    discovery_max_depth: int = Field(default=3, ge=0, le=10)
+    discovery_max_links_per_page: int = Field(default=500, ge=1, le=5000)
+    discovery_max_sitemap_files: int = Field(default=20, ge=1, le=100)
+    discovery_max_sitemap_depth: int = Field(default=3, ge=0, le=10)
+    discovery_max_redirects: int = Field(default=5, ge=0, le=10)
+    discovery_request_timeout_seconds: int = Field(default=15, ge=1, le=60)
+    discovery_deadline_seconds: int = Field(default=180, ge=10, le=600)
+    discovery_max_response_bytes: int = Field(default=2_000_000, ge=10_000, le=10_000_000)
+    discovery_include_verified_subdomains: bool = False
     responsive_viewports: str = (
         "mobile_portrait:390x844,mobile_landscape:844x390,tablet:768x1024,"
         "laptop:1366x768,desktop:1920x1080"

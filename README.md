@@ -64,6 +64,49 @@ copyright evidence, confidence-based Next.js indicators, Lighthouse execution co
 failed/manual audit summaries. Time to Interactive is labelled legacy/supplementary, and the
 Lighthouse accessibility section always calls out the need for manual testing.
 
+### Safe website discovery and coverage
+
+Website discovery is a separate bounded worker job. It starts with the submitted URL,
+robots sitemap declarations, `/sitemap.xml`, sitemap indexes, homepage/internal HTML links,
+canonical links, and bounded rendered-DOM links retained by a prior homepage analysis. It
+does not run Lighthouse on discovered pages, click controls, submit forms, authenticate, or
+cross into unrelated domains.
+
+Default boundaries are 500 discovered URLs, 50 fetched HTML pages, depth 3, 500 links per
+page, 20 sitemap files, five redirects, a 15-second request timeout, a 180-second overall
+deadline, and 2 MB per response. The matching `DISCOVERY_*` environment variables in
+`.env.example` configure these limits. Subdomains remain recorded but excluded from crawling
+unless explicitly enabled after their relationship has been verified.
+
+robots.txt is fetched with the existing public-URL/SSRF protections. Disallowed pages are
+excluded from analysis coverage. A missing robots file permits crawling; a fetch or parse
+failure records `unknown` rather than inventing permission. XML, sitemap-index, namespaced,
+and bounded gzip sitemap inputs are supported. Loops, external sitemap URLs, unsafe
+redirects, oversized responses, state-changing paths, and configured limits are recorded
+without discarding successful partial discovery.
+
+Coverage is not a quality score:
+
+`analyzed coverage = analyzed eligible pages / total eligible pages × 100`
+
+The API and UI always show the numerator and denominator. Analyzed means an eligible page
+with a completed, partial, or failed analysis attempt; pending pages remain in the
+denominator. Excluded, skipped, external, destructive, and robots-disallowed pages do not.
+When there are no eligible pages, the percentage is unavailable.
+
+Discovery endpoints are:
+
+- `POST /api/v1/websites/{website_id}/discovery-runs`
+- `GET /api/v1/discovery-runs/{run_id}`
+- `GET /api/v1/websites/{website_id}/pages`
+- `GET /api/v1/websites/{website_id}/coverage`
+- `GET /api/v1/website-pages/{page_id}`
+
+Page listing supports bounded pagination, URL/title search, and eligibility, page-type,
+discovery-source, robots, and latest-analysis-status filters. Discovery remains
+single-engine lightweight HTTP collection; full page-level audits and browser/viewport
+matrices are intentionally deferred.
+
 Create the frontend environment file:
 
 ```powershell

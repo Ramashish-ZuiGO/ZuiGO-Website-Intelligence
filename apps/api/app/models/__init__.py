@@ -4,8 +4,10 @@ from app.models.analysis_interpretation import AnalysisInterpretation
 from app.models.analysis_result import AnalysisResult
 from app.models.analysis_run import AnalysisRun, AnalysisStatus
 from app.models.analysis_score import AnalysisScore
+from app.models.discovery_run import DiscoveryRun, DiscoveryStatus
 from app.models.project import Project
 from app.models.website import Website
+from app.models.website_page import WebsitePage
 
 __all__ = [
     "AnalysisDiagnostic",
@@ -15,8 +17,11 @@ __all__ = [
     "AnalysisRun",
     "AnalysisScore",
     "AnalysisStatus",
+    "DiscoveryRun",
+    "DiscoveryStatus",
     "FindingSeverity",
     "FindingSource",
     "Project",
     "Website",
+    "WebsitePage",
 ]

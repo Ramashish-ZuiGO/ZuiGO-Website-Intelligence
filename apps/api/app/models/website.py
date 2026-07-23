@@ -9,7 +9,9 @@ from app.db.base import Base
 
 if TYPE_CHECKING:
     from app.models.analysis_run import AnalysisRun
+    from app.models.discovery_run import DiscoveryRun
     from app.models.project import Project
+    from app.models.website_page import WebsitePage
 
 
 class Website(Base):
@@ -34,4 +36,10 @@ class Website(Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
         order_by="AnalysisRun.created_at.desc()",
+    )
+    discovery_runs: Mapped[list["DiscoveryRun"]] = relationship(
+        back_populates="website", cascade="all, delete-orphan", passive_deletes=True
+    )
+    pages: Mapped[list["WebsitePage"]] = relationship(
+        back_populates="website", cascade="all, delete-orphan", passive_deletes=True
     )

@@ -490,3 +490,148 @@ export interface AnalysisInterpretation {
   fallback_reason: string | null;
   generated_at: string;
 }
+
+export type RepositoryProvider =
+  | "local"
+  | "github"
+  | "gitlab"
+  | "bitbucket"
+  | "azure_devops";
+
+export interface RepositoryConnection {
+  id: string;
+  project_id: string;
+  provider: string;
+  display_name: string;
+  local_root: string;
+  remote_url: string | null;
+  default_branch: string | null;
+  current_branch: string | null;
+  current_commit_sha: string | null;
+  framework_summary: Record<string, unknown> | null;
+  status: string;
+  last_scan_execution_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RepositoryConnectionCreate {
+  project_id: string;
+  provider: string;
+  display_name: string;
+  local_root: string;
+  remote_url?: string | null;
+}
+
+export interface RepositoryConnectionUpdate {
+  display_name?: string | null;
+  local_root?: string | null;
+  status?: string | null;
+  remote_url?: string | null;
+}
+
+export interface RepositoryConnectionValidate {
+  local_root: string;
+  is_git: boolean;
+  error_message: string | null;
+}
+
+export interface RepositoryScanExecution {
+  id: string;
+  connection_id: string;
+  requested_commit_sha: string | null;
+  resolved_commit_sha: string | null;
+  branch: string | null;
+  status: string;
+  started_at: string | null;
+  completed_at: string | null;
+  total_files_discovered: number;
+  eligible_files: number;
+  scanned_files: number;
+  skipped_files: number;
+  failed_files: number;
+  ignored_directories: string[] | null;
+  detected_frameworks: Record<string, unknown> | null;
+  limitations: string[] | null;
+  failure_reason_code: string | null;
+  failure_explanation: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RepositoryFileIndex {
+  id: string;
+  scan_execution_id: string;
+  relative_path: string;
+  normalized_path: string;
+  extension: string | null;
+  detected_language: string | null;
+  file_size: number;
+  line_count: number;
+  content_hash: string | null;
+  git_status: string | null;
+  framework_role: string | null;
+  module_hints: Record<string, unknown> | null;
+  exported_symbols: string[] | null;
+  redacted: boolean;
+  redaction_metadata: Record<string, unknown> | null;
+  first_lines: string | null;
+  scan_status: string;
+  skip_reason: string | null;
+  created_at: string;
+}
+
+export interface DetectedTechnology {
+  id: string;
+  scan_execution_id: string;
+  technology: string;
+  confidence: string;
+  supporting_files: string[] | null;
+  evidence: Record<string, unknown> | null;
+  limitations: string | null;
+  created_at: string;
+}
+
+export interface ActionMatchingExecution {
+  id: string;
+  connection_id: string;
+  scan_execution_id: string;
+  generation_execution_id: string | null;
+  status: string;
+  total_actions: number;
+  located_actions: number;
+  unlocated_actions: number;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ActionRepositoryMatch {
+  id: string;
+  matching_execution_id: string;
+  action_item_id: string;
+  repository_file_id: string | null;
+  relative_path: string | null;
+  start_line: number | null;
+  end_line: number | null;
+  symbol_name: string | null;
+  match_reason: string | null;
+  evidence_snippet: string | null;
+  match_confidence: string;
+  mapping_strategy: string | null;
+  is_primary: boolean;
+  created_at: string;
+}
+
+export interface ScanSummary {
+  total_files_discovered: number;
+  eligible_files: number;
+  scanned_files: number;
+  skipped_files: number;
+  failed_files: number;
+  total_technologies: number;
+  total_actions_matched: number;
+  located_actions: number;
+  unlocated_actions: number;
+}

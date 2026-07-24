@@ -8,11 +8,14 @@ import type {
   ActionGroupDetail,
   ActionItemDetail,
   ActionPlanSummary,
+  ActionRepositoryMatch,
   PaginatedResponse,
+  RepositoryConnection,
 } from "@/lib/types";
 
 interface ActionPlanPanelProps {
   websiteId: string;
+  projectId?: string;
 }
 
 function SeverityBadge({ severity }: { severity: string }) {
@@ -103,7 +106,7 @@ function PriorityBar({ score }: { score: number }) {
   );
 }
 
-export function ActionPlanPanel({ websiteId }: ActionPlanPanelProps) {
+export function ActionPlanPanel({ websiteId, projectId }: ActionPlanPanelProps) {
   const [summary, setSummary] = useState<ActionPlanSummary | null>(null);
   const [pageAnalysisExecutionId, setPageAnalysisExecutionId] = useState<string | null>(null);
   const [groups, setGroups] = useState<ActionGroup[]>([]);
@@ -114,6 +117,9 @@ export function ActionPlanPanel({ websiteId }: ActionPlanPanelProps) {
   const [selectedGroup, setSelectedGroup] = useState<ActionGroupDetail | null>(null);
   const [selectedAction, setSelectedAction] = useState<ActionItemDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+
+  const [matchResults, setMatchResults] = useState<ActionRepositoryMatch[]>([]);
+  const [matchResultsLoading, setMatchResultsLoading] = useState(false);
 
   const [filterStatus, setFilterStatus] = useState("");
   const [filterSeverity, setFilterSeverity] = useState("");
@@ -217,11 +223,15 @@ export function ActionPlanPanel({ websiteId }: ActionPlanPanelProps) {
 
   async function openActionDetail(actionId: string) {
     setDetailLoading(true);
+    setMatchResults([]);
     try {
       const result = await apiRequest<ActionItemDetail>(
         `/api/v1/websites/${websiteId}/action-plan/actions/${actionId}`
       );
       setSelectedAction(result);
+      if (projectId) {
+        await loadActionMatches(actionId);
+      }
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Unable to load action detail.");
     } finally {
@@ -245,6 +255,28 @@ export function ActionPlanPanel({ websiteId }: ActionPlanPanelProps) {
       }
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Unable to update status.");
+    }
+  }
+
+  async function loadActionMatches(actionId: string) {
+    if (!projectId) return;
+    setMatchResultsLoading(true);
+    try {
+      const connections = await apiRequest<RepositoryConnection[]>(
+        `/api/v1/projects/${projectId}/repository/connections`
+      );
+      if (connections.length > 0) {
+        const results = await apiRequest<ActionRepositoryMatch[]>(
+          `/api/v1/projects/${projectId}/repository/connections/${connections[0].id}/match-results`
+        );
+        setMatchResults(results.filter((m) => m.action_item_id === actionId));
+      } else {
+        setMatchResults([]);
+      }
+    } catch {
+      setMatchResults([]);
+    } finally {
+      setMatchResultsLoading(false);
     }
   }
 
@@ -591,6 +623,63 @@ export function ActionPlanPanel({ websiteId }: ActionPlanPanelProps) {
                   <dt className="text-slate-500">Priority</dt>
                   <dd><PriorityBar score={selectedAction.priority_score} /></dd>
                 </div>
+                {matchResults.length > 0 && (
+                  <div className="sm:col-span-2">
+                    <dt className="text-slate-500">Repository Match</dt>
+                    <dd className="mt-1 space-y-2">
+                      {matchResultsLoading && <p className="text-xs text-slate-500">Loading matches…</p>}
+                      {!matchResultsLoading && matchResults.filter(m => m.is_primary).map(match => (
+                        <div key={match.id} className="rounded-lg border bg-slate-50 p-3 text-xs space-y-1">
+                          <div className="flex items-center gap-2">
+                            <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-bold ${
+                              match.match_confidence === 'high' ? 'bg-emerald-100 text-emerald-800' :
+                              match.match_confidence === 'medium' ? 'bg-amber-100 text-amber-800' :
+                              match.match_confidence === 'low' ? 'bg-red-100 text-red-800' :
+                              'bg-slate-100 text-slate-400'
+                            }`}>
+                              {match.match_confidence}
+                            </span>
+                            {match.symbol_name && <span className="font-mono font-semibold">{match.symbol_name}</span>}
+                          </div>
+                          <div className="font-mono text-slate-700">
+                            {match.relative_path}
+                            {match.start_line != null && `:${match.start_line}`}
+                            {match.end_line != null && `-${match.end_line}`}
+                          </div>
+                          <p className="text-slate-500">{match.match_reason}</p>
+                          {match.evidence_snippet && (
+                            <pre className="mt-1 max-h-32 overflow-auto rounded border bg-white p-2 text-xs text-slate-600">
+                              {match.evidence_snippet}
+                            </pre>
+                          )}
+                        </div>
+                      ))}
+                      {!matchResultsLoading && matchResults.filter(m => !m.is_primary).length > 0 && (
+                        <details className="mt-2">
+                          <summary className="cursor-pointer text-xs text-slate-500 hover:text-slate-700">
+                            {matchResults.filter(m => !m.is_primary).length} alternative candidate{matchResults.filter(m => !m.is_primary).length !== 1 ? 's' : ''}
+                          </summary>
+                          <div className="mt-1 space-y-1">
+                            {matchResults.filter(m => !m.is_primary).map(match => (
+                              <div key={match.id} className="rounded border bg-white p-2 text-xs space-y-0.5">
+                                <span className={`inline-block rounded-full px-1.5 py-0.5 text-xs font-bold ${
+                                  match.match_confidence === 'high' ? 'bg-emerald-100 text-emerald-800' :
+                                  match.match_confidence === 'medium' ? 'bg-amber-100 text-amber-800' :
+                                  match.match_confidence === 'low' ? 'bg-red-100 text-red-800' :
+                                  'bg-slate-100 text-slate-400'
+                                }`}>
+                                  {match.match_confidence}
+                                </span>
+                                <span className="ml-1 font-mono">{match.relative_path}</span>
+                                <p className="text-slate-500">{match.match_reason}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </details>
+                      )}
+                    </dd>
+                  </div>
+                )}
                 <div>
                   <dt className="text-slate-500">Confidence</dt>
                   <dd className="font-medium capitalize">{selectedAction.confidence} ({selectedAction.confidence_percent}%)</dd>

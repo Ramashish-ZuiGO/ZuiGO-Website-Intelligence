@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     postgres_port: int = 5432
     redis_url: str
     backend_cors_origins: Annotated[list[str], NoDecode] = ["http://localhost:3000"]
+    allowed_repository_roots: Annotated[list[str], NoDecode] = ["C:\\Users", "/home", "/app"]
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

@@ -1,11 +1,14 @@
 from fastapi import APIRouter
 
-from app.api.routes.action_plan import router as action_plan_router
-from app.api.routes.analysis_runs import router as analysis_runs_router
-from app.api.routes.discovery import router as discovery_router
-from app.api.routes.health import router as health_router
-from app.api.routes.page_analysis import router as page_analysis_router
-from app.api.routes.projects import router as projects_router
+from app.api.routes import (
+    action_plan_router,
+    analysis_runs_router,
+    discovery_router,
+    health_router,
+    page_analysis_router,
+    projects_router,
+    repository_router,
+)
 
 api_router = APIRouter()
 api_router.include_router(health_router)
@@ -16,4 +19,5 @@ v1_router.include_router(analysis_runs_router)
 v1_router.include_router(discovery_router)
 v1_router.include_router(page_analysis_router)
 v1_router.include_router(projects_router)
+v1_router.include_router(repository_router)
 api_router.include_router(v1_router)

@@ -7,6 +7,8 @@ import { useEffect, useState } from "react";
 import { apiRequest } from "@/lib/api";
 import type { AnalysisReport, DiagnosticGroup } from "@/lib/types";
 import { ScoreValue } from "@/components/metrics/ScoreValue";
+import { MetricRatingBadge } from "@/components/metrics/MetricRatingBadge";
+import { MetricInterpretation } from "@/components/metrics/types";
 
 function display(value: unknown): string {
   if (value === null || value === undefined || value === "") return "Not available";
@@ -176,13 +178,24 @@ function DiagnosticCard({ name, diagnostic }: { name: string; diagnostic: Diagno
 export default function AnalysisReportPage() {
   const { analysisRunId } = useParams<{ analysisRunId: string }>();
   const [report, setReport] = useState<AnalysisReport | null>(null);
+  const [interpretations, setInterpretations] = useState<MetricInterpretation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     void apiRequest<AnalysisReport>(`/api/v1/analysis-runs/${analysisRunId}/report`)
-      .then((loaded) => { if (!cancelled) setReport(loaded); })
+      .then(async (loaded) => {
+        if (!cancelled) {
+          setReport(loaded);
+          try {
+            const interps = await apiRequest<MetricInterpretation[]>(`/api/v1/websites/${loaded.website.id}/metric-interpretations`);
+            if (!cancelled) setInterpretations(interps);
+          } catch (e) {
+            console.error("Failed to load interpretations", e);
+          }
+        }
+      })
       .catch((requestError: unknown) => {
         if (!cancelled) setError(requestError instanceof Error ? requestError.message : "Unable to load report.");
       })
@@ -240,9 +253,30 @@ export default function AnalysisReportPage() {
       )}
 
       <section className="mt-6 grid gap-4 md:grid-cols-3">
-        <div className="rounded-2xl border bg-white p-6"><p className="text-sm text-slate-500">Overall score</p><p className="mt-2 text-6xl font-bold"><ScoreValue metricId="overall_score" value={report.score.overall_score} /></p><p className="mt-3 text-sm">Confidence: {report.score.confidence_percent}%</p><p className="text-sm">Formula: {report.score.formula_version}</p></div>
+        <div className="rounded-2xl border bg-white p-6">
+          <div className="flex items-start justify-between">
+            <p className="text-sm text-slate-500">Overall score</p>
+            <MetricRatingBadge interpretation={interpretations.find(i => i.metric_id === "overall_score")} />
+          </div>
+          <p className="mt-2 text-6xl font-bold"><ScoreValue metricId="overall_score" value={report.score.overall_score} /></p>
+          <p className="mt-3 text-sm">Confidence: {report.score.confidence_percent}%</p>
+          <p className="text-sm">Formula: {report.score.formula_version}</p>
+        </div>
 
-        <div className="grid gap-3 sm:grid-cols-2 md:col-span-2">{Object.entries(categoryScores).map(([name, score]) => <div className="rounded-xl border bg-white p-4" key={name}><p className="text-sm text-slate-500">{name}</p><p className="mt-1 text-3xl font-bold"><ScoreValue metricId={name.toLowerCase().replace(" ", "_") + "_score"} value={score} /></p></div>)}</div>
+        <div className="grid gap-3 sm:grid-cols-2 md:col-span-2">
+          {Object.entries(categoryScores).map(([name, score]) => {
+            const mId = name.toLowerCase().replace(" ", "_") + "_score";
+            return (
+              <div className="rounded-xl border bg-white p-4" key={name}>
+                <div className="flex items-start justify-between">
+                  <p className="text-sm text-slate-500">{name}</p>
+                  <MetricRatingBadge interpretation={interpretations.find(i => i.metric_id === mId)} />
+                </div>
+                <p className="mt-1 text-3xl font-bold"><ScoreValue metricId={mId} value={score} /></p>
+              </div>
+            );
+          })}
+        </div>
       </section>
 
       <section className="mt-6 rounded-2xl border bg-white p-6">
@@ -262,7 +296,18 @@ export default function AnalysisReportPage() {
       <section className="mt-6 grid gap-6 lg:grid-cols-2">
         <div className="rounded-2xl border bg-white p-6">
           <h2 className="text-xl font-bold">Lighthouse metrics</h2>
-          <dl className="mt-4 grid gap-3">{Object.entries(metricLabels).map(([key, name]) => <div key={key}><dt className="text-sm text-slate-500">{name}</dt><dd className="font-semibold">{display(report.lighthouse_metrics[key])}</dd>{key === "time_to_interactive_ms" && <p className="text-xs text-slate-500">Legacy/supplementary; not a current Core Web Vital and not necessarily included in the performance score.</p>}</div>)}</dl>
+          <dl className="mt-4 grid gap-3">
+            {Object.entries(metricLabels).map(([key, name]) => (
+              <div key={key}>
+                <dt className="text-sm text-slate-500 flex items-center gap-2">
+                  {name}
+                  <MetricRatingBadge interpretation={interpretations.find(i => i.metric_id === key.replace('_ms', ''))} />
+                </dt>
+                <dd className="font-semibold">{display(report.lighthouse_metrics[key])}</dd>
+                {key === "time_to_interactive_ms" && <p className="text-xs text-slate-500">Legacy/supplementary; not a current Core Web Vital and not necessarily included in the performance score.</p>}
+              </div>
+            ))}
+          </dl>
         </div>
         <div className="rounded-2xl border bg-white p-6"><h2 className="text-xl font-bold">Lighthouse execution context</h2><div className="mt-4"><HumanValue value={lighthouseContext} /></div></div>
       </section>

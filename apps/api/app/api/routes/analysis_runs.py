@@ -15,6 +15,7 @@ from app.schemas import (
     AnalysisResultSummary,
     AnalysisRunRead,
 )
+from app.services import profiles_registry
 from app.services.analysis_queue import enqueue_analysis
 
 router = APIRouter(tags=["analysis-runs"])
@@ -203,8 +204,14 @@ def run_response(analysis_run: AnalysisRun) -> AnalysisRunRead:
     status_code=status.HTTP_202_ACCEPTED,
 )
 def start_analysis(website_id: uuid.UUID, db: DatabaseSession) -> AnalysisRunRead:
-    get_website_or_raise(db, website_id)
-    analysis_run = AnalysisRun(website_id=website_id)
+    website = get_website_or_raise(db, website_id)
+    profile = profiles_registry.get_profile(website.profile_id)
+    if not profile:
+        profile = profiles_registry.get_profile("global_general")
+
+    analysis_run = AnalysisRun(
+        website_id=website_id, profile_id=profile.profile_id, profile_version=profile.version
+    )
     db.add(analysis_run)
     db.commit()
     db.refresh(analysis_run)

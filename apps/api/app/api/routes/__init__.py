@@ -6,6 +6,7 @@ from app.api.routes.metadata import router as metadata_router
 from app.api.routes.page_analysis import router as page_analysis_router
 from app.api.routes.projects import router as projects_router
 from app.api.routes.repository import router as repository_router
+from app.api.routes.websites import router as websites_router
 
 __all__ = [
     "action_plan_router",
@@ -16,4 +17,5 @@ __all__ = [
     "projects_router",
     "repository_router",
     "metadata_router",
+    "websites_router",
 ]

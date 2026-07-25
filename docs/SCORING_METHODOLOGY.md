@@ -291,8 +291,20 @@ consume these definitions to provide interactive, accessible explanations rather
 than duplicating metric explanations in multiple places.
 
 
+### Threshold Profiles
+
+Starting with v1.0.0, the calculation of scores remains deterministic, but the **interpretation** of those metrics (i.e. Good, Needs Improvement, Poor) is governed by Threshold Profiles.
+
+Four primary profiles are included:
+- **Global General**: Standard Lighthouse interpretations
+- **India General**: General standards optimized for Indian user bases
+- **India Government**: Strict GIGW 3.0 adherence
+- **Enterprise**: High-availability, ultra-strict web performance thresholds
+
+When evaluating a metric, the system looks up the threshold rule defined in the assigned profile. The resulting `MetricInterpretation` includes the rating, the exact thresholds used, and limitations.
+
 ### Metric Registry Version: 1.0.0
-Exact Metric Count: 53
+Exact Metric Count: 58
 Supported Value Types: score, percentage, count, duration, bytes, ratio, boolean, status, text, unavailable.
 Endpoints: GET /api/v1/metadata/metrics, GET /api/v1/metadata/metrics/{metric_id}
 Score/Percentage distinction: Scores are x/100, Percentages are %.

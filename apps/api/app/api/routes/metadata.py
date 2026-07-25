@@ -1,7 +1,8 @@
 from fastapi import APIRouter, HTTPException, Query
 
 from app.schemas.metadata import MetricCategoryEnum, MetricDefinition, MetricValueTypeEnum
-from app.services import metrics_registry
+from app.schemas.profile import ProfileDefinition
+from app.services import metrics_registry, profiles_registry
 
 router = APIRouter(prefix="/metadata", tags=["Metadata"])
 
@@ -33,3 +34,24 @@ def get_metric(metric_id: str) -> MetricDefinition:
     if not metric:
         raise HTTPException(status_code=404, detail="Metric not found")
     return metric
+
+
+@router.get(
+    "/profiles",
+    response_model=list[ProfileDefinition],
+    summary="List all standard profiles",
+)
+def get_profiles() -> list[ProfileDefinition]:
+    return profiles_registry.get_all_profiles()
+
+
+@router.get(
+    "/profiles/{profile_id}",
+    response_model=ProfileDefinition,
+    summary="Get profile by ID",
+)
+def get_profile(profile_id: str) -> ProfileDefinition:
+    profile = profiles_registry.get_profile(profile_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    return profile

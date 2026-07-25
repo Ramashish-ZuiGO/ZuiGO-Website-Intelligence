@@ -24,11 +24,17 @@ class Website(Base):
     )
     url: Mapped[str] = mapped_column(String(2048), nullable=False)
     name: Mapped[str | None] = mapped_column(String(200))
+    profile_id: Mapped[str] = mapped_column(
+        String(100), server_default="global_general", nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
     )
     project: Mapped["Project"] = relationship(back_populates="websites")
     analysis_runs: Mapped[list["AnalysisRun"]] = relationship(

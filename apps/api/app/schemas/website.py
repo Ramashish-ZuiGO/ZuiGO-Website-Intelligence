@@ -20,5 +20,6 @@ class WebsiteRead(BaseModel):
     project_id: uuid.UUID
     url: str
     name: str | None
+    profile_id: str
     created_at: datetime
     updated_at: datetime

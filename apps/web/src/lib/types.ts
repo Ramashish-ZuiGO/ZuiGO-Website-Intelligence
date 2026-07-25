@@ -3,6 +3,7 @@ export interface Website {
   project_id: string;
   url: string;
   name: string | null;
+  profile_id: string;
   created_at: string;
   updated_at: string;
 }

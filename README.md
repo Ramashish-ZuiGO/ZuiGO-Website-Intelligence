@@ -470,7 +470,7 @@ A centralized Metric Registry API (/api/v1/metadata/metrics) provides consistent
 
 
 ### Metric Registry Version: 1.0.0
-Exact Metric Count: 53
+Exact Metric Count: 58
 Supported Value Types: score, percentage, count, duration, bytes, ratio, boolean, status, text, unavailable.
 Endpoints: GET /api/v1/metadata/metrics, GET /api/v1/metadata/metrics/{metric_id}
 Score/Percentage distinction: Scores are x/100, Percentages are %.

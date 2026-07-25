@@ -9,6 +9,7 @@ from app.api.routes import (
     page_analysis_router,
     projects_router,
     repository_router,
+    websites_router,
 )
 
 api_router = APIRouter()
@@ -22,4 +23,5 @@ v1_router.include_router(page_analysis_router)
 v1_router.include_router(projects_router)
 v1_router.include_router(repository_router)
 v1_router.include_router(metadata_router)
+v1_router.include_router(websites_router)
 api_router.include_router(v1_router)

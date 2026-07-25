@@ -2293,9 +2293,21 @@ Assume the reader is learning enterprise software architecture while building th
 
 The final output should be detailed enough that an engineering team could build the platform directly from the generated documentation without needing major architectural clarification.
 
+## Profile
+
+Every analysis run explicitly targets a versioned interpretation profile. A profile establishes standard thresholds and reference limits to evaluate metrics deterministically. The application ships with four primary profiles:
+- Global General Website (Standard Lighthouse/CWV limits)
+- India General Website
+- India Government Website (GIGW 3.0 adherence, strict performance/accessibility thresholds)
+- Enterprise Website (High scale, strict reliability margins)
+
+Profiles are assigned per-website and historical analysis runs permanently retain the profile reference they were evaluated against.
+
+The overall score formula remains strictly uninfluenced by profiles—a 1500ms LCP results in the exact same mathematical score component regardless of the profile, but the interpretation (e.g. "Good" vs "Needs Improvement") may differ based on the strictness of the profile selected.
+
 ## Safe website discovery and analysis coverage
 
-Website discovery is a separate bounded lifecycle that records normalized pages, discovery
+Website discovery is a separate continuous lifecycle that records normalized pages, discovery
 sources, scope, robots eligibility, safety exclusions, crawl depth, page classification, and
 latest analysis status. It may use the submitted homepage, sitemap declarations and indexes,
 bounded same-site HTML links, canonical links, and already-visible rendered DOM links. It
@@ -2564,7 +2576,7 @@ The final report must progressively include:
 
 To ensure transparent and consistent scoring, a Metric Registry governs metric presentation.
 Registry Version: 1.0.0
-Exact Metric Count: 53
+Exact Metric Count: 58
 
 API Endpoints:
 - GET /api/v1/metadata/metrics

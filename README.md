@@ -36,6 +36,7 @@ Backend configuration belongs in the repository-root `.env`:
 - `AI_MODEL`: local Ollama model name when Ollama is enabled.
 - `AI_BASE_URL`: Ollama API URL reachable from the worker container.
 - `AI_TIMEOUT_SECONDS`: bounded provider request timeout from 1 through 600 seconds.
+- `CRUX_API_KEY`: API key for Chrome UX Report field data.
 - `BROWSER_LAUNCH_TIMEOUT_MS`: Chromium launch deadline; defaults to 20000.
 - `NAVIGATION_TIMEOUT_MS`: main-document navigation deadline; defaults to 45000.
 - `DOM_READINESS_TIMEOUT_MS`: optional full-load wait after DOM readiness; defaults to 15000.

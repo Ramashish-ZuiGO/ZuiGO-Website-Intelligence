@@ -310,3 +310,9 @@ Endpoints: GET /api/v1/metadata/metrics, GET /api/v1/metadata/metrics/{metric_id
 Score/Percentage distinction: Scores are x/100, Percentages are %.
 Accessibility: Components are fully accessible (focus, Enter/Space/Escape) without relying solely on hover.
 Limitations: Screen-reader users may require manual tests for complex aria-label tables.
+
+### Modern Performance Intelligence
+
+- **Field vs Lab Separation**: Field evidence (CrUX) and Lab evidence (Lighthouse) are distinct. Missing field data is never averaged as zero, and lab values are never substituted for missing field values.
+- **Disagreement Indicator**: Comparisons are made between Field and Lab metrics. If they differ materially, a disagreement indicator is provided, but this NEVER alters the Overall Score Formula v1.0.0 or Priority Formula v1.0.0.
+- **History and Profiles**: Historical analyses are preserved, and threshold profiles are applied without modifying raw values.

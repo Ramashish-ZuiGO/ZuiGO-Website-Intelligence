@@ -5,6 +5,10 @@ from collections.abc import Callable
 from datetime import datetime
 from urllib.parse import urlsplit
 
+from app.services.performance_service import (
+    collect_browser_timing_evidence,
+    collect_lighthouse_evidence,
+)
 from billiard.exceptions import SoftTimeLimitExceeded
 from sqlalchemy import delete, insert, select, update
 from sqlalchemy.orm import Session
@@ -396,6 +400,21 @@ def run_analysis(analysis_run_id: str) -> dict[str, str]:
                 + 5,
             )
             playwright_data = playwright_result
+            try:
+                timing = playwright_data.get("window_performance_timing", {})
+                if timing:
+                    with SessionLocal() as db_session:
+                        collect_browser_timing_evidence(
+                            db_session,
+                            run_id,
+                            context["website_id"],
+                            str(playwright_data["final_url"]),
+                            timing,
+                            analysis_run_id=run_id,
+                        )
+            except Exception as e:
+                logger.error(f"Failed to collect browser timing evidence: {e}")
+
             playwright_data["attempt_count"] = playwright_attempt
             logger.info(
                 "analysis_stage_complete analysis_run_id=%s project_id=%s website_id=%s "
@@ -448,6 +467,19 @@ def run_analysis(analysis_run_id: str) -> dict[str, str]:
             ensure_deadline()
             stage(session, run_id, 75, "calculating_score")
             metrics = parse_lighthouse(lighthouse_data)
+            try:
+                with SessionLocal() as db_session:
+                    collect_lighthouse_evidence(
+                        db_session,
+                        run_id,
+                        context["website_id"],
+                        str(playwright_data["final_url"]),
+                        metrics,
+                        analysis_run_id=run_id,
+                    )
+            except Exception as e:
+                logger.error(f"Failed to collect lighthouse evidence: {e}")
+
             findings = generate_findings(playwright_data, metrics)
             try:
                 diagnostics = build_diagnostics(

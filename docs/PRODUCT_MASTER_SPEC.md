@@ -2591,3 +2591,20 @@ Conventions:
 
 Frontend UI uses shared, interactive components (e.g., AccessibleExplanation, ScoreValue) replacing legacy static text or hover-only information icons. Explanations must be fully accessible (e.g., focusable, accessible via Enter/Space/Escape, not dependent solely on hover).
 Limitations: Currently, screen reader users may require manual testing to confirm ria-label propagation in complex metric tables.
+
+### MODERN PERFORMANCE INTELLIGENCE
+
+The performance intelligence layer strictly separates field evidence from lab evidence.
+- **Field vs Lab Evidence**: Field data represents real user experiences (CrUX), while lab data represents controlled Lighthouse conditions. The system never substitutes lab values for field values.
+- **CrUX URL vs Origin Behavior**: The system looks up URL-level data first. If insufficient, it uses origin-level fallback data, while preserving the requested URL and returned normalized key.
+- **Form-factor Handling**: Phone, desktop, and all-device form-factor records are retrieved where available.
+- **p75 Interpretation**: Field metrics like LCP and CLS use the p75 (75th percentile) values to represent the typical user experience.
+- **CrUX API-key Configuration**: Configured via the `CRUX_API_KEY` environment variable. If missing or invalid, the provider safely disables field collection without crashing.
+- **Absence-of-data Behavior**: Missing data is never stored as zero. It is marked as unavailable or partial.
+- **Caching and Retries**: Identical field-data requests are cached for a documented period. Transient failures undergo idempotent retries without uncontrolled API calls.
+- **Lighthouse Evidence**: Preserves lab FCP, LCP, TBT, CLS, and Speed Index without substituting them for field values. TBT is never renamed to INP.
+- **Browser Timing Calculations**: Durations are deterministically calculated from raw timing values to prevent negative durations. Unsupported browser values return unavailable.
+- **Long-task Limitations**: Browser diagnostics measure long tasks, but unsupported values or cross-origin restrictions return unavailable.
+- **Disagreement Indicator**: When corresponding field and lab evidence differ materially (e.g., ratio > 1.2 or < 0.8), a disagreement indicator is set. This explains the difference without declaring either source incorrect.
+- **History and Profile Preservation**: Historical snapshots are immutable. Repeated ingestion is idempotent. Profiles are preserved alongside the snapshots.
+- **Formulas Unchanged**: The Overall Score Formula v1.0.0 and Priority Formula v1.0.0 remain completely unchanged by performance comparison disagreements.

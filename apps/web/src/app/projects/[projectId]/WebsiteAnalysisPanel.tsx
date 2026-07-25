@@ -6,6 +6,7 @@ import { apiRequest } from "@/lib/api";
 import type { AnalysisResults, AnalysisRun } from "@/lib/types";
 
 import { MetricInfoButton } from "@/components/metrics/MetricInfoButton";
+import { PerformanceIntelligence } from '@/components/performance/PerformanceIntelligence';
 import { ScoreValue } from "@/components/metrics/ScoreValue";
 
 interface WebsiteAnalysisPanelProps {
@@ -18,6 +19,19 @@ function isActive(run: AnalysisRun | undefined): boolean {
 
 export function WebsiteAnalysisPanel({ websiteId }: WebsiteAnalysisPanelProps) {
   const [history, setHistory] = useState<AnalysisRun[]>([]);
+  const [performanceData, setPerformanceData] = useState<{snapshots: Record<string, unknown>[], disagreement?: boolean, explanation?: string}>({snapshots: []});
+  useEffect(() => {
+    if (websiteId) {
+      apiRequest<{snapshots?: Record<string, unknown>[], disagreement?: boolean, explanation?: string}>(`/api/v1/websites/${websiteId}/performance/comparison`)
+        .then((res) => setPerformanceData({
+          snapshots: (res.snapshots || []) as Record<string, unknown>[],
+          disagreement: res.disagreement,
+          explanation: res.explanation
+        }))
+        .catch(console.error);
+    }
+  }, [websiteId]);
+
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -224,6 +238,14 @@ export function WebsiteAnalysisPanel({ websiteId }: WebsiteAnalysisPanelProps) {
           </ul>
         )}
       </details>
+      <div className="mt-8">
+        <PerformanceIntelligence
+          data={performanceData.snapshots as unknown as { id: string; metric_id: string; evidence_type: string; raw_value: number }[]}
+          disagreement={performanceData.disagreement}
+          explanation={performanceData.explanation}
+        />
+      </div>
+
       <button className="mt-3 text-xs font-semibold text-slate-600" onClick={() => void loadHistory().catch((requestError: unknown) => setError(requestError instanceof Error ? requestError.message : "Unable to refresh analysis history."))}>Refresh analysis history</button>
     </section>
   );

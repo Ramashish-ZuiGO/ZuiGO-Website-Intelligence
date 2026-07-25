@@ -16,6 +16,7 @@ from app.models.analysis_run import AnalysisRun, AnalysisStatus
 from app.models.analysis_score import AnalysisScore
 from app.models.discovery_run import DiscoveryRun, DiscoveryStatus
 from app.models.page_analysis_run import PageAnalysisRun, PageAnalysisStatus
+from app.models.performance import PerformanceSnapshot
 from app.models.project import Project
 from app.models.repository import (
     ActionMatchingExecution,
@@ -63,6 +64,7 @@ __all__ = [
     "MatchConfidence",
     "PageAnalysisRun",
     "PageAnalysisStatus",
+    "PerformanceSnapshot",
     "Project",
     "RepositoryConnection",
     "RepositoryConnectionStatus",

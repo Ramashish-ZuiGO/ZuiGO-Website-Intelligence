@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 
 import { apiRequest } from "@/lib/api";
 import type { AnalysisReport, DiagnosticGroup } from "@/lib/types";
+import { PerformanceIntelligence } from '@/components/performance/PerformanceIntelligence';
 import { ScoreValue } from "@/components/metrics/ScoreValue";
 import { MetricRatingBadge } from "@/components/metrics/MetricRatingBadge";
 import { MetricInterpretation } from "@/components/metrics/types";
@@ -178,6 +179,7 @@ function DiagnosticCard({ name, diagnostic }: { name: string; diagnostic: Diagno
 export default function AnalysisReportPage() {
   const { analysisRunId } = useParams<{ analysisRunId: string }>();
   const [report, setReport] = useState<AnalysisReport | null>(null);
+  const [performanceData, setPerformanceData] = useState<Record<string, unknown>[]>([]);
   const [interpretations, setInterpretations] = useState<MetricInterpretation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -200,6 +202,13 @@ export default function AnalysisReportPage() {
         if (!cancelled) setError(requestError instanceof Error ? requestError.message : "Unable to load report.");
       })
       .finally(() => { if (!cancelled) setLoading(false); });
+
+    if (analysisRunId) {
+      void apiRequest<{ data?: Record<string, unknown>[] }>(`/api/v1/analysis-runs/${analysisRunId}/performance`)
+        .then((res) => { if (!cancelled) setPerformanceData((res.data || []) as Record<string, unknown>[]); })
+        .catch(console.error);
+    }
+
     return () => { cancelled = true; };
   }, [analysisRunId]);
 
@@ -324,6 +333,10 @@ export default function AnalysisReportPage() {
       </section>
 
       <section className="mt-6 rounded-2xl border bg-white p-6"><h2 className="text-xl font-bold">Findings</h2>{report.findings.length === 0 ? <p className="mt-3 text-slate-600">No verified findings.</p> : <ul className="mt-4 grid gap-4">{report.findings.map((finding) => <li className="rounded-xl border p-4" key={finding.id}><p className="text-xs font-bold uppercase">{finding.severity} · {finding.category} · {finding.source}</p><h3 className="mt-2 font-bold">{finding.title}</h3><p className="mt-1 text-sm text-slate-600">{finding.description}</p><dl className="mt-3 grid gap-2 text-sm"><div><dt className="text-slate-500">Finding code</dt><dd>{finding.finding_code}</dd></div><div><dt className="text-slate-500">Affected URL</dt><dd className="break-all">{finding.affected_url}</dd></div><div><dt className="text-slate-500">Evidence</dt><dd><HumanValue value={finding.evidence} /></dd></div><div><dt className="text-slate-500">Confidence</dt><dd>{finding.confidence_percent}%</dd></div></dl></li>)}</ul>}</section>
+
+      <div className="mt-8">
+        <PerformanceIntelligence data={performanceData as unknown as { id: string; metric_id: string; evidence_type: string; raw_value: number }[]} />
+      </div>
     </main>
   );
 }

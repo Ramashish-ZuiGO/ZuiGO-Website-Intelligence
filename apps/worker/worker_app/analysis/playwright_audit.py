@@ -316,6 +316,7 @@ def inspect_page(
                     meta_description: document.querySelector('meta[name="description"]')?.content || null,
                     canonical_url: document.querySelector('link[rel="canonical"]')?.href || null,
                     html_language: document.documentElement.lang || null,
+                    window_performance_timing: window.performance?.timing ? JSON.parse(JSON.stringify(window.performance.timing)) : null,
                     h1_texts: [...document.querySelectorAll('h1')].map((node) => node.textContent?.trim() || ''),
                     image_count: images.length,
                     images_missing_alt: images.filter((image) => !image.hasAttribute('alt') || !image.alt.trim()).length,

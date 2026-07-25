@@ -47,6 +47,10 @@ class Settings(BaseSettings):
             f"@{self.postgres_host}:{self.postgres_port}/{database}"
         )
 
+    # Performance Intelligence
+    crux_api_key: str | None = None
+    crux_timeout_seconds: float = 10.0
+
     @field_validator("backend_cors_origins", mode="before")
     @classmethod
     def parse_cors_origins(cls, value: Any) -> list[str]:

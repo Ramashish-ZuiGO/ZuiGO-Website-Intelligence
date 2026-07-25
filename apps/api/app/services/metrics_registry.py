@@ -1070,3 +1070,176 @@ def register_metric(metric: MetricDefinition) -> None:
     if metric.metric_id in METRICS_REGISTRY:
         raise ValueError(f"Metric {metric.metric_id} already registered.")
     METRICS_REGISTRY[metric.metric_id] = metric
+
+
+METRICS_REGISTRY.update(
+    {
+        "field_lcp": MetricDefinition(
+            metric_id="field_lcp",
+            label="Field LCP",
+            category=MetricCategoryEnum.PERFORMANCE,
+            description="Largest Contentful Paint measured in the field",
+            explanation=(
+                "Represents real-user experience at the 75th percentile, collected by the "
+                "Chrome User Experience Report (CrUX)."
+            ),
+            value_type=MetricValueTypeEnum.DURATION,
+            unit="ms",
+            display_scale=None,
+            min_value=0,
+            max_value=None,
+            higher_is_better=False,
+            evidence_source="CrUX real-user p75 evidence",
+            calculation_summary="CrUX p75 over the last 28 days.",
+            interpretation_guidance="Values under 2500ms are good. Evaluate alongside Lab LCP.",
+            known_limitations="Only available for public URLs with sufficient Chrome traffic.",
+            confidence_applicability="High confidence for real-world representation.",
+        ),
+        "field_inp": MetricDefinition(
+            metric_id="field_inp",
+            label="Field INP",
+            category=MetricCategoryEnum.PERFORMANCE,
+            description="Interaction to Next Paint measured in the field",
+            explanation=(
+                "Represents real-user interactivity responsiveness at the 75th percentile, "
+                "collected by CrUX."
+            ),
+            value_type=MetricValueTypeEnum.DURATION,
+            unit="ms",
+            display_scale=None,
+            min_value=0,
+            max_value=None,
+            higher_is_better=False,
+            evidence_source="CrUX real-user p75 evidence",
+            calculation_summary="CrUX p75 over the last 28 days.",
+            interpretation_guidance="Values under 200ms are good.",
+            known_limitations="Only available for public URLs with sufficient Chrome traffic.",
+            confidence_applicability="High confidence for real-world representation.",
+        ),
+        "field_cls": MetricDefinition(
+            metric_id="field_cls",
+            label="Field CLS",
+            category=MetricCategoryEnum.PERFORMANCE,
+            description="Cumulative Layout Shift measured in the field",
+            explanation=(
+                "Represents real-user visual stability at the 75th percentile, collected by CrUX."
+            ),
+            value_type=MetricValueTypeEnum.RATIO,
+            unit=None,
+            display_scale=None,
+            min_value=0,
+            max_value=None,
+            higher_is_better=False,
+            evidence_source="CrUX real-user p75 evidence",
+            calculation_summary="CrUX p75 over the last 28 days.",
+            interpretation_guidance="Values under 0.1 are good.",
+            known_limitations="Only available for public URLs with sufficient Chrome traffic.",
+            confidence_applicability="High confidence for real-world representation.",
+        ),
+        "lab_fcp": MetricDefinition(
+            metric_id="lab_fcp",
+            label="Lab FCP",
+            category=MetricCategoryEnum.PERFORMANCE,
+            description="First Contentful Paint measured in a controlled lab environment",
+            explanation=(
+                "Simulated load time collected via Lighthouse, representing a single specific "
+                "test condition."
+            ),
+            value_type=MetricValueTypeEnum.DURATION,
+            unit="ms",
+            display_scale=None,
+            min_value=0,
+            max_value=None,
+            higher_is_better=False,
+            evidence_source="Lighthouse controlled test evidence",
+            calculation_summary="Lighthouse simulated measurement.",
+            interpretation_guidance="Use to debug issues detected in Field data.",
+            known_limitations="Does not capture real-world network variability.",
+            confidence_applicability="Highly reproducible for diagnostic purposes.",
+        ),
+        "lab_lcp": MetricDefinition(
+            metric_id="lab_lcp",
+            label="Lab LCP",
+            category=MetricCategoryEnum.PERFORMANCE,
+            description="Largest Contentful Paint measured in a controlled lab environment",
+            explanation=(
+                "Simulated load time collected via Lighthouse, representing a single specific "
+                "test condition."
+            ),
+            value_type=MetricValueTypeEnum.DURATION,
+            unit="ms",
+            display_scale=None,
+            min_value=0,
+            max_value=None,
+            higher_is_better=False,
+            evidence_source="Lighthouse controlled test evidence",
+            calculation_summary="Lighthouse simulated measurement.",
+            interpretation_guidance="Use to debug issues detected in Field data.",
+            known_limitations="Does not capture real-world network variability.",
+            confidence_applicability="Highly reproducible for diagnostic purposes.",
+        ),
+        "lab_cls": MetricDefinition(
+            metric_id="lab_cls",
+            label="Lab CLS",
+            category=MetricCategoryEnum.PERFORMANCE,
+            description="Cumulative Layout Shift measured in a controlled lab environment",
+            explanation=(
+                "Simulated visual stability collected via Lighthouse, representing a single "
+                "specific test condition."
+            ),
+            value_type=MetricValueTypeEnum.RATIO,
+            unit=None,
+            display_scale=None,
+            min_value=0,
+            max_value=None,
+            higher_is_better=False,
+            evidence_source="Lighthouse controlled test evidence",
+            calculation_summary="Lighthouse simulated measurement.",
+            interpretation_guidance="Use to debug issues detected in Field data.",
+            known_limitations="Does not capture real-world network variability.",
+            confidence_applicability="Highly reproducible for diagnostic purposes.",
+        ),
+        "lab_tbt": MetricDefinition(
+            metric_id="lab_tbt",
+            label="Lab TBT",
+            category=MetricCategoryEnum.PERFORMANCE,
+            description="Total Blocking Time measured in a controlled lab environment",
+            explanation=(
+                "Lighthouse Total Blocking Time. Note: TBT is a lab diagnostic metric and is "
+                "NOT equivalent to Field INP, though they correlate."
+            ),
+            value_type=MetricValueTypeEnum.DURATION,
+            unit="ms",
+            display_scale=None,
+            min_value=0,
+            max_value=None,
+            higher_is_better=False,
+            evidence_source="Lighthouse controlled test evidence",
+            calculation_summary="Lighthouse simulated measurement.",
+            interpretation_guidance="Use to debug main-thread blocking detected in Field data.",
+            known_limitations="Does not capture real-world network variability.",
+            confidence_applicability="Highly reproducible for diagnostic purposes.",
+        ),
+        "lab_speed_index": MetricDefinition(
+            metric_id="lab_speed_index",
+            label="Lab Speed Index",
+            category=MetricCategoryEnum.PERFORMANCE,
+            description="Speed Index measured in a controlled lab environment",
+            explanation=(
+                "Simulated visual progression collected via Lighthouse, representing a single "
+                "specific test condition."
+            ),
+            value_type=MetricValueTypeEnum.DURATION,
+            unit="ms",
+            display_scale=None,
+            min_value=0,
+            max_value=None,
+            higher_is_better=False,
+            evidence_source="Lighthouse controlled test evidence",
+            calculation_summary="Lighthouse simulated measurement.",
+            interpretation_guidance="Use to debug issues detected in Field data.",
+            known_limitations="Does not capture real-world network variability.",
+            confidence_applicability="Highly reproducible for diagnostic purposes.",
+        ),
+    }
+)

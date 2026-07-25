@@ -5,6 +5,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiRequest } from "@/lib/api";
 import type { AnalysisResults, AnalysisRun } from "@/lib/types";
 
+import { MetricInfoButton } from "@/components/metrics/MetricInfoButton";
+import { ScoreValue } from "@/components/metrics/ScoreValue";
+
 interface WebsiteAnalysisPanelProps {
   websiteId: string;
 }
@@ -139,8 +142,9 @@ export function WebsiteAnalysisPanel({ websiteId }: WebsiteAnalysisPanelProps) {
             <p className="mt-1 text-sm text-red-700">{latestRun.error_message}</p>
           )}
           {latestRun?.result_summary?.overall_score != null && (
-            <p className="mt-1 text-lg font-bold text-slate-950">
-              Overall score: {latestRun.result_summary.overall_score}
+            <p className="mt-1 text-lg font-bold text-slate-950 flex items-center gap-2">
+              Overall score: <ScoreValue metricId="overall_score" value={latestRun.result_summary.overall_score} />
+              <MetricInfoButton metricId="overall_score" />
             </p>
           )}
         </div>
@@ -174,8 +178,8 @@ export function WebsiteAnalysisPanel({ websiteId }: WebsiteAnalysisPanelProps) {
             <div><dt className="text-slate-500">HTTP status</dt><dd className="font-medium">{results.result.http_status_code ?? "Unavailable"}</dd></div>
             <div><dt className="text-slate-500">Page title</dt><dd className="font-medium">{results.result.page_title || "Missing"}</dd></div>
             {(["performance_score", "accessibility_score", "best_practices_score", "seo_score"] as const).map((key) => {
-              const value = results.lighthouse_metrics[key];
-              return <div key={key}><dt className="capitalize text-slate-500">{key.replaceAll("_", " ")}</dt><dd className="font-medium">{typeof value === "number" || typeof value === "string" ? value : "Unavailable"}</dd></div>;
+              const value = results.lighthouse_metrics[key] as number | undefined;
+              return <div key={key}><dt className="capitalize text-slate-500 flex items-center gap-1">{key.replaceAll("_", " ")} <MetricInfoButton metricId={key} /></dt><dd className="font-medium"><ScoreValue metricId={key} value={value ?? null} /></dd></div>;
             })}
             <div><dt className="text-slate-500">Total findings</dt><dd className="font-medium">{results.findings.length}</dd></div>
           </dl>

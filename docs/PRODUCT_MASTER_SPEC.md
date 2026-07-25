@@ -2559,3 +2559,23 @@ The final report must progressively include:
 - Never claim 100% coverage when configured limits prevented full analysis.
 - Do not change Overall Score Formula v1.0.0 without an explicitly approved,
   documented and versioned decision.
+
+### 13. METRIC PRESENTATION AND REGISTRY
+
+To ensure transparent and consistent scoring, a Metric Registry governs metric presentation.
+Registry Version: 1.0.0
+Exact Metric Count: 53
+
+API Endpoints:
+- GET /api/v1/metadata/metrics
+- GET /api/v1/metadata/metrics/{metric_id}
+
+Conventions:
+- Unique metric IDs (e.g. overall_score, nalysis_coverage_percent).
+- Supported Value Types: score, percentage, count, duration, 	ext.
+- Score vs Percentage: score formats as x/100 and NEVER as a percentage. percentage formats with % and NEVER as x/100.
+- Confidence is always separated from the score.
+- Unavailable, partial, or failed values must be clearly identified and must not be silently treated as successful data.
+
+Frontend UI uses shared, interactive components (e.g., AccessibleExplanation, ScoreValue) replacing legacy static text or hover-only information icons. Explanations must be fully accessible (e.g., focusable, accessible via Enter/Space/Escape, not dependent solely on hover).
+Limitations: Currently, screen reader users may require manual testing to confirm ria-label propagation in complex metric tables.

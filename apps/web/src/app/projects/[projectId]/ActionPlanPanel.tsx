@@ -13,6 +13,10 @@ import type {
   RepositoryConnection,
 } from "@/lib/types";
 
+import { AccessibleExplanation } from "@/components/metrics/AccessibleExplanation";
+import { MetricInfoButton } from "@/components/metrics/MetricInfoButton";
+import { ScoreValue } from "@/components/metrics/ScoreValue";
+
 interface ActionPlanPanelProps {
   websiteId: string;
   projectId?: string;
@@ -50,44 +54,12 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-function InfoButton({ label, explanation }: { label: string; explanation: string }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <span className="relative inline-flex items-center">
-      <button
-        aria-label={`Info about ${label}`}
-        className="ml-1 inline-flex size-5 cursor-help items-center justify-center rounded-full border text-xs hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-400"
-        onClick={() => setOpen(!open)}
-        onKeyDown={(e) => { if (e.key === "Escape") setOpen(false); }}
-        type="button"
-      >
-        i
-      </button>
-      {open && (
-        <div
-          className="absolute bottom-full left-1/2 z-10 mb-2 w-72 -translate-x-1/2 rounded-lg border bg-white p-3 text-xs shadow-lg"
-          role="tooltip"
-        >
-          <p>{explanation}</p>
-          <button
-            className="mt-2 text-blue-600 underline"
-            onClick={() => setOpen(false)}
-            type="button"
-          >
-            Close
-          </button>
-        </div>
-      )}
-    </span>
-  );
-}
-
 function SummaryCard({ label, value, explanation }: { label: string; value: string | number; explanation?: string }) {
   return (
     <div className="rounded-xl border bg-white p-4">
-      <p className="text-xs text-slate-500">
+      <p className="text-xs text-slate-500 flex items-center justify-between">
         {label}
-        {explanation && <InfoButton label={label} explanation={explanation} />}
+        {explanation && <AccessibleExplanation title={label} explanation={explanation} />}
       </p>
       <p className="mt-1 text-2xl font-bold">{value}</p>
     </div>
@@ -101,7 +73,7 @@ function PriorityBar({ score }: { score: number }) {
       <div className="h-2 w-16 overflow-hidden rounded-full bg-slate-200">
         <div className={`h-full ${barColor}`} style={{ width: `${score}%` }} />
       </div>
-      <span className="text-sm font-bold">{score}/100</span>
+      <ScoreValue metricId="priority_score" value={score} className="text-sm font-bold" />
     </div>
   );
 }
@@ -404,10 +376,10 @@ export function ActionPlanPanel({ websiteId, projectId }: ActionPlanPanelProps) 
               <table className="w-full min-w-[700px] text-left text-xs">
                 <thead>
                   <tr className="border-b">
-                    <th className="p-2">Issue</th>
+                    <th className="p-2 flex items-center gap-1">Issue <AccessibleExplanation title="Action Grouping" explanation="Action items are grouped by their issue title, category, and exact correction so they can be addressed together across multiple pages." /></th>
                     <th>Category</th>
                     <th>Severity</th>
-                    <th>Priority</th>
+                    <th className="flex items-center gap-1">Priority <MetricInfoButton metricId="priority_score" /></th>
                     <th>Pages</th>
                     <th>Area</th>
                     <th>Role</th>
@@ -625,7 +597,7 @@ export function ActionPlanPanel({ websiteId, projectId }: ActionPlanPanelProps) 
                 </div>
                 {matchResults.length > 0 && (
                   <div className="sm:col-span-2">
-                    <dt className="text-slate-500">Repository Match</dt>
+                    <dt className="text-slate-500 flex items-center gap-1">Repository Match <MetricInfoButton metricId="repository_match_confidence" /></dt>
                     <dd className="mt-1 space-y-2">
                       {matchResultsLoading && <p className="text-xs text-slate-500">Loading matches…</p>}
                       {!matchResultsLoading && matchResults.filter(m => m.is_primary).map(match => (

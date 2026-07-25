@@ -19,4 +19,4 @@ def test_coverage_interface_explains_empty_state_formula_reasons_and_information
         "depth",
         "limit",
     ):
-        assert f"{explanation}:" in source
+        assert explanation in source

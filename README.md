@@ -463,3 +463,16 @@ docker compose exec worker celery --app worker_app.celery_app:celery_app inspect
 - `scripts`: future development and operations scripts
 - `tests/api`: FastAPI settings, health, and CORS tests
 - `tests/worker`: Celery task tests
+
+## Metric Registry
+
+A centralized Metric Registry API (/api/v1/metadata/metrics) provides consistent definitions and presentation rules for all scoring and coverage metrics.
+
+
+### Metric Registry Version: 1.0.0
+Exact Metric Count: 53
+Supported Value Types: score, percentage, count, duration, bytes, ratio, boolean, status, text, unavailable.
+Endpoints: GET /api/v1/metadata/metrics, GET /api/v1/metadata/metrics/{metric_id}
+Score/Percentage distinction: Scores are x/100, Percentages are %.
+Accessibility: Components are fully accessible (focus, Enter/Space/Escape) without relying solely on hover.
+Limitations: Screen-reader users may require manual tests for complex aria-label tables.

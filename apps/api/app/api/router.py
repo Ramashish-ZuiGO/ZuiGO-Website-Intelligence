@@ -5,6 +5,7 @@ from app.api.routes import (
     analysis_runs_router,
     discovery_router,
     health_router,
+    metadata_router,
     page_analysis_router,
     projects_router,
     repository_router,
@@ -20,4 +21,5 @@ v1_router.include_router(discovery_router)
 v1_router.include_router(page_analysis_router)
 v1_router.include_router(projects_router)
 v1_router.include_router(repository_router)
+v1_router.include_router(metadata_router)
 api_router.include_router(v1_router)

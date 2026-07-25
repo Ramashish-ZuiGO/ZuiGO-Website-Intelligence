@@ -10,6 +10,11 @@ import type {
   SiteCoverageDetail,
 } from "@/lib/types";
 
+import { AccessibleExplanation } from "@/components/metrics/AccessibleExplanation";
+import { MetricInfoButton } from "@/components/metrics/MetricInfoButton";
+import { ScoreValue } from "@/components/metrics/ScoreValue";
+import { PercentageValue } from "@/components/metrics/PercentageValue";
+
 interface PageAnalysisPanelProps {
   websiteId: string;
 }
@@ -23,37 +28,7 @@ const explanations: Record<string, string> = {
   skipped: "Pages that were intentionally skipped based on configured rules (e.g., unsupported content type, blocked by robots, page limit reached).",
 };
 
-function InfoIcon({ kind, explanation }: { kind: string; explanation: string }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <span className="relative inline-flex items-center">
-      <button
-        aria-label={`Info about ${kind}`}
-        className="ml-1 inline-flex size-5 cursor-help items-center justify-center rounded-full border text-xs hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-400"
-        onClick={() => setOpen(!open)}
-        onKeyDown={(e) => { if (e.key === "Escape") setOpen(false); }}
-        type="button"
-      >
-        i
-      </button>
-      {open && (
-        <div
-          className="absolute bottom-full left-1/2 z-10 mb-2 w-72 -translate-x-1/2 rounded-lg border bg-white p-3 text-xs shadow-lg"
-          role="tooltip"
-        >
-          <p>{explanation}</p>
-          <button
-            className="mt-2 text-blue-600 underline"
-            onClick={() => setOpen(false)}
-            type="button"
-          >
-            Close
-          </button>
-        </div>
-      )}
-    </span>
-  );
-}
+
 
 function AnalysisLevelBadge({ level }: { level: number }) {
   return (
@@ -85,12 +60,7 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-function ScoreDisplay({ score, confidence }: { score: number | null; confidence: string }) {
-  if (score === null) {
-    return <span className="text-slate-400">—/100</span>;
-  }
-  return <span className="font-bold">{score}/100 <span className="text-xs font-normal text-slate-500">({confidence})</span></span>;
-}
+
 
 export function PageAnalysisPanel({ websiteId }: PageAnalysisPanelProps) {
   const [summary, setSummary] = useState<PageAnalysisSummary | null>(null);
@@ -194,12 +164,12 @@ export function PageAnalysisPanel({ websiteId }: PageAnalysisPanelProps) {
           {activeTab === "coverage" && detail && (
             <div className="mt-4 grid gap-4">
               <div className="rounded-xl border bg-white p-4">
-                <h4 className="font-semibold">
+                <h4 className="font-semibold flex items-center gap-1">
                   Coverage
-                  <InfoIcon kind="coverage" explanation={explanations.coverage} />
+                  <MetricInfoButton metricId="analysis_coverage_percent" />
                 </h4>
                 <p className="mt-1 text-3xl font-bold">
-                  {detail.coverage_percent === null ? "—" : `${detail.coverage_percent}%`}
+                  <PercentageValue metricId="analysis_coverage_percent" value={detail.coverage_percent} />
                 </p>
                 <p className="text-sm text-slate-500">
                   {detail.level_1_attempted} of {detail.eligible_page_count} eligible pages
@@ -207,26 +177,26 @@ export function PageAnalysisPanel({ websiteId }: PageAnalysisPanelProps) {
               </div>
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 <div className="rounded-lg border bg-white p-3">
-                  <p className="text-xs text-slate-500">Discovered <InfoIcon kind="selected" explanation={explanations.l1} /></p>
+                  <p className="text-xs text-slate-500 flex items-center justify-between">Discovered <MetricInfoButton metricId="discovered_pages" /></p>
                   <p className="text-xl font-bold">{detail.discovered_page_count}</p>
                 </div>
                 <div className="rounded-lg border bg-white p-3">
-                  <p className="text-xs text-slate-500">Eligible</p>
+                  <p className="text-xs text-slate-500 flex items-center justify-between">Eligible <MetricInfoButton metricId="eligible_pages" /></p>
                   <p className="text-xl font-bold">{detail.eligible_page_count}</p>
                 </div>
                 <div className="rounded-lg border bg-white p-3">
-                  <p className="text-xs text-slate-500">Selected</p>
+                  <p className="text-xs text-slate-500 flex items-center justify-between">Selected <AccessibleExplanation title="Selected" explanation={explanations.selected} /></p>
                   <p className="text-xl font-bold">{detail.selected_page_count}</p>
                 </div>
                 <div className="rounded-lg border bg-white p-3">
-                  <p className="text-xs text-slate-500">Clean pass</p>
-                  <p className="text-xl font-bold">{detail.clean_pass_percent === null ? "—" : `${detail.clean_pass_percent}%`}</p>
+                  <p className="text-xs text-slate-500 flex items-center justify-between">Clean pass <MetricInfoButton metricId="clean_pass_percent" /></p>
+                  <p className="text-xl font-bold"><PercentageValue metricId="clean_pass_percent" value={detail.clean_pass_percent} /></p>
                 </div>
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="rounded-lg border bg-white p-3">
-                  <p className="text-xs font-semibold text-slate-500">
-                    Level 1 (Lightweight) <InfoIcon kind="l1" explanation={explanations.l1} />
+                  <p className="text-xs font-semibold text-slate-500 flex items-center gap-1">
+                    Level 1 (Lightweight) <AccessibleExplanation title="Level 1 Analysis" explanation={explanations.l1} />
                   </p>
                   <dl className="mt-2 grid grid-cols-2 gap-2 text-sm">
                     <div><dt className="text-slate-400">Attempted</dt><dd className="font-semibold">{detail.level_1_attempted}</dd></div>
@@ -236,8 +206,8 @@ export function PageAnalysisPanel({ websiteId }: PageAnalysisPanelProps) {
                   </dl>
                 </div>
                 <div className="rounded-lg border bg-white p-3">
-                  <p className="text-xs font-semibold text-slate-500">
-                    Level 2 (Deep) <InfoIcon kind="l2" explanation={explanations.l2} />
+                  <p className="text-xs font-semibold text-slate-500 flex items-center gap-1">
+                    Level 2 (Deep) <AccessibleExplanation title="Level 2 Analysis" explanation={explanations.l2} />
                   </p>
                   <dl className="mt-2 grid grid-cols-2 gap-2 text-sm">
                     <div><dt className="text-slate-400">Attempted</dt><dd className="font-semibold">{detail.level_2_attempted}</dd></div>
@@ -277,7 +247,7 @@ export function PageAnalysisPanel({ websiteId }: PageAnalysisPanelProps) {
                         <th>Title</th>
                         <th>Level</th>
                         <th>Status</th>
-                        <th>Score</th>
+                        <th>Score <MetricInfoButton metricId="page_score" /></th>
                       </tr>
                     </thead>
                     <tbody>
@@ -289,7 +259,10 @@ export function PageAnalysisPanel({ websiteId }: PageAnalysisPanelProps) {
                           <td><StatusBadge status={item.analysis_status} /></td>
                           <td>
                             {item.score_available ? (
-                              <ScoreDisplay score={item.score} confidence={item.confidence} />
+                              <div className="flex items-baseline gap-1">
+                                <span className="font-bold"><ScoreValue metricId="page_score" value={item.score} /></span>
+                                <span className="text-xs font-normal text-slate-500">({item.confidence})</span>
+                              </div>
                             ) : (
                               <span className="text-slate-400">—/100</span>
                             )}

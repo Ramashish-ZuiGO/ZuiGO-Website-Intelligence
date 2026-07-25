@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 
 import { apiRequest } from "@/lib/api";
 import type { AnalysisReport, DiagnosticGroup } from "@/lib/types";
+import { ScoreValue } from "@/components/metrics/ScoreValue";
 
 function display(value: unknown): string {
   if (value === null || value === undefined || value === "") return "Not available";
@@ -239,8 +240,9 @@ export default function AnalysisReportPage() {
       )}
 
       <section className="mt-6 grid gap-4 md:grid-cols-3">
-        <div className="rounded-2xl border bg-white p-6"><p className="text-sm text-slate-500">Overall score</p><p className="mt-2 text-6xl font-bold">{display(report.score.overall_score)}</p><p className="mt-3 text-sm">Confidence: {report.score.confidence_percent}%</p><p className="text-sm">Formula: {report.score.formula_version}</p></div>
-        <div className="grid gap-3 sm:grid-cols-2 md:col-span-2">{Object.entries(categoryScores).map(([name, score]) => <div className="rounded-xl border bg-white p-4" key={name}><p className="text-sm text-slate-500">{name}</p><p className="mt-1 text-3xl font-bold">{display(score)}</p></div>)}</div>
+        <div className="rounded-2xl border bg-white p-6"><p className="text-sm text-slate-500">Overall score</p><p className="mt-2 text-6xl font-bold"><ScoreValue metricId="overall_score" value={report.score.overall_score} /></p><p className="mt-3 text-sm">Confidence: {report.score.confidence_percent}%</p><p className="text-sm">Formula: {report.score.formula_version}</p></div>
+
+        <div className="grid gap-3 sm:grid-cols-2 md:col-span-2">{Object.entries(categoryScores).map(([name, score]) => <div className="rounded-xl border bg-white p-4" key={name}><p className="text-sm text-slate-500">{name}</p><p className="mt-1 text-3xl font-bold"><ScoreValue metricId={name.toLowerCase().replace(" ", "_") + "_score"} value={score} /></p></div>)}</div>
       </section>
 
       <section className="mt-6 rounded-2xl border bg-white p-6">

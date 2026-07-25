@@ -9,18 +9,19 @@ import type {
   WebsitePageList,
 } from "@/lib/types";
 
+import { MetricInfoButton } from "@/components/metrics/MetricInfoButton";
+import { MetricValue } from "@/components/metrics/MetricValue";
+import { PercentageValue } from "@/components/metrics/PercentageValue";
+
 const explanations: Record<string, string> = {
-  discovered: "Every URL observation before normalization. Repeated links can appear more than once.",
-  eligible: "Unique in-scope HTTP pages not blocked by robots or safety exclusions. External, destructive, and disallowed pages are excluded.",
-  coverage: "Eligible pages with a completed, partial, or failed analysis attempt divided by all eligible pages. This is coverage, not a quality score.",
+  unique: "Unique in-scope HTTP pages not blocked by robots or safety exclusions. External, destructive, and disallowed pages are excluded.",
   excluded: "Pages outside scope, blocked by robots, or matching state-changing safety patterns.",
-  skipped: "In-scope candidates not fetched as HTML because of an optional fetch failure, response type, or HTTP response.",
   robots: "Whether the applicable ZuiGO-Discovery robots policy allowed the URL. Unknown means permissions could not be established.",
   depth: "Number of internal-link steps from the submitted homepage. Sitemap URLs begin at depth zero.",
   limit: "Whether any configured URL, sitemap, HTML-page, link, depth, response-size, redirect, or deadline boundary stopped further discovery.",
 };
 
-function Info({ kind }: { kind: keyof typeof explanations }) {
+function LegacyInfo({ kind }: { kind: keyof typeof explanations }) {
   return (
     <span
       aria-label={explanations[kind]}
@@ -83,9 +84,6 @@ export function WebsiteCoveragePanel({ websiteId }: { websiteId: string }) {
     }
   }
 
-  const analyzedLabel = coverage
-    ? `${coverage.analyzed_coverage_numerator}/${coverage.analyzed_coverage_denominator} pages — ${coverage.analyzed_coverage_percent === null ? "Unavailable" : `${coverage.analyzed_coverage_percent}%`}`
-    : "Not available";
 
   return (
     <section className="mt-5 border-t pt-5">
@@ -101,18 +99,23 @@ export function WebsiteCoveragePanel({ websiteId }: { websiteId: string }) {
       ) : (
         <>
           <dl className="mt-4 grid gap-2 text-sm sm:grid-cols-3">
-            <div><dt className="text-slate-500">Pages Discovered <Info kind="discovered" /></dt><dd className="font-semibold">{coverage.discovered_urls}</dd></div>
-            <div><dt className="text-slate-500">Unique</dt><dd className="font-semibold">{coverage.unique_pages}</dd></div>
-            <div><dt className="text-slate-500">Eligible Pages <Info kind="eligible" /></dt><dd className="font-semibold">{coverage.eligible_pages}</dd></div>
-            <div className="sm:col-span-2"><dt className="text-slate-500">Analyzed Coverage <Info kind="coverage" /></dt><dd className="font-semibold">{analyzedLabel}</dd></div>
+            <div><dt className="text-slate-500 flex items-center gap-1">Pages Discovered <MetricInfoButton metricId="discovered_pages" /></dt><dd className="font-semibold"><MetricValue metricId="discovered_pages" value={coverage.discovered_urls} /></dd></div>
+            <div><dt className="text-slate-500 flex items-center gap-1">Unique <LegacyInfo kind="unique" /></dt><dd className="font-semibold">{coverage.unique_pages}</dd></div>
+            <div><dt className="text-slate-500 flex items-center gap-1">Eligible Pages <MetricInfoButton metricId="eligible_pages" /></dt><dd className="font-semibold"><MetricValue metricId="eligible_pages" value={coverage.eligible_pages} /></dd></div>
+            <div className="sm:col-span-2"><dt className="text-slate-500 flex items-center gap-1">Analyzed Coverage <MetricInfoButton metricId="analysis_coverage_percent" /></dt>
+              <dd className="font-semibold">
+                {coverage.analyzed_coverage_numerator}/{coverage.analyzed_coverage_denominator} pages —{" "}
+                <PercentageValue metricId="analysis_coverage_percent" value={coverage.analyzed_coverage_percent} />
+              </dd>
+            </div>
             <div><dt className="text-slate-500">Pending</dt><dd>{coverage.pending_analyses}</dd></div>
-            <div><dt className="text-slate-500">Completed</dt><dd>{coverage.completed_analyses}</dd></div>
+            <div><dt className="text-slate-500 flex items-center gap-1">Completed <MetricInfoButton metricId="analyzed_pages" /></dt><dd><MetricValue metricId="analyzed_pages" value={coverage.completed_analyses} /></dd></div>
             <div><dt className="text-slate-500">Partial</dt><dd>{coverage.partial_analyses}</dd></div>
-            <div><dt className="text-slate-500">Failed</dt><dd>{coverage.failed_analyses}</dd></div>
-            <div><dt className="text-slate-500">Excluded Pages <Info kind="excluded" /></dt><dd>{coverage.excluded_pages}</dd></div>
-            <div><dt className="text-slate-500">Skipped Pages <Info kind="skipped" /></dt><dd>{coverage.skipped_pages}</dd></div>
-            <div><dt className="text-slate-500">Robots-disallowed <Info kind="robots" /></dt><dd>{coverage.robots_disallowed_pages}</dd></div>
-            <div><dt className="text-slate-500">Crawl limit <Info kind="limit" /></dt><dd>{coverage.crawl_limit_reached ? "Yes" : "No"}</dd></div>
+            <div><dt className="text-slate-500 flex items-center gap-1">Failed <MetricInfoButton metricId="failed_pages" /></dt><dd><MetricValue metricId="failed_pages" value={coverage.failed_analyses} /></dd></div>
+            <div><dt className="text-slate-500 flex items-center gap-1">Excluded Pages <LegacyInfo kind="excluded" /></dt><dd>{coverage.excluded_pages}</dd></div>
+            <div><dt className="text-slate-500 flex items-center gap-1">Skipped Pages <MetricInfoButton metricId="skipped_pages" /></dt><dd><MetricValue metricId="skipped_pages" value={coverage.skipped_pages} /></dd></div>
+            <div><dt className="text-slate-500 flex items-center gap-1">Robots-disallowed <LegacyInfo kind="robots" /></dt><dd>{coverage.robots_disallowed_pages}</dd></div>
+            <div><dt className="text-slate-500 flex items-center gap-1">Crawl limit <LegacyInfo kind="limit" /></dt><dd>{coverage.crawl_limit_reached ? "Yes" : "No"}</dd></div>
           </dl>
           <div className="mt-5 flex flex-wrap gap-2">
             <input aria-label="Search page URLs" className="rounded border px-3 py-1.5 text-sm" onChange={(event) => { setPage(1); setSearch(event.target.value); }} placeholder="Search URL or title" value={search} />
@@ -123,7 +126,7 @@ export function WebsiteCoveragePanel({ websiteId }: { websiteId: string }) {
           {pages?.items.length ? (
             <div className="mt-3 overflow-x-auto">
               <table className="w-full min-w-[900px] text-left text-xs">
-                <thead><tr className="border-b"><th className="p-2">Page URL</th><th>Title</th><th>Type</th><th>Source</th><th>Depth <Info kind="depth" /></th><th>Eligibility</th><th>Robots <Info kind="robots" /></th><th>Analysis</th><th>Reason</th><th>Action</th></tr></thead>
+                <thead><tr className="border-b"><th className="p-2">Page URL</th><th>Title</th><th>Type</th><th>Source</th><th>Depth <LegacyInfo kind="depth" /></th><th>Eligibility</th><th>Robots <LegacyInfo kind="robots" /></th><th>Analysis</th><th>Reason</th><th>Action</th></tr></thead>
                 <tbody>{pages.items.map((item) => <tr className="border-b align-top" key={item.id}><td className="max-w-64 break-all p-2">{item.normalized_url}</td><td>{item.page_title || "—"}</td><td>{item.page_type.replaceAll("_", " ")}</td><td>{item.discovery_source.replaceAll("_", " ")}</td><td>{item.crawl_depth}</td><td>{item.eligibility_status}</td><td>{item.robots_status}</td><td>{item.latest_analysis_status}</td><td>{item.exclusion_reason || item.skip_reason || "—"}</td><td><a className="underline" href={item.normalized_url} rel="noreferrer" target="_blank">View page</a></td></tr>)}</tbody>
               </table>
             </div>

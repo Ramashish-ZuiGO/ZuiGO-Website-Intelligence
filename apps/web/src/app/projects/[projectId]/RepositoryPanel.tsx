@@ -10,6 +10,9 @@ import type {
   RepositoryScanExecution,
 } from "@/lib/types";
 
+import { AccessibleExplanation } from "@/components/metrics/AccessibleExplanation";
+import { ConfidenceBadge } from "@/components/metrics/ConfidenceBadge";
+
 interface RepositoryPanelProps {
   projectId: string;
 }
@@ -33,18 +36,6 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-function ConfidenceBadge({ confidence }: { confidence: string }) {
-  const colors: Record<string, string> = {
-    high: "bg-emerald-100 text-emerald-800",
-    medium: "bg-amber-100 text-amber-800",
-    low: "bg-red-100 text-red-800",
-  };
-  return (
-    <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-bold ${colors[confidence] ?? "bg-slate-100 text-slate-600"}`}>
-      {confidence}
-    </span>
-  );
-}
 
 const PROVIDER_OPTIONS = [
   { value: "local", label: "Local" },
@@ -539,7 +530,10 @@ export function RepositoryPanel({ projectId }: RepositoryPanelProps) {
       {connection && (
         <div className="mt-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <h4 className="font-semibold">Repository Scan</h4>
+            <h4 className="font-semibold flex items-center gap-1">
+              Repository Scan
+              <AccessibleExplanation title="Repository Scan Coverage" explanation="Percentage of eligible source files scanned successfully. Excludes media files and ignored directories." />
+            </h4>
             <button
               aria-label={isScanRunning ? "Scan in progress" : "Start repository scan"}
               className="rounded-lg border bg-slate-950 px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50"
@@ -637,7 +631,10 @@ export function RepositoryPanel({ projectId }: RepositoryPanelProps) {
 
       {connection && (
         <div className="mt-6">
-          <h4 className="font-semibold">Repository-Aware Remediation</h4>
+          <h4 className="font-semibold flex items-center gap-1">
+            Repository-Aware Remediation
+            <AccessibleExplanation title="Repository Match Confidence" explanation="The confidence that an action item is correctly mapped to a specific repository file, based on finding evidence overlapping with file AST/Regex matching." />
+          </h4>
           <p className="mt-1 text-xs text-slate-500">
             View match results between action items and repository source files.
           </p>

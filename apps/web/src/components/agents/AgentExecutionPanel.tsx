@@ -1189,6 +1189,14 @@ export function AgentExecutionPanel({
                     ))}
                   </ul>
                 )}
+                {websiteId && (
+                  <a
+                    className="mt-3 inline-block font-semibold underline focus-visible:outline-2 focus-visible:outline-offset-2"
+                    href={`#report-delivery-${websiteId}`}
+                  >
+                    Open immutable report history and exports
+                  </a>
+                )}
               </div>
             </div>
           </section>

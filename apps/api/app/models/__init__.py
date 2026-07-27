@@ -32,6 +32,12 @@ from app.models.discovery_run import DiscoveryRun, DiscoveryStatus
 from app.models.page_analysis_run import PageAnalysisRun, PageAnalysisStatus
 from app.models.performance import PerformanceSnapshot
 from app.models.project import Project
+from app.models.report_delivery import (
+    ReportArtifact,
+    ReportExecution,
+    ReportSection,
+    ReportSnapshot,
+)
 from app.models.repository import (
     ActionMatchingExecution,
     ActionRepositoryMatch,
@@ -110,6 +116,10 @@ __all__ = [
     "RepositoryFileIndex",
     "RepositoryProvider",
     "RepositoryScanExecution",
+    "ReportArtifact",
+    "ReportExecution",
+    "ReportSection",
+    "ReportSnapshot",
     "ScanStatus",
     "SiteDiagnosticExecution",
     "SiteDiagnosticExecutionStatusEnum",

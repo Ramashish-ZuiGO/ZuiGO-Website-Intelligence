@@ -133,3 +133,31 @@ Validation stage after prerequisite analysis branches, stores a score-execution
 reference for downstream remediation/report agents, and is prohibited from using
 LLM output. Report and remediation results may reference contributions, never
 override them. The eight agent IDs and three workflow DAGs remain unchanged.
+
+## Report delivery integration
+
+The unified analysis-start endpoint composes existing behavior: the existing
+single-page evidence task runs first, then the existing
+`full_website_analysis@1.0.0` execution consumes its retained evidence. The
+database owns both UUIDs and the project/workflow/idempotency-key boundary;
+Celery receives deterministic task IDs. Repeated requests do not dispatch twice,
+while a new key preserves a new history.
+
+`report_agent@1.0.0` remains the only reporting domain agent. Its
+`report_generation@1.0.0` tool materializes `ReportExecution`,
+`ReportSnapshot`, ordered `ReportSection`, and `ReportArtifact` records from
+persisted analysis, score, diagnostics, Action Plan, and agent evidence. It does
+not calculate metrics or scores. Optional approved-LLM output may provide only
+grounded narrative; provider unavailability selects the versioned deterministic
+fallback without changing section facts.
+
+Report generation is permitted from a terminal workflow through the public API.
+The report tool may snapshot the report-agent stage while its containing
+execution is active; that snapshot accurately retains the then-current workflow
+state and unavailable sections. A later explicit report uses a new idempotency
+key and creates independent immutable history rather than rewriting it.
+
+The progress projection exposes only persisted statuses, stage order, agent
+attempts, coverage, checkpoints, unavailable tools/providers, timestamps, and
+redacted error summaries. It excludes prompts, credentials, private reasoning,
+and raw secret-bearing tool payloads.

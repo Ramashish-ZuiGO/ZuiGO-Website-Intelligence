@@ -20,7 +20,6 @@ from app.models import (
     AnalysisResult,
     DiscoveryRun,
     PerformanceSnapshot,
-    ScoreExecution,
     SiteDiagnosticExecution,
 )
 from app.schemas.agent_platform import (
@@ -35,6 +34,7 @@ from app.schemas.agent_platform import (
 )
 from app.services.action_generation import generate_actions
 from app.services.agent_platform_registry import AgentRegistry, SchemaRegistry, ToolRegistry
+from app.services.report_delivery import ReportDeliveryError, generate_report
 from app.services.repository.git_scanner import RepositoryScannerService
 from app.services.scoring_intelligence import (
     ScoringIntelligenceError,
@@ -757,14 +757,23 @@ def _report(context: ToolContext, _input: BaseModel) -> ToolResult:
             },
             evidence_references=context.dependency_evidence,
         )
-    result = context.db.scalar(
-        select(AnalysisResult).where(AnalysisResult.analysis_run_id == analysis_run_id)
-    )
-    if result is None:
+    try:
+        report, _created = generate_report(
+            context.db,
+            analysis_run_id,
+            idempotency_key=f"{context.execution.idempotency_key}:report-agent",
+            workflow_execution_id=context.execution.execution_id,
+            allow_active_workflow=True,
+        )
+    except ReportDeliveryError as exception:
         return ToolResult(
-            status=ExecutionStatus.PARTIAL,
-            failure_code="analysis_report_unavailable",
-            failure_message="No completed analysis result is available.",
+            status=(
+                ExecutionStatus.PARTIAL
+                if exception.status_code in {404, 409}
+                else ExecutionStatus.FAILED
+            ),
+            failure_code=exception.code.casefold(),
+            failure_message=exception.safe_message,
             deterministic_fallback=True,
             structured_output={
                 "mode": "evidence_reference_report",
@@ -772,35 +781,22 @@ def _report(context: ToolContext, _input: BaseModel) -> ToolResult:
             },
             evidence_references=context.dependency_evidence,
         )
-    score_execution = context.db.scalar(
-        select(ScoreExecution)
-        .where(ScoreExecution.analysis_run_id == analysis_run_id)
-        .order_by(ScoreExecution.created_at.desc(), ScoreExecution.id.desc())
-    )
     return ToolResult(
-        status=ExecutionStatus.COMPLETED,
+        status=ExecutionStatus(report.status),
         structured_output={
-            "report_reference": f"analysis-run:{analysis_run_id}:report",
+            "report_reference": f"report:{report.report_id}",
             "score_execution_reference": (
-                str(score_execution.execution_id) if score_execution else None
+                str(report.score_execution_id) if report.score_execution_id else None
             ),
             "score_calculated_by_llm": False,
+            "generation_mode": "deterministic_fallback",
+            "artifact_formats": ["html", "json", "pdf"],
         },
         evidence_references=[
-            _evidence("analysis_result", result.id, source="database"),
-            *(
-                [
-                    _evidence(
-                        "score_execution",
-                        score_execution.execution_id,
-                        source="database",
-                    )
-                ]
-                if score_execution
-                else []
-            ),
+            _evidence("report_execution", report.report_id, source="database"),
             *context.dependency_evidence,
         ],
+        deterministic_fallback=True,
     )
 
 

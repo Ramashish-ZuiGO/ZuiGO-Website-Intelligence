@@ -2754,3 +2754,38 @@ Evidence Validation precedes calculation; Report and Remediation may consume
 persisted references; no LLM may calculate, change, or override scores. The
 report, project, Website Analysis, Page Analysis, Action Plan, and agent
 execution interfaces link to the same persisted breakdown.
+
+## 17. END-TO-END ANALYSIS JOURNEY AND REPORT DELIVERY
+
+The primary journey is Website/Project â†’ Start full analysis â†’ Track execution
+â†’ Review grounded results â†’ Generate immutable report â†’ Export HTML/PDF/JSON
+â†’ Review report history. One scoped start validates ownership, creates or reuses
+an analysis run through idempotency, and dispatches existing evidence collection
+before the versioned `full_website_analysis` workflow. New keys preserve
+independent historical runs.
+
+Progress must expose queued, running, partial, completed, failed, cancelled, and
+unavailable states using text as well as visual treatment. It includes current
+stage, completed/pending/failed/unavailable agents, percentage, elapsed duration,
+coverage numerator/denominator, retry/resume availability, unavailable
+tools/providers, and redacted safe errors.
+
+Each report execution owns an independent UUID and immutable snapshot. The report
+pins analysis, workflow, score, template, report, formula, and provider versions;
+retains input fingerprint and idempotency scope; and records coverage, confidence,
+unavailable sections, partial/failure details, evidence references, sections, and
+artifacts. Factual content must reference persisted evidence. Passed, failed,
+unavailable, incomplete, excluded, and not-analysed states remain distinct.
+
+HTML, PDF, and JSON exports use deterministic section order, stable safe filenames,
+accessible HTML, PDF table of contents/page numbers/timestamp, SHA-256 checksums,
+and database storage references rather than internal file paths. Exported content
+must not contain secrets or private reasoning. The existing Report Agent may add
+grounded narrative only under its optional approved-provider policy; its
+deterministic fallback is always available and may not calculate scores or metrics.
+
+The project page, Website Analysis, analysis-run report, Agent Execution, and
+Action Plan surfaces link the same progress, immutable history, evidence
+references, viewer, and export controls. Semantic landmarks, heading order,
+keyboard operation, visible focus, progress announcements, accessible tables,
+non-colour status, safe text rendering, and announced errors are required.

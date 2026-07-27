@@ -788,6 +788,19 @@ export function ActionPlanPanel({ websiteId, projectId }: ActionPlanPanelProps) 
           Review score contributions
         </a>
       </aside>
+      <aside className="mt-4 rounded-xl border bg-slate-50 p-4 text-sm">
+        <h3 className="font-semibold">Report evidence references</h3>
+        <p className="mt-1 text-slate-600">
+          Immutable reports retain action IDs, priority formula versions, responsible
+          roles, remediation, verification guidance, and source evidence references.
+        </p>
+        <a
+          className="mt-2 inline-block font-semibold underline focus-visible:outline-2 focus-visible:outline-offset-2"
+          href={`#report-delivery-${websiteId}`}
+        >
+          Review report history and exports
+        </a>
+      </aside>
     </section>
   );
 }

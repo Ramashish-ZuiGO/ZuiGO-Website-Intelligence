@@ -576,3 +576,24 @@ not-calculated, and incompatible states remain distinct. The multi-agent platfor
 adds the deterministic `scoring_intelligence` tool after Evidence Validation;
 the eight domain-agent IDs remain unchanged and LLM output cannot calculate,
 modify, or override a score.
+
+## End-to-end analysis and report delivery
+
+Task 028 provides one customer-facing start action that validates project/website
+ownership, creates an independently identifiable analysis run, and queues the
+existing evidence analysis before `full_website_analysis`. The
+project/workflow/idempotency-key scope prevents accidental duplicate dispatch;
+another key creates separate analysis and workflow history.
+
+Live progress reports workflow state, current stage, completed and pending agents,
+coverage numerator/denominator, elapsed time, retry/resume availability, unavailable
+tools/providers, and safe errors. Once the workflow is terminal, the existing
+`report_agent` and `report_generation` tool can create an immutable, evidence-linked
+snapshot with twelve deterministic sections. The approved LLM provider remains
+optional; deterministic report generation works when it is unavailable.
+
+Every snapshot has stable database-backed HTML, PDF, and JSON artifacts with safe
+filenames, SHA-256 checksums, accessible structure, explicit unavailable sections,
+and no secrets or internal paths. Report history never overwrites completed reports.
+See [Report Delivery](docs/REPORT_DELIVERY.md) for endpoints, evidence rules, export
+behavior, limitations, and the complete user journey.

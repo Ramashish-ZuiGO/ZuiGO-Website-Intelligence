@@ -349,7 +349,7 @@ Formula v1.0.0 or Priority Formula v1.0.0.
 
 ## Multi-agent orchestration and scoring
 
-The eight-agent, fourteen-tool platform coordinates existing evidence-producing
+The eight-agent, fifteen-tool platform coordinates existing evidence-producing
 services through three versioned deterministic workflows. Agent status, workflow
 progress, retry attempts, tool availability, evidence counts, checkpoints, token
 totals, and provider costs are operational metadata. They are not score inputs,
@@ -394,3 +394,17 @@ tool runs after Evidence Validation and supplies persisted references to report,
 remediation, and Action Plan surfaces. LLMs are explicitly prohibited from
 score calculation or modification, and private chain-of-thought is neither
 stored nor exposed.
+
+## Immutable report snapshots
+
+Task 028 report delivery consumes persisted scoring executions; it never
+recalculates or modifies them. Report sections retain the score execution
+reference, Overall Score Formula v1.0.0, Priority Formula v1.0.0, category values,
+contributions, exclusions, confidence, and evidence coverage exactly as stored.
+The Report Agent and optional narrative provider cannot override any value.
+
+An unavailable score remains unavailable in HTML, PDF, and JSON. Report-level
+coverage is the number of sections with retained evidence divided by the twelve
+defined sections, shown separately from score evidence coverage and confidence.
+Generating a later report creates a new immutable snapshot; comparisons remain
+subject to the formula/profile compatibility rules above.

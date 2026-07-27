@@ -363,3 +363,34 @@ silently alter them.
 
 Consequently, Task 026 makes no mathematical or version change to Overall Score
 Formula v1.0.0 or Priority Formula v1.0.0.
+
+## Explainable scoring executions
+
+Task 027 does not alter either approved formula. It materializes each calculation
+as an independent UUID-backed execution with a snapshot of category inputs,
+configured weights, normalized available weights, metric contributions, raw
+weighted total, round-half-up result, technical deductions, confidence,
+evidence-coverage numerator/denominator, exclusions, and source references.
+Formula, profile, and Metric Registry versions plus the deterministic evidence
+fingerprint make the result reproducible.
+
+The five category inputs are the only metric contributions to Overall Score
+Formula v1.0.0. An unavailable category has no normalized value or contribution;
+its configured weight is redistributed across available categories exactly as
+before. Coverage is `available scoring inputs / 5 × 100`. Confidence continues
+to use the unchanged 60/25/10/5 evidence-completeness formula and is classified
+for presentation as high (90–100), medium (70–89), low (1–69), or unavailable.
+
+Each profile retains its registered thresholds. Descriptive score bands split
+the registered outer ranges transparently: critical below 25, poor below 50,
+needs improvement below 90, good below 95, and excellent from 95. These are
+internal descriptions, not competitor, industry, Google, global-site, or
+search-engine rankings, and they never alter a numeric score.
+
+Trends compare executions only when formula ID/version and profile ID/version
+match. Compatible history exposes overall, category, and evidence-coverage
+deltas; incompatible history exposes no direct delta. The deterministic scoring
+tool runs after Evidence Validation and supplies persisted references to report,
+remediation, and Action Plan surfaces. LLMs are explicitly prohibited from
+score calculation or modification, and private chain-of-thought is neither
+stored nor exposed.

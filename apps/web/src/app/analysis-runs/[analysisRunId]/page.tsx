@@ -13,6 +13,7 @@ import { MetricRatingBadge } from "@/components/metrics/MetricRatingBadge";
 import { MetricInterpretation } from "@/components/metrics/types";
 import { SiteDiagnosticsPanel } from "@/components/diagnostics/SiteDiagnosticsPanel";
 import { AgentExecutionPanel } from "@/components/agents/AgentExecutionPanel";
+import { ScoringIntelligencePanel } from "@/components/scoring/ScoringIntelligencePanel";
 
 function display(value: unknown): string {
   if (value === null || value === undefined || value === "") return "Not available";
@@ -276,6 +277,7 @@ export default function AnalysisReportPage() {
           <li><a className="underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700" href="#verified-diagnostics">Verified diagnostics</a></li>
           <li><a className="underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700" href={`#site-diagnostics-${report.website.id}`}>Site-wide diagnostics</a></li>
           <li><a className="underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700" href={`#agent-execution-${report.website.id}`}>Agent execution</a></li>
+          <li><a className="underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700" href={`#scoring-intelligence-${report.website.id}`}>Score explanation</a></li>
         </ul>
       </nav>
 
@@ -380,6 +382,10 @@ export default function AnalysisReportPage() {
       </div>
 
       <AgentExecutionPanel
+        analysisRunId={analysisRunId}
+        websiteId={report.website.id}
+      />
+      <ScoringIntelligencePanel
         analysisRunId={analysisRunId}
         websiteId={report.website.id}
       />

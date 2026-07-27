@@ -778,6 +778,16 @@ export function ActionPlanPanel({ websiteId, projectId }: ActionPlanPanelProps) 
           Review agent execution evidence
         </a>
       </aside>
+      <aside className="mt-4 rounded-xl border bg-slate-50 p-4 text-sm">
+        <h3 className="font-semibold">Score contribution evidence</h3>
+        <p className="mt-1 text-slate-600">
+          Action priority remains separate from the Overall Score. Remediation may
+          reference persisted category contributions without changing either formula.
+        </p>
+        <a className="mt-2 inline-block font-semibold underline focus-visible:outline-2 focus-visible:outline-offset-2" href={`#scoring-intelligence-${websiteId}`}>
+          Review score contributions
+        </a>
+      </aside>
     </section>
   );
 }

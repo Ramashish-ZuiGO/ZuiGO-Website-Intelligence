@@ -12,6 +12,7 @@ from app.api.routes import (
     performance_router,
     projects_router,
     repository_router,
+    scoring_intelligence_router,
     site_diagnostics_router,
     websites_router,
     workflow_executions_router,
@@ -33,5 +34,6 @@ v1_router.include_router(performance_router)
 v1_router.include_router(websites_router)
 v1_router.include_router(accessibility_router)
 v1_router.include_router(site_diagnostics_router)
+v1_router.include_router(scoring_intelligence_router)
 v1_router.include_router(workflow_executions_router)
 api_router.include_router(v1_router)

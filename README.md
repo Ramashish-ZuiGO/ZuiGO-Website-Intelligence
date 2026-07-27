@@ -529,7 +529,7 @@ v1.0.0.
 ## Multi-agent platform
 
 Task 026 adds a reusable execution layer around the existing deterministic
-analysis services. It registers exactly eight versioned domain agents, fourteen
+analysis services. It registers exactly eight versioned domain agents, fifteen
 versioned tools, and three deterministic workflows. The full website workflow
 runs performance, accessibility, and site-diagnostics branches in parallel after
 discovery, validates their evidence, conditionally includes repository
@@ -552,3 +552,27 @@ See [Multi-Agent Platform Architecture](docs/MULTI_AGENT_ARCHITECTURE.md) for th
 complete registries, DAG, execution semantics, API surface, security boundary,
 provider limitations, and frontend behavior. Task 026 leaves Overall Score
 Formula v1.0.0 and Priority Formula v1.0.0 unchanged.
+
+## Explainable scoring intelligence
+
+Task 027 preserves Overall Score Formula v1.0.0 and Priority Formula v1.0.0
+mathematically while adding immutable scoring executions and explanations. A
+calculation snapshots the five formula inputs, configured and normalized weights,
+raw weighted total, round-half-up decision, technical deductions, confidence,
+evidence coverage, unavailable/excluded metrics, profile thresholds, evidence
+references, and formula/profile/Metric Registry versions.
+
+Repeated calculation with the same analysis run and idempotency key returns the
+same execution; another key creates independent history. Trends compare overall,
+category, and coverage deltas only when formula and profile IDs/versions match.
+Descriptive `critical`, `poor`, `needs improvement`, `good`, and `excellent`
+bands are transparent, profile-versioned interpretations—not competitor,
+industry, search-engine, or global rankings.
+
+The analysis report and project interfaces expose score overview, category and
+metric contributions, evidence coverage, confidence/limitations, explanations,
+history, and formula/profile details. Zero, unavailable, excluded, incomplete,
+not-calculated, and incompatible states remain distinct. The multi-agent platform
+adds the deterministic `scoring_intelligence` tool after Evidence Validation;
+the eight domain-agent IDs remain unchanged and LLM output cannot calculate,
+modify, or override a score.

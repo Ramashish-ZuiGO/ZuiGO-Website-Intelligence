@@ -186,6 +186,17 @@ TOOL_DEFINITIONS = (
         limitations="Uses persisted evidence and does not perform a new public crawl.",
     ),
     _tool(
+        tool_id="scoring_intelligence",
+        input_ref="website_analysis_input",
+        permissions=(Permission.DATABASE_READ, Permission.DATABASE_WRITE),
+        timeout=30,
+        retry=NO_RETRY,
+        evidence=("score_execution", "score_snapshot", "metric_contributions"),
+        limitations=(
+            "Uses Overall Score Formula v1.0.0 only; an LLM cannot calculate or modify scores."
+        ),
+    ),
+    _tool(
         tool_id="repository_scanning",
         input_ref="repository_analysis_input",
         permissions=(Permission.FILESYSTEM_READ, Permission.DATABASE_WRITE),
@@ -376,13 +387,13 @@ AGENT_DEFINITIONS = (
         purpose="Validate evidence references, coverage, provenance, and prerequisite status.",
         goals=("validate evidence provenance", "reject unsupported downstream claims"),
         input_ref="evidence_validation_input",
-        tools=("evidence_retrieval",),
+        tools=("evidence_retrieval", "scoring_intelligence"),
         dependencies=(
             "performance_agent",
             "accessibility_agent",
             "site_diagnostics_agent",
         ),
-        permissions=(Permission.DATABASE_READ,),
+        permissions=(Permission.DATABASE_READ, Permission.DATABASE_WRITE),
         timeout=60,
         behavior=PartialFailureBehavior.MARK_UNAVAILABLE,
         limitations="Validation cannot improve or fabricate missing source evidence.",

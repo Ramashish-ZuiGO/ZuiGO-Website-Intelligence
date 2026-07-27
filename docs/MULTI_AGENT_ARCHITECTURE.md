@@ -20,11 +20,12 @@ The eight domain agents are:
 7. `remediation_agent`
 8. `report_agent`
 
-The fourteen registered tools are `website_discovery`, `url_normalization`,
+The fifteen registered tools are `website_discovery`, `url_normalization`,
 `playwright_analysis`, `lighthouse_analysis`, `crux_field_evidence`,
 `browser_timing`, `axe_accessibility`, `accessibility_aggregation`,
 `site_diagnostics`, `repository_scanning`, `remediation_generation`,
-`report_generation`, `evidence_retrieval`, and `approved_llm_completion`.
+`report_generation`, `evidence_retrieval`, `scoring_intelligence`, and
+`approved_llm_completion`.
 Each definition pins a semantic version, schemas, permissions, timeout, retry and
 idempotency behavior, side-effect class, evidence type, secret policy,
 availability, and limitations. Agent runs may invoke only their registered tools.
@@ -124,3 +125,11 @@ operable with visible focus, and structured values are bounded and safely escape
 The platform changes neither Overall Score Formula v1.0.0 nor Priority Formula
 v1.0.0. Agent orchestration coordinates evidence production; it does not add a
 scoring path.
+
+The deterministic `scoring_intelligence` tool is the exception to narrative-only
+report assembly: it persists the already-approved formula result and explanation,
+but does not introduce a new formula or autonomous agent. It runs in the Evidence
+Validation stage after prerequisite analysis branches, stores a score-execution
+reference for downstream remediation/report agents, and is prohibited from using
+LLM output. Report and remediation results may reference contributions, never
+override them. The eight agent IDs and three workflow DAGs remain unchanged.

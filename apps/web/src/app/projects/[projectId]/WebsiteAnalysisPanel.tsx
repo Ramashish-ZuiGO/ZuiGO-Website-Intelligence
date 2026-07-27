@@ -11,6 +11,7 @@ import { AccessibilityIntelligence, AccessibilityData } from '@/components/acces
 import { ScoreValue } from "@/components/metrics/ScoreValue";
 import { SiteDiagnosticsPanel } from "@/components/diagnostics/SiteDiagnosticsPanel";
 import { AgentExecutionPanel } from "@/components/agents/AgentExecutionPanel";
+import { ScoringIntelligencePanel } from "@/components/scoring/ScoringIntelligencePanel";
 
 interface WebsiteAnalysisPanelProps {
   projectId?: string;
@@ -275,6 +276,11 @@ export function WebsiteAnalysisPanel({
         analysisRunId={latestRun?.status === "completed" ? latestRun.id : undefined}
         compact
         projectId={projectId}
+        websiteId={websiteId}
+      />
+      <ScoringIntelligencePanel
+        analysisRunId={latestRun?.status === "completed" ? latestRun.id : undefined}
+        compact
         websiteId={websiteId}
       />
 

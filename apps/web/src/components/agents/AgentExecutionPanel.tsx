@@ -1147,6 +1147,12 @@ export function AgentExecutionPanel({
               References point to retained evidence; raw reports and secrets are not
               copied into this view.
             </p>
+            <a
+              className="mt-2 inline-block text-sm font-semibold underline focus-visible:outline-2 focus-visible:outline-offset-2"
+              href={`#scoring-intelligence-${websiteId ?? resolvedProjectId}`}
+            >
+              Review persisted scoring execution and contributions
+            </a>
             <div className="mt-4 grid gap-5 lg:grid-cols-2">
               <div>
                 <h4 className="font-semibold">Evidence references</h4>

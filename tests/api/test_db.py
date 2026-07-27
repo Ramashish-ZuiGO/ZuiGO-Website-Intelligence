@@ -38,6 +38,11 @@ def test_database_foundation_uses_psycopg_with_mvp_tables() -> None:
         "site_diagnostic_executions",
         "site_diagnostic_findings",
         "site_diagnostic_occurrences",
+        "score_executions",
+        "score_snapshots",
+        "category_scores",
+        "metric_contributions",
+        "score_explanations",
         "website_pages",
         "websites",
     }

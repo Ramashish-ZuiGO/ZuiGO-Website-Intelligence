@@ -364,6 +364,16 @@ export function PageAnalysisPanel({ websiteId }: PageAnalysisPanelProps) {
 
       {!summary && !error && <p className="mt-4 text-sm text-slate-500">Loading page analysis data…</p>}
       <SiteDiagnosticsReference context="page-analysis" websiteId={websiteId} />
+      <aside className="mt-4 rounded-xl border bg-slate-50 p-4 text-sm">
+        <strong>Site score context</strong>
+        <p className="mt-1 text-slate-600">
+          Page-level scores remain separate from the site score. Review normalized
+          contributions, evidence coverage, and exclusions in the site explanation.
+        </p>
+        <a className="mt-2 inline-block font-semibold underline focus-visible:outline-2 focus-visible:outline-offset-2" href={`#scoring-intelligence-${websiteId}`}>
+          Review explainable site score
+        </a>
+      </aside>
     </section>
   );
 }

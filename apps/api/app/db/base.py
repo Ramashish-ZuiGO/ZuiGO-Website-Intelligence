@@ -29,5 +29,12 @@ from app.models.repository import (  # noqa: E402, F401
     RepositoryFileIndex,  # noqa: F401
     RepositoryScanExecution,  # noqa: F401
 )
+from app.models.score_intelligence import (  # noqa: E402, F401
+    CategoryScore,
+    MetricContribution,
+    ScoreExecution,
+    ScoreExplanation,
+    ScoreSnapshot,
+)
 from app.models.website import Website  # noqa: E402, F401
 from app.models.website_page import WebsitePage  # noqa: E402, F401

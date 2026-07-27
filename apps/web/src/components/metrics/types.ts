@@ -22,6 +22,8 @@ export type MetricCategory =
   | "accessibility"
   | "security"
   | "compatibility"
+  | "seo"
+  | "technical_quality"
   | "other";
 
 export interface MetricDefinition {

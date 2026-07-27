@@ -304,7 +304,7 @@ Four primary profiles are included:
 When evaluating a metric, the system looks up the threshold rule defined in the assigned profile. The resulting `MetricInterpretation` includes the rating, the exact thresholds used, and limitations.
 
 ### Metric Registry Version: 1.0.0
-Exact Metric Count: 58
+Exact Metric Count: 86
 Supported Value Types: score, percentage, count, duration, bytes, ratio, boolean, status, text, unavailable.
 Endpoints: GET /api/v1/metadata/metrics, GET /api/v1/metadata/metrics/{metric_id}
 Score/Percentage distinction: Scores are x/100, Percentages are %.
@@ -316,3 +316,33 @@ Limitations: Screen-reader users may require manual tests for complex aria-label
 - **Field vs Lab Separation**: Field evidence (CrUX) and Lab evidence (Lighthouse) are distinct. Missing field data is never averaged as zero, and lab values are never substituted for missing field values.
 - **Disagreement Indicator**: Comparisons are made between Field and Lab metrics. If they differ materially, a disagreement indicator is provided, but this NEVER alters the Overall Score Formula v1.0.0 or Priority Formula v1.0.0.
 - **History and Profiles**: Historical analyses are preserved, and threshold profiles are applied without modifying raw values.
+
+## Site-diagnostic metrics and deterministic grouping
+
+Site-wide diagnostics add 12 presentation metrics to both registries:
+`site_diagnostic_finding_count`, `sitewide_finding_count`,
+`template_finding_count`, `isolated_page_finding_count`,
+`internal_broken_link_count`, `orphan_page_count`, `dead_end_page_count`,
+`canonical_conflict_count`, `duplicate_title_group_count`,
+`duplicate_description_group_count`, `near_duplicate_page_group_count`, and
+`site_diagnostic_coverage_percentage`. Counts are observations, not scores. Coverage is
+`evidence_coverage_numerator / evidence_coverage_denominator * 100` and must always be
+presented with its numerator and denominator.
+
+The 31-rule registry assigns severity, scope, remediation, responsible role, and
+verification guidance independently of score calculation. Exact content grouping uses
+normalized text with `sha256-normalized-text-v1`. Near-duplicate grouping uses
+`token-set-jaccard-v1`, a similarity threshold of `0.85`, at least 80 usable characters,
+and at least two affected pages. Repeated, section, and template classifications are
+deterministic; template scope is not used when the evidence supports repetition only.
+
+Missing link, content, canonical, indexability, or technical evidence is represented as
+partial or unavailable. It is never assigned a zero issue count as a substitute for
+evidence. Link-graph results are limited to persisted internal-link evidence, and
+canonical/indexability diagnostics describe technical signals rather than real
+search-engine indexing.
+
+Site-diagnostic findings can supply original evidence references to the Action Plan, but
+the workflows retain separate execution history and idempotency. None of the 12 metrics,
+31 rules, deterministic clusters, or Action Plan references changes Overall Score
+Formula v1.0.0 or Priority Formula v1.0.0.

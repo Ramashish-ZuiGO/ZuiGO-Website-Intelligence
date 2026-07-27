@@ -8,6 +8,7 @@ from app.api.routes.page_analysis import router as page_analysis_router
 from app.api.routes.performance import router as performance_router
 from app.api.routes.projects import router as projects_router
 from app.api.routes.repository import router as repository_router
+from app.api.routes.site_diagnostics import router as site_diagnostics_router
 from app.api.routes.websites import router as websites_router
 
 __all__ = [
@@ -22,4 +23,5 @@ __all__ = [
     "websites_router",
     "metadata_router",
     "accessibility_router",
+    "site_diagnostics_router",
 ]

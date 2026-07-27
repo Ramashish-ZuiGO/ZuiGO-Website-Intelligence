@@ -9,6 +9,7 @@ import { MetricInfoButton } from "@/components/metrics/MetricInfoButton";
 import { PerformanceIntelligence } from '@/components/performance/PerformanceIntelligence';
 import { AccessibilityIntelligence, AccessibilityData } from '@/components/accessibility/AccessibilityIntelligence';
 import { ScoreValue } from "@/components/metrics/ScoreValue";
+import { SiteDiagnosticsPanel } from "@/components/diagnostics/SiteDiagnosticsPanel";
 
 interface WebsiteAnalysisPanelProps {
   websiteId: string;
@@ -255,6 +256,13 @@ export function WebsiteAnalysisPanel({ websiteId }: WebsiteAnalysisPanelProps) {
       <div className="mt-8">
         <AccessibilityIntelligence
           accessibilityData={accessibilityData}
+        />
+      </div>
+
+      <div className="mt-8">
+        <SiteDiagnosticsPanel
+          analysisRunId={latestRun?.status === "completed" ? latestRun.id : undefined}
+          websiteId={websiteId}
         />
       </div>
 

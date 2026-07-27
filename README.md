@@ -471,9 +471,57 @@ A centralized Metric Registry API (/api/v1/metadata/metrics) provides consistent
 
 
 ### Metric Registry Version: 1.0.0
-Exact Metric Count: 58
+Exact Metric Count: 86
 Supported Value Types: score, percentage, count, duration, bytes, ratio, boolean, status, text, unavailable.
 Endpoints: GET /api/v1/metadata/metrics, GET /api/v1/metadata/metrics/{metric_id}
 Score/Percentage distinction: Scores are x/100, Percentages are %.
 Accessibility: Components are fully accessible (focus, Enter/Space/Escape) without relying solely on hover.
 Limitations: Screen-reader users may require manual tests for complex aria-label tables.
+
+## Site-wide diagnostics
+
+Task 025 adds immutable, repeatable site-diagnostic executions over already-persisted
+project evidence. Each execution has its own UUID and is idempotent within an analysis
+run and idempotency key; a new key creates a new historical execution. Findings use
+page, section, template, or site scope, and every affected page is retained as an
+occurrence with an original evidence reference.
+
+The versioned registry contains 31 deterministic rules across repeated patterns,
+internal-link structure, canonical/indexability, metadata and content, near-duplicate
+content, technical consistency, and evidence availability. Evidence coverage is shown
+as numerator/denominator. Partial, failed, or unavailable inputs remain explicit and
+an empty response never proves that a site has no issues.
+
+Content grouping is local and deterministic. Exact groups use normalized text with
+`sha256-normalized-text-v1`. Near-duplicate groups use token-set Jaccard similarity
+(`token-set-jaccard-v1`) with a `0.85` threshold, at least 80 usable characters, and at
+least two affected pages. No embeddings, remote models, or LLMs participate.
+
+The internal-link graph is limited to persisted crawl/discovery evidence and excludes
+external, `mailto`, `tel`, and `javascript` links. A broken-link claim requires response
+evidence. Canonical and indexability findings describe observed technical signals only;
+they do not claim actual search-engine indexing. Site findings retain remediation,
+responsible role, verification guidance, and evidence references that can inform the
+separate Action Plan workflow.
+
+The exact API surface is:
+
+- `GET /api/v1/analysis-runs/{run_id}/site-diagnostics`
+- `POST /api/v1/analysis-runs/{run_id}/site-diagnostics/generate`
+- `GET /api/v1/websites/{website_id}/site-diagnostics`
+- `GET /api/v1/websites/{website_id}/site-diagnostics/history`
+- `GET /api/v1/websites/{website_id}/site-diagnostics/findings`
+- `GET /api/v1/site-diagnostics/findings/{finding_id}`
+- `GET /api/v1/websites/{website_id}/site-diagnostics/link-graph`
+- `GET /api/v1/metadata/site-diagnostic-rules`
+
+The backend and frontend Metric Registries add the same 12 metric IDs:
+`site_diagnostic_finding_count`, `sitewide_finding_count`,
+`template_finding_count`, `isolated_page_finding_count`,
+`internal_broken_link_count`, `orphan_page_count`, `dead_end_page_count`,
+`canonical_conflict_count`, `duplicate_title_group_count`,
+`duplicate_description_group_count`, `near_duplicate_page_group_count`, and
+`site_diagnostic_coverage_percentage`.
+
+Site diagnostics do not modify Overall Score Formula v1.0.0 or Priority Formula
+v1.0.0.

@@ -14,6 +14,7 @@ import { AccessibleExplanation } from "@/components/metrics/AccessibleExplanatio
 import { MetricInfoButton } from "@/components/metrics/MetricInfoButton";
 import { ScoreValue } from "@/components/metrics/ScoreValue";
 import { PercentageValue } from "@/components/metrics/PercentageValue";
+import { SiteDiagnosticsReference } from "@/components/diagnostics/SiteDiagnosticsPanel";
 
 interface PageAnalysisPanelProps {
   websiteId: string;
@@ -362,6 +363,7 @@ export function PageAnalysisPanel({ websiteId }: PageAnalysisPanelProps) {
       )}
 
       {!summary && !error && <p className="mt-4 text-sm text-slate-500">Loading page analysis data…</p>}
+      <SiteDiagnosticsReference context="page-analysis" websiteId={websiteId} />
     </section>
   );
 }

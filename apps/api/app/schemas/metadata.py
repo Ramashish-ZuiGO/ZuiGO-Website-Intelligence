@@ -28,6 +28,8 @@ class MetricCategoryEnum(StrEnum):
     ACCESSIBILITY = "accessibility"
     SECURITY = "security"
     COMPATIBILITY = "compatibility"
+    SEO = "seo"
+    TECHNICAL_QUALITY = "technical_quality"
     OTHER = "other"
 
 

@@ -2576,7 +2576,7 @@ The final report must progressively include:
 
 To ensure transparent and consistent scoring, a Metric Registry governs metric presentation.
 Registry Version: 1.0.0
-Exact Metric Count: 58
+Exact Metric Count: 86
 
 API Endpoints:
 - GET /api/v1/metadata/metrics
@@ -2608,3 +2608,75 @@ The performance intelligence layer strictly separates field evidence from lab ev
 - **Disagreement Indicator**: When corresponding field and lab evidence differ materially (e.g., ratio > 1.2 or < 0.8), a disagreement indicator is set. This explains the difference without declaring either source incorrect.
 - **History and Profile Preservation**: Historical snapshots are immutable. Repeated ingestion is idempotent. Profiles are preserved alongside the snapshots.
 - **Formulas Unchanged**: The Overall Score Formula v1.0.0 and Priority Formula v1.0.0 remain completely unchanged by performance comparison disagreements.
+
+## 14. SITE-WIDE DIAGNOSTICS
+
+Site-wide diagnostics are immutable executions derived only from persisted website,
+discovery, page-analysis, analysis-run, and original page-level evidence. Each repeatable
+execution has an independent UUID. The tuple of analysis run and idempotency key is the
+retry boundary: a matching key returns the existing execution, while a different key
+creates separate history. Completed history must never be rewritten or deleted.
+
+### Diagnostic model and evidence states
+
+The 31-rule registry is versioned and covers repeated pattern, internal-link graph,
+canonical/indexability, metadata/content, near-duplicate, technical-consistency, and
+evidence-availability categories. Findings use page, section, template, or site scope.
+Every affected page is a persisted occurrence with a reference to original evidence.
+Template scope requires deterministic URL structure and evidence consistency; repeated
+evidence alone must not be described as template certainty.
+
+Coverage is always displayed as analyzed-evidence numerator and eligible-page
+denominator. The UI and API preserve completed, partial, failed, and unavailable states.
+Unavailable input is not interpreted as absence of an issue, and an empty finding list
+does not imply a clean site when collection has not run or coverage is incomplete.
+
+### Deterministic content methodology
+
+Exact duplicate content uses normalized text and `sha256-normalized-text-v1`.
+Near-duplicate grouping uses local token-set Jaccard similarity
+(`token-set-jaccard-v1`) at a `0.85` threshold. Content must have at least 80 usable
+characters, and a group requires at least two pages. Embeddings, remote models, and LLMs
+are prohibited from this workflow.
+
+### Link and indexability limitations
+
+The link graph uses persisted crawl/discovery evidence only. It excludes external,
+`mailto`, `tel`, and `javascript` targets. Broken-link findings require response
+evidence; unavailable edge or response evidence must be reported as unavailable.
+Canonical/indexability findings report deterministic conflicts in canonical, robots,
+header, sitemap, status, protocol, and host evidence. They never claim that a search
+engine has or has not indexed a URL.
+
+### Frontend and Action Plan relationship
+
+The report and project interfaces provide Site Health Overview, Repeated Patterns,
+Internal Link Graph, Indexability and Canonical, Metadata and Content Patterns,
+Technical Consistency, Finding Detail, and History sections. They expose generation
+status, coverage, filters, pagination, occurrences, original evidence references,
+remediation, responsible role, verification, and historical comparison with semantic
+headings, keyboard operation, and visible focus. Page Analysis and Action Plan link back
+to retained site evidence. Site diagnostics inform actions but do not silently create or
+rewrite Action Plan records.
+
+### Exact API surface
+
+- `GET /api/v1/analysis-runs/{run_id}/site-diagnostics`
+- `POST /api/v1/analysis-runs/{run_id}/site-diagnostics/generate`
+- `GET /api/v1/websites/{website_id}/site-diagnostics`
+- `GET /api/v1/websites/{website_id}/site-diagnostics/history`
+- `GET /api/v1/websites/{website_id}/site-diagnostics/findings`
+- `GET /api/v1/site-diagnostics/findings/{finding_id}`
+- `GET /api/v1/websites/{website_id}/site-diagnostics/link-graph`
+- `GET /api/v1/metadata/site-diagnostic-rules`
+
+The backend and frontend registries contain the same 12 site-diagnostic metrics:
+`site_diagnostic_finding_count`, `sitewide_finding_count`,
+`template_finding_count`, `isolated_page_finding_count`,
+`internal_broken_link_count`, `orphan_page_count`, `dead_end_page_count`,
+`canonical_conflict_count`, `duplicate_title_group_count`,
+`duplicate_description_group_count`, `near_duplicate_page_group_count`, and
+`site_diagnostic_coverage_percentage`.
+
+This capability leaves Overall Score Formula v1.0.0 and Priority Formula v1.0.0
+unchanged.

@@ -764,6 +764,20 @@ export function ActionPlanPanel({ websiteId, projectId }: ActionPlanPanelProps) 
         </div>
       )}
       <SiteDiagnosticsReference context="action-plan" websiteId={websiteId} />
+      <aside className="mt-4 rounded-xl border border-indigo-200 bg-indigo-50 p-4 text-sm">
+        <h3 className="font-semibold text-indigo-950">Agent remediation evidence</h3>
+        <p className="mt-1 text-indigo-900">
+          When remediation is produced by a registered agent workflow, its pinned
+          agent version, evidence references, structured decision, and limitations
+          remain available in the execution record.
+        </p>
+        <a
+          className="mt-2 inline-block font-semibold text-indigo-950 underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-700"
+          href={`#agent-execution-${websiteId}`}
+        >
+          Review agent execution evidence
+        </a>
+      </aside>
     </section>
   );
 }

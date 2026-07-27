@@ -346,3 +346,20 @@ Site-diagnostic findings can supply original evidence references to the Action P
 the workflows retain separate execution history and idempotency. None of the 12 metrics,
 31 rules, deterministic clusters, or Action Plan references changes Overall Score
 Formula v1.0.0 or Priority Formula v1.0.0.
+
+## Multi-agent orchestration and scoring
+
+The eight-agent, fourteen-tool platform coordinates existing evidence-producing
+services through three versioned deterministic workflows. Agent status, workflow
+progress, retry attempts, tool availability, evidence counts, checkpoints, token
+totals, and provider costs are operational metadata. They are not score inputs,
+deductions, confidence replacements, or substitute evidence.
+
+Partial, failed, cancelled, and unavailable agent states remain explicit and do
+not become zero-valued measurements. Deterministic LLM fallback does not invent a
+score or evidence. Remediation and report agents may reference existing findings
+and their published scoring components, but orchestration cannot recalculate or
+silently alter them.
+
+Consequently, Task 026 makes no mathematical or version change to Overall Score
+Formula v1.0.0 or Priority Formula v1.0.0.

@@ -16,6 +16,7 @@ import type {
 import { AccessibleExplanation } from "@/components/metrics/AccessibleExplanation";
 import { MetricInfoButton } from "@/components/metrics/MetricInfoButton";
 import { ScoreValue } from "@/components/metrics/ScoreValue";
+import { SiteDiagnosticsReference } from "@/components/diagnostics/SiteDiagnosticsPanel";
 
 interface ActionPlanPanelProps {
   websiteId: string;
@@ -762,6 +763,7 @@ export function ActionPlanPanel({ websiteId, projectId }: ActionPlanPanelProps) 
           )}
         </div>
       )}
+      <SiteDiagnosticsReference context="action-plan" websiteId={websiteId} />
     </section>
   );
 }

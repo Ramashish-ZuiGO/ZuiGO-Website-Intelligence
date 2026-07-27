@@ -11,6 +11,7 @@ import { AccessibilityIntelligence, AccessibilityData } from "@/components/acces
 import { ScoreValue } from "@/components/metrics/ScoreValue";
 import { MetricRatingBadge } from "@/components/metrics/MetricRatingBadge";
 import { MetricInterpretation } from "@/components/metrics/types";
+import { SiteDiagnosticsPanel } from "@/components/diagnostics/SiteDiagnosticsPanel";
 
 function display(value: unknown): string {
   if (value === null || value === undefined || value === "") return "Not available";
@@ -268,6 +269,14 @@ export default function AnalysisReportPage() {
         </dl>
       </header>
 
+      <nav aria-label="Report sections" className="mt-4 rounded-xl border bg-white p-3">
+        <ul className="flex flex-wrap gap-x-5 gap-y-2 text-sm font-semibold">
+          <li><a className="underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700" href="#score-overview">Score overview</a></li>
+          <li><a className="underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700" href="#verified-diagnostics">Verified diagnostics</a></li>
+          <li><a className="underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700" href={`#site-diagnostics-${report.website.id}`}>Site-wide diagnostics</a></li>
+        </ul>
+      </nav>
+
       {report.interpretation && (
         <section className="mt-6 grid gap-6">
           <div className="rounded-2xl border bg-white p-6">
@@ -283,7 +292,7 @@ export default function AnalysisReportPage() {
         </section>
       )}
 
-      <section className="mt-6 grid gap-4 md:grid-cols-3">
+      <section className="mt-6 grid scroll-mt-6 gap-4 md:grid-cols-3" id="score-overview">
         <div className="rounded-2xl border bg-white p-6">
           <div className="flex items-start justify-between">
             <p className="text-sm text-slate-500">Overall score</p>
@@ -323,7 +332,7 @@ export default function AnalysisReportPage() {
         <AccessibilityIntelligence accessibilityData={accessibilityData} />
       </section>
 
-      <section className="mt-6 grid gap-5">
+      <section className="mt-6 grid scroll-mt-6 gap-5" id="verified-diagnostics">
         <h2 className="text-2xl font-bold">Verified diagnostics</h2>
         {diagnostics.map(([name, diagnostic]) => <DiagnosticCard diagnostic={diagnostic} key={name} name={name} />)}
       </section>
@@ -359,6 +368,14 @@ export default function AnalysisReportPage() {
       </section>
 
       <section className="mt-6 rounded-2xl border bg-white p-6"><h2 className="text-xl font-bold">Findings</h2>{report.findings.length === 0 ? <p className="mt-3 text-slate-600">No verified findings.</p> : <ul className="mt-4 grid gap-4">{report.findings.map((finding) => <li className="rounded-xl border p-4" key={finding.id}><p className="text-xs font-bold uppercase">{finding.severity} · {finding.category} · {finding.source}</p><h3 className="mt-2 font-bold">{finding.title}</h3><p className="mt-1 text-sm text-slate-600">{finding.description}</p><dl className="mt-3 grid gap-2 text-sm"><div><dt className="text-slate-500">Finding code</dt><dd>{finding.finding_code}</dd></div><div><dt className="text-slate-500">Affected URL</dt><dd className="break-all">{finding.affected_url}</dd></div><div><dt className="text-slate-500">Evidence</dt><dd><HumanValue value={finding.evidence} /></dd></div><div><dt className="text-slate-500">Confidence</dt><dd>{finding.confidence_percent}%</dd></div></dl></li>)}</ul>}</section>
+
+      <div className="mt-8">
+        <SiteDiagnosticsPanel
+          analysisRunId={analysisRunId}
+          restrictToAnalysisRun
+          websiteId={report.website.id}
+        />
+      </div>
 
       <div className="mt-8">
         <PerformanceIntelligence data={performanceData as unknown as { id: string; metric_id: string; evidence_type: string; raw_value: number }[]} />

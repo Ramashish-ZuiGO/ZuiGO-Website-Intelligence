@@ -1,4 +1,5 @@
 import re
+from datetime import datetime
 from enum import StrEnum
 from typing import Any
 from uuid import UUID
@@ -235,6 +236,8 @@ class WebsiteAnalysisInput(BaseModel):
     project_id: UUID
     analysis_run_id: UUID | None = None
     website_id: UUID
+    repository_connection_id: UUID | None = None
+    page_analysis_execution_id: UUID | None = None
 
 
 class RepositoryAnalysisInput(BaseModel):
@@ -308,3 +311,112 @@ class ApprovedLLMOutput(BaseModel):
     provider: str | None
     model_version: str | None
     structured_result: dict[str, Any] = Field(default_factory=dict)
+
+
+class WorkflowExecutionCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    workflow_id: str
+    project_id: UUID
+    analysis_run_id: UUID | None = None
+    website_id: UUID | None = None
+    repository_connection_id: UUID | None = None
+    page_analysis_execution_id: UUID | None = None
+    evidence_references: list[str] = Field(default_factory=list)
+    idempotency_key: str = Field(min_length=1, max_length=255)
+    max_concurrency: int = Field(default=3, ge=1, le=8)
+
+    @field_validator("workflow_id")
+    @classmethod
+    def validate_workflow_id(cls, value: str) -> str:
+        if not REGISTRY_ID_PATTERN.fullmatch(value):
+            raise ValueError("Workflow ID must use lower snake case")
+        return value
+
+    @field_validator("idempotency_key")
+    @classmethod
+    def normalize_idempotency_key(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Idempotency key cannot be empty")
+        return normalized
+
+
+class WorkflowExecutionRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    execution_id: UUID
+    workflow_id: str
+    workflow_version: str
+    project_id: UUID
+    analysis_run_id: UUID | None
+    input_fingerprint: str
+    idempotency_key: str
+    status: ExecutionStatus
+    attempt: int
+    structured_input: dict[str, Any]
+    structured_output: dict[str, Any]
+    evidence_references: list[dict[str, Any]]
+    provider_version_metadata: dict[str, Any]
+    token_total: int
+    cost_total_usd: float
+    failure_details: dict[str, Any]
+    partial_completion_details: dict[str, Any]
+    started_at: datetime
+    completed_at: datetime | None
+    created_at: datetime
+
+
+class AgentRunRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    agent_run_id: UUID
+    execution_id: UUID
+    agent_id: str
+    agent_version: str
+    dependency_agent_run_ids: list[str]
+    input_fingerprint: str
+    idempotency_key: str
+    status: ExecutionStatus
+    attempt: int
+    structured_input: dict[str, Any]
+    structured_output: dict[str, Any]
+    tool_activity_summary: list[dict[str, Any]]
+    evidence_references: list[dict[str, Any]]
+    provider_version_metadata: dict[str, Any]
+    token_total: int
+    cost_total_usd: float
+    failure_details: dict[str, Any]
+    partial_completion_details: dict[str, Any]
+    started_at: datetime
+    completed_at: datetime | None
+    created_at: datetime
+
+
+class AgentEventRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    event_id: UUID
+    execution_id: UUID
+    agent_run_id: UUID | None
+    agent_step_id: UUID | None
+    event_type: str
+    sequence_number: int
+    status: ExecutionStatus
+    structured_payload: dict[str, Any]
+    evidence_references: list[dict[str, Any]]
+    created_at: datetime
+
+
+class PaginatedAgentRuns(BaseModel):
+    items: list[AgentRunRead]
+    total: int
+    limit: int
+    offset: int
+
+
+class PaginatedAgentEvents(BaseModel):
+    items: list[AgentEventRead]
+    total: int
+    limit: int
+    offset: int

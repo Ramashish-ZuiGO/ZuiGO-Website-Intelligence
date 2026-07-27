@@ -60,6 +60,10 @@ class SchemaRegistry:
     def has_schema(cls, schema_ref: str) -> bool:
         return schema_ref in cls._schemas
 
+    @classmethod
+    def get(cls, schema_ref: str) -> type[BaseModel] | None:
+        return cls._schemas.get(schema_ref)
+
 
 NO_RETRY = RetryPolicy(max_attempts=1, backoff_seconds=0, retryable_failures=())
 SAFE_RETRY = RetryPolicy(

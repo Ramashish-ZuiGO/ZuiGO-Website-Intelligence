@@ -7,6 +7,7 @@ import type { AnalysisResults, AnalysisRun } from "@/lib/types";
 
 import { MetricInfoButton } from "@/components/metrics/MetricInfoButton";
 import { PerformanceIntelligence } from '@/components/performance/PerformanceIntelligence';
+import { AccessibilityIntelligence, AccessibilityData } from '@/components/accessibility/AccessibilityIntelligence';
 import { ScoreValue } from "@/components/metrics/ScoreValue";
 
 interface WebsiteAnalysisPanelProps {
@@ -20,6 +21,7 @@ function isActive(run: AnalysisRun | undefined): boolean {
 export function WebsiteAnalysisPanel({ websiteId }: WebsiteAnalysisPanelProps) {
   const [history, setHistory] = useState<AnalysisRun[]>([]);
   const [performanceData, setPerformanceData] = useState<{snapshots: Record<string, unknown>[], disagreement?: boolean, explanation?: string}>({snapshots: []});
+  const [accessibilityData, setAccessibilityData] = useState<AccessibilityData | null>(null);
   useEffect(() => {
     if (websiteId) {
       apiRequest<{snapshots?: Record<string, unknown>[], disagreement?: boolean, explanation?: string}>(`/api/v1/websites/${websiteId}/performance/comparison`)
@@ -28,6 +30,10 @@ export function WebsiteAnalysisPanel({ websiteId }: WebsiteAnalysisPanelProps) {
           disagreement: res.disagreement,
           explanation: res.explanation
         }))
+        .catch(console.error);
+
+      apiRequest<AccessibilityData>(`/api/v1/websites/${websiteId}/accessibility`)
+        .then((res) => setAccessibilityData(res))
         .catch(console.error);
     }
   }, [websiteId]);
@@ -243,6 +249,12 @@ export function WebsiteAnalysisPanel({ websiteId }: WebsiteAnalysisPanelProps) {
           data={performanceData.snapshots as unknown as { id: string; metric_id: string; evidence_type: string; raw_value: number }[]}
           disagreement={performanceData.disagreement}
           explanation={performanceData.explanation}
+        />
+      </div>
+
+      <div className="mt-8">
+        <AccessibilityIntelligence
+          accessibilityData={accessibilityData}
         />
       </div>
 

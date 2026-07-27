@@ -3,3 +3,4 @@ pydantic-settings==2.12.0
 playwright==1.60.0
 psycopg[binary]==3.3.4
 SQLAlchemy==2.0.51
+axe-playwright-python==0.1.8

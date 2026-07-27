@@ -3,6 +3,7 @@
 from typing import Any
 from urllib.parse import urlsplit
 
+from axe_playwright_python.sync_playwright import Axe
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
@@ -416,6 +417,23 @@ def inspect_page(
                 measurements["resource_sample_limit"] = max_resources
                 measurements["network_urls"] = network_urls[:200]
                 measurements["_html"] = page.content()[:2_000_000]
+
+                # Run axe-core accessibility audit
+                try:
+                    axe = Axe()
+                    options = {
+                        "resultTypes": ["violations", "incomplete", "passes", "inapplicable"]
+                    }
+                    axe_results = axe.run(page, options=options)
+                    measurements["accessibility_axe_results"] = axe_results.response
+                    measurements["accessibility_axe_version"] = axe_results.response.get(
+                        "testEngine", {}
+                    ).get("version", "unknown")
+                except Exception as e:
+                    console_errors.append(f"Axe-core failed: {str(e)}")
+                    measurements["accessibility_axe_results"] = None
+                    measurements["accessibility_axe_version"] = "unknown"
+
             except PlaywrightError as exception:
                 raise AnalysisFailure(
                     FailureDetail(

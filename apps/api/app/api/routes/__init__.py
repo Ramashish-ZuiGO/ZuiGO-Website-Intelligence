@@ -1,3 +1,4 @@
+from app.api.routes.accessibility import router as accessibility_router
 from app.api.routes.action_plan import router as action_plan_router
 from app.api.routes.analysis_runs import router as analysis_runs_router
 from app.api.routes.discovery import router as discovery_router
@@ -18,6 +19,7 @@ __all__ = [
     "performance_router",
     "projects_router",
     "repository_router",
-    "metadata_router",
     "websites_router",
+    "metadata_router",
+    "accessibility_router",
 ]

@@ -1,3 +1,9 @@
+from app.models.accessibility import (
+    AccessibilityAudit,
+    AccessibilityFinding,
+    AccessibilityNode,
+    ManualReviewChecklist,
+)
 from app.models.action_plan import (
     ACTION_STATUS_TRANSITIONS,
     ActionGenerationExecution,
@@ -37,6 +43,9 @@ from app.models.website import Website
 from app.models.website_page import WebsitePage
 
 __all__ = [
+    "AccessibilityAudit",
+    "AccessibilityFinding",
+    "AccessibilityNode",
     "ACTION_STATUS_TRANSITIONS",
     "ActionGenerationExecution",
     "ActionGroup",
@@ -60,6 +69,7 @@ __all__ = [
     "FindingSeverity",
     "FindingSource",
     "LocationStatus",
+    "ManualReviewChecklist",
     "MappingStrategy",
     "MatchConfidence",
     "PageAnalysisRun",

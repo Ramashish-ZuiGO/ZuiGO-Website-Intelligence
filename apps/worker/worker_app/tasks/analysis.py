@@ -5,6 +5,10 @@ from collections.abc import Callable
 from datetime import datetime
 from urllib.parse import urlsplit
 
+from app.services.accessibility_service import (
+    process_axe_results,
+    process_lighthouse_accessibility,
+)
 from app.services.performance_service import (
     collect_browser_timing_evidence,
     collect_lighthouse_evidence,
@@ -415,6 +419,20 @@ def run_analysis(analysis_run_id: str) -> dict[str, str]:
             except Exception as e:
                 logger.error(f"Failed to collect browser timing evidence: {e}")
 
+            try:
+                axe_results = playwright_data.get("accessibility_axe_results")
+                if axe_results:
+                    with SessionLocal() as db_session:
+                        process_axe_results(
+                            db_session,
+                            run_id,
+                            context["website_id"],
+                            axe_results,
+                            axe_version=playwright_data.get("accessibility_axe_version"),
+                        )
+            except Exception as e:
+                logger.error(f"Failed to collect axe accessibility evidence: {e}")
+
             playwright_data["attempt_count"] = playwright_attempt
             logger.info(
                 "analysis_stage_complete analysis_run_id=%s project_id=%s website_id=%s "
@@ -476,6 +494,9 @@ def run_analysis(analysis_run_id: str) -> dict[str, str]:
                         str(playwright_data["final_url"]),
                         metrics,
                         analysis_run_id=run_id,
+                    )
+                    process_lighthouse_accessibility(
+                        db_session, run_id, context["website_id"], lighthouse_data
                     )
             except Exception as e:
                 logger.error(f"Failed to collect lighthouse evidence: {e}")

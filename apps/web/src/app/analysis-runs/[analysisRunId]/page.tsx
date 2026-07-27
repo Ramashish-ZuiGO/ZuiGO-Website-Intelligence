@@ -6,7 +6,8 @@ import { useEffect, useState } from "react";
 
 import { apiRequest } from "@/lib/api";
 import type { AnalysisReport, DiagnosticGroup } from "@/lib/types";
-import { PerformanceIntelligence } from '@/components/performance/PerformanceIntelligence';
+import { PerformanceIntelligence } from "@/components/performance/PerformanceIntelligence";
+import { AccessibilityIntelligence, AccessibilityData } from "@/components/accessibility/AccessibilityIntelligence";
 import { ScoreValue } from "@/components/metrics/ScoreValue";
 import { MetricRatingBadge } from "@/components/metrics/MetricRatingBadge";
 import { MetricInterpretation } from "@/components/metrics/types";
@@ -180,6 +181,7 @@ export default function AnalysisReportPage() {
   const { analysisRunId } = useParams<{ analysisRunId: string }>();
   const [report, setReport] = useState<AnalysisReport | null>(null);
   const [performanceData, setPerformanceData] = useState<Record<string, unknown>[]>([]);
+  const [accessibilityData, setAccessibilityData] = useState<AccessibilityData | null>(null);
   const [interpretations, setInterpretations] = useState<MetricInterpretation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -196,6 +198,13 @@ export default function AnalysisReportPage() {
           } catch (e) {
             console.error("Failed to load interpretations", e);
           }
+
+          try {
+            const accData = await apiRequest<AccessibilityData>(`/api/v1/websites/${loaded.website.id}/accessibility`);
+            if (!cancelled) setAccessibilityData(accData);
+          } catch (e) {
+            console.error("Failed to load accessibility data", e);
+          }
         }
       })
       .catch((requestError: unknown) => {
@@ -206,6 +215,19 @@ export default function AnalysisReportPage() {
     if (analysisRunId) {
       void apiRequest<{ data?: Record<string, unknown>[] }>(`/api/v1/analysis-runs/${analysisRunId}/performance`)
         .then((res) => { if (!cancelled) setPerformanceData((res.data || []) as Record<string, unknown>[]); })
+        .catch(console.error);
+
+
+      // Try fetching accessibility from run (if supported, else fallback to website latest, but run is safer)
+      void apiRequest<{ data?: unknown[] }>(`/api/v1/analysis-runs/${analysisRunId}/accessibility`)
+        .then((res) => {
+            // In a real app we might fetch the specific audit and its findings here.
+            // The run endpoint returns raw audits for now. We might need the website endpoint to get the rich payload with findings.
+            if (!cancelled && res.data && res.data.length > 0) {
+               // We have an audit, let's fetch the full data using the website endpoint for now since that's what we built
+               return;
+            }
+        })
         .catch(console.error);
     }
 
@@ -295,6 +317,10 @@ export default function AnalysisReportPage() {
         <p className="mt-1 text-sm"><strong>Unavailable:</strong> {report.score.unavailable_categories.join(", ") || "None"}</p>
         <h3 className="mt-5 font-semibold">Technical Quality deductions</h3>
         {report.score.deductions.length ? <HumanValue value={report.score.deductions} /> : <p className="mt-2 text-sm text-slate-600">No eligible deductions.</p>}
+      </section>
+
+      <section className="mt-6">
+        <AccessibilityIntelligence accessibilityData={accessibilityData} />
       </section>
 
       <section className="mt-6 grid gap-5">

@@ -39,6 +39,13 @@ from app.models.repository import (
     RepositoryScanExecution,
     ScanStatus,
 )
+from app.models.site_diagnostic import (
+    DiagnosticScopeEnum,
+    SiteDiagnosticExecution,
+    SiteDiagnosticExecutionStatusEnum,
+    SiteDiagnosticFinding,
+    SiteDiagnosticOccurrence,
+)
 from app.models.website import Website
 from app.models.website_page import WebsitePage
 
@@ -63,6 +70,7 @@ __all__ = [
     "AnalysisScore",
     "AnalysisStatus",
     "DetectedTechnology",
+    "DiagnosticScopeEnum",
     "DiscoveryRun",
     "DiscoveryStatus",
     "FileScanStatus",
@@ -82,6 +90,10 @@ __all__ = [
     "RepositoryProvider",
     "RepositoryScanExecution",
     "ScanStatus",
+    "SiteDiagnosticExecution",
+    "SiteDiagnosticExecutionStatusEnum",
+    "SiteDiagnosticFinding",
+    "SiteDiagnosticOccurrence",
     "Website",
     "WebsitePage",
     "validate_action_transition",

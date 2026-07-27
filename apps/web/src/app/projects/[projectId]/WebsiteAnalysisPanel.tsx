@@ -10,8 +10,10 @@ import { PerformanceIntelligence } from '@/components/performance/PerformanceInt
 import { AccessibilityIntelligence, AccessibilityData } from '@/components/accessibility/AccessibilityIntelligence';
 import { ScoreValue } from "@/components/metrics/ScoreValue";
 import { SiteDiagnosticsPanel } from "@/components/diagnostics/SiteDiagnosticsPanel";
+import { AgentExecutionPanel } from "@/components/agents/AgentExecutionPanel";
 
 interface WebsiteAnalysisPanelProps {
+  projectId?: string;
   websiteId: string;
 }
 
@@ -19,7 +21,10 @@ function isActive(run: AnalysisRun | undefined): boolean {
   return run?.status === "queued" || run?.status === "running";
 }
 
-export function WebsiteAnalysisPanel({ websiteId }: WebsiteAnalysisPanelProps) {
+export function WebsiteAnalysisPanel({
+  projectId,
+  websiteId,
+}: WebsiteAnalysisPanelProps) {
   const [history, setHistory] = useState<AnalysisRun[]>([]);
   const [performanceData, setPerformanceData] = useState<{snapshots: Record<string, unknown>[], disagreement?: boolean, explanation?: string}>({snapshots: []});
   const [accessibilityData, setAccessibilityData] = useState<AccessibilityData | null>(null);
@@ -265,6 +270,13 @@ export function WebsiteAnalysisPanel({ websiteId }: WebsiteAnalysisPanelProps) {
           websiteId={websiteId}
         />
       </div>
+
+      <AgentExecutionPanel
+        analysisRunId={latestRun?.status === "completed" ? latestRun.id : undefined}
+        compact
+        projectId={projectId}
+        websiteId={websiteId}
+      />
 
       <button className="mt-3 text-xs font-semibold text-slate-600" onClick={() => void loadHistory().catch((requestError: unknown) => setError(requestError instanceof Error ? requestError.message : "Unable to refresh analysis history."))}>Refresh analysis history</button>
     </section>

@@ -525,3 +525,30 @@ The backend and frontend Metric Registries add the same 12 metric IDs:
 
 Site diagnostics do not modify Overall Score Formula v1.0.0 or Priority Formula
 v1.0.0.
+
+## Multi-agent platform
+
+Task 026 adds a reusable execution layer around the existing deterministic
+analysis services. It registers exactly eight versioned domain agents, fourteen
+versioned tools, and three deterministic workflows. The full website workflow
+runs performance, accessibility, and site-diagnostics branches in parallel after
+discovery, validates their evidence, conditionally includes repository
+intelligence, and then runs remediation and reporting.
+
+Every workflow start has an execution UUID and an idempotency key. Execution,
+agent-run, event, artifact, and checkpoint history is retained; cancellation,
+bounded retries, partial completion, and fingerprint-validated resume never
+delete successful historical work. Celery receives the execution UUID while the
+database remains the source of scheduling truth.
+
+The project and analysis-report interfaces expose workflow selection, progress,
+the accessible dependency graph, pinned agent runs, tool activity, event
+filtering/pagination, retry/resume controls, evidence and artifact references, and
+available token/cost totals. Unavailable tools or providers and deterministic LLM
+fallbacks are explicit. Only structured decisions and references are displayed;
+private chain-of-thought and secrets are neither persisted nor rendered.
+
+See [Multi-Agent Platform Architecture](docs/MULTI_AGENT_ARCHITECTURE.md) for the
+complete registries, DAG, execution semantics, API surface, security boundary,
+provider limitations, and frontend behavior. Task 026 leaves Overall Score
+Formula v1.0.0 and Priority Formula v1.0.0 unchanged.

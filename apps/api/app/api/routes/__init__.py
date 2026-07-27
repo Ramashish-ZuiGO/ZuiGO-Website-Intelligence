@@ -1,5 +1,6 @@
 from app.api.routes.accessibility import router as accessibility_router
 from app.api.routes.action_plan import router as action_plan_router
+from app.api.routes.agent_platform import router as agent_platform_router
 from app.api.routes.analysis_runs import router as analysis_runs_router
 from app.api.routes.discovery import router as discovery_router
 from app.api.routes.health import router as health_router
@@ -10,9 +11,11 @@ from app.api.routes.projects import router as projects_router
 from app.api.routes.repository import router as repository_router
 from app.api.routes.site_diagnostics import router as site_diagnostics_router
 from app.api.routes.websites import router as websites_router
+from app.api.routes.workflow_executions import router as workflow_executions_router
 
 __all__ = [
     "action_plan_router",
+    "agent_platform_router",
     "analysis_runs_router",
     "discovery_router",
     "health_router",
@@ -24,4 +27,5 @@ __all__ = [
     "metadata_router",
     "accessibility_router",
     "site_diagnostics_router",
+    "workflow_executions_router",
 ]

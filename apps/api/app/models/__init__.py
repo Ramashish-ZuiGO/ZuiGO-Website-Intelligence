@@ -14,6 +14,14 @@ from app.models.action_plan import (
     ActionStatusHistory,
     validate_action_transition,
 )
+from app.models.agent_platform import (
+    AgentArtifact,
+    AgentCheckpoint,
+    AgentEvent,
+    AgentExecution,
+    AgentRun,
+    AgentStep,
+)
 from app.models.analysis_diagnostic import AnalysisDiagnostic
 from app.models.analysis_finding import AnalysisFinding, FindingSeverity, FindingSource
 from app.models.analysis_interpretation import AnalysisInterpretation
@@ -62,6 +70,12 @@ __all__ = [
     "ActionResponsibleArea",
     "ActionStatus",
     "ActionStatusHistory",
+    "AgentArtifact",
+    "AgentCheckpoint",
+    "AgentEvent",
+    "AgentExecution",
+    "AgentRun",
+    "AgentStep",
     "AnalysisDiagnostic",
     "AnalysisFinding",
     "AnalysisInterpretation",

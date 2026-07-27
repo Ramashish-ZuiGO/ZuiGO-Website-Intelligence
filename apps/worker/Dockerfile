@@ -6,11 +6,12 @@ FROM python:3.13-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 WORKDIR /app
 
-COPY requirements.txt .
+COPY apps/worker/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir --requirement requirements.txt
 RUN python -m playwright install --with-deps chromium
 
@@ -21,7 +22,8 @@ RUN ln -s /usr/local/lib/node_modules/lighthouse/cli/index.js /usr/local/bin/lig
 RUN addgroup --system app && adduser --system --ingroup app app \
     && chown -R app:app /ms-playwright
 
-COPY worker_app ./worker_app
+COPY apps/api/app ./app
+COPY apps/worker/worker_app ./worker_app
 
 USER app
 

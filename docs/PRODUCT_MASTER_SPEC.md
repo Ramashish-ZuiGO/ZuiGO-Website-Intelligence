@@ -2680,3 +2680,50 @@ The backend and frontend registries contain the same 12 site-diagnostic metrics:
 
 This capability leaves Overall Score Formula v1.0.0 and Priority Formula v1.0.0
 unchanged.
+
+## 15. REUSABLE MULTI-AGENT PLATFORM
+
+The platform registers eight domain agents (`discovery_agent`,
+`performance_agent`, `accessibility_agent`, `site_diagnostics_agent`,
+`repository_intelligence_agent`, `evidence_validation_agent`,
+`remediation_agent`, and `report_agent`), fourteen typed tools, and three
+deterministic workflows (`full_website_analysis`, `repository_remediation`, and
+`reanalysis`). Agents own versioned goal contracts, tools expose bounded
+capabilities, services implement existing product behavior, and the orchestrator
+is separate workflow infrastructure rather than a domain agent.
+
+Full website analysis schedules discovery first; performance, accessibility, and
+site diagnostics then run in parallel; evidence validation follows; repository
+intelligence is included only when an approved connection is configured; and
+remediation precedes report generation. Workflow versions, pinned agent/tool
+versions, permissions, allowed tools, dependencies, timeout/retry policies,
+provider availability, partial behavior, and limitations are validated
+deterministically.
+
+Each repeatable start owns an execution UUID. Idempotency reuses the same
+project/workflow/key scope, while new keys preserve independent history. Celery
+workers claim persisted ready work. Cancellation prevents new work, retries are
+bounded, and resume requires a matching fingerprinted checkpoint. Completed
+branches, partial outcomes, unavailable evidence, events, evidence references,
+artifact references, provider metadata, and supplied token/cost totals remain
+historical.
+
+The Agent Execution interface augments rather than replaces the deterministic
+analysis UI. Project, website-analysis, analysis-report navigation, and Action
+Plan evidence links expose workflow selection, accessible dependency order and
+parallel branches, progress, run/event filtering and pagination, retry, cancel,
+resume, checkpoints, tools, evidence, artifacts, and available costs. Semantic
+headings, keyboard controls, visible focus, text status, accessible graph
+alternatives, and safe error announcements are required.
+
+Only concise structured decisions, statuses, evidence references, tool activity,
+and limitations may be stored or displayed. Private chain-of-thought and hidden
+reasoning are prohibited persistence and UI fields. Secrets are runtime-only and
+redacted according to tool policy. Approved LLM completion is conditional on an
+available configured provider and grounded evidence; unavailable providers and
+deterministic fallback remain explicit.
+
+The six metadata and seven execution endpoints, registry IDs, DAGs, persistence
+semantics, security model, and interface behavior are specified in
+[MULTI_AGENT_ARCHITECTURE.md](MULTI_AGENT_ARCHITECTURE.md). This orchestration
+layer leaves Overall Score Formula v1.0.0 and Priority Formula v1.0.0 unchanged.

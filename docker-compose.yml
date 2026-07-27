@@ -65,7 +65,8 @@ services:
 
   worker:
     build:
-      context: ./apps/worker
+      context: .
+      dockerfile: apps/worker/Dockerfile
     command: celery --app worker_app.celery_app:celery_app worker --loglevel=${LOG_LEVEL:-INFO}
     environment:
       APP_ENV: ${APP_ENV:-development}

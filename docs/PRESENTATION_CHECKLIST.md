@@ -26,6 +26,13 @@
 - [ ] Top findings contain page URLs and evidence states.
 - [ ] The Action Plan contains owner, priority, and verification.
 - [ ] HTML, PDF, and JSON downloads have safe filenames and checksums.
+- [ ] The presentation PDF contains exactly 15 pages and never exceeds 20.
+- [ ] The Technical Appendix is separate from the presentation PDF.
+- [ ] Page Inventory JSON contains all 12 discovered URL states.
+- [ ] Chromium, Firefox, and WebKit are labelled as Playwright browser engines.
+- [ ] Desktop 1440 x 900 and mobile 390 x 844 coverage is explicit.
+- [ ] The compatibility matrix includes Pass, Partial, Fail, Not tested, and
+      Inconclusive labels without unsupported branded-browser claims.
 - [ ] A verified backup PDF is available locally without requiring internet
       access.
 

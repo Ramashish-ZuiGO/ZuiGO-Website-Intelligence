@@ -47,11 +47,10 @@ def test_presentation_shows_parallel_workflow_and_all_eight_agents() -> None:
     assert all(agent_id in component for agent_id in EXPECTED_AGENTS)
     assert "Parallel agent group" in component
     assert "Performance, accessibility, and site diagnostics" in component
-    assert "Six visible stages" in component
-    assert "Eight reusable agents and their contributions" in component
-    assert "ReportDeliveryPanel" in component
-    assert "Priority action plan" in component
-    assert "Verified report exports" in component
+    assert "Eight-agent summary" in component
+    assert "Priority Action Plan" in component
+    assert "Export Presentation PDF" in component
+    assert "Open Full Report" in component
 
 
 def test_presentation_has_explicit_states_fallback_and_coverage() -> None:
@@ -70,8 +69,8 @@ def test_presentation_has_explicit_states_fallback_and_coverage() -> None:
     assert "Prepared fallback report" in component
     assert "last verified prepared fallback report" in component
     assert "No execution is being shown as completed" in component
-    assert "evidence_coverage_numerator" in component
-    assert "evidence_coverage_denominator" in component
+    assert "coverage_numerator" in component
+    assert "coverage_denominator" in component
     assert "score_confidence_percent" in component
 
 
@@ -80,7 +79,7 @@ def test_presentation_accessibility_and_safe_rendering_contract() -> None:
     assert 'aria-live="polite"' in component
     assert 'aria-atomic="true"' in component
     assert 'aria-label="Demo controls"' in component
-    assert 'aria-label="Demo analysis stages"' in component
+    assert 'aria-label="Analysis stages"' in component
     assert "focus-visible:outline" in component
     assert "<main" in component
     assert "<header" in component
@@ -89,3 +88,43 @@ def test_presentation_accessibility_and_safe_rendering_contract() -> None:
     assert "<h2" in component
     assert "dangerouslySetInnerHTML" not in component
     assert "innerHTML" not in component
+
+
+def test_progressive_disclosure_inventory_browser_matrix_and_plain_labels() -> None:
+    component = PRESENTATION.read_text(encoding="utf-8")
+    for tab in (
+        "Overview",
+        "Pages",
+        "Browser Compatibility",
+        "Findings",
+        "Action Plan",
+        "Scores",
+        "Agents",
+        "Technical Details",
+    ):
+        assert f'"{tab}"' in component
+    assert 'role="tablist"' in component
+    assert 'role="tabpanel"' in component
+    assert "Page Inventory" in component
+    assert "Filter pages" in component
+    assert "Analysis status" in component
+    assert "View page-level details" in component
+    assert all(label in component for label in ("Chromium", "Firefox", "WebKit"))
+    assert "View All Affected Pages" in component
+    assert ".slice(0, 5)" in component
+    assert ".slice(0, 10)" in component
+
+
+def test_normal_presentation_does_not_render_internal_contract_fields() -> None:
+    component = PRESENTATION.read_text(encoding="utf-8")
+    forbidden_rendered_labels = (
+        "Finding ID",
+        "Rule ID",
+        "Tool IDs",
+        "Provider metadata",
+        "Execution logs",
+        "Raw JSON",
+        "Stack trace",
+    )
+    assert all(label not in component for label in forbidden_rendered_labels)
+    assert "dangerouslySetInnerHTML" not in component

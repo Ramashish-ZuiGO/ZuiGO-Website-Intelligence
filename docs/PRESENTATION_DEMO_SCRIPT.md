@@ -14,6 +14,10 @@ prepared report is labelled as synthetic demonstration evidence.
 5. Download one export and confirm that it opens. Return to presentation mode.
 6. Select **Reset Demo**, then leave the clean presentation screen open.
 
+Confirm the report controls show **Export Presentation PDF**, **Open Full
+Report**, **Export Technical Appendix**, **Download Evidence JSON**, and
+**Download Page Inventory JSON**.
+
 ## Suggested five-to-seven-minute narrative
 
 ### 1. Frame the product (45 seconds)
@@ -46,6 +50,17 @@ Call out:
 - evidence coverage `15/16 (93.75%)`;
 - the unavailable CrUX field-evidence state, which is not displayed as passed;
 - each of the eight reusable agents and its retained contribution.
+
+Open **Pages** and explain that discovered, visited, and successfully analysed
+are different states. The prepared fixture shows 12 discovered URLs, 10
+scheduled pages, 9 visited pages, and 7 successfully analysed pages (7/10,
+70%). Failed, skipped, excluded, redirected, duplicate-normalised, and
+incomplete-evidence counts remain visible.
+
+Open **Browser Compatibility** and identify the tests as Playwright Chromium,
+Firefox, and WebKit engine tests at 1440 x 900 and 390 x 844. Point out the
+WebKit checkout failure and the explicit limitation that branded browser
+versions are not being claimed.
 
 Overall Score Formula v1.0.0 deterministically combines the available category
 scores using the configured weights; unavailable evidence affects coverage and
@@ -93,9 +108,11 @@ screen clearly opens the last verified prepared report as a fallback.
 4. Move through **Top findings** and **Priority action plan**.
 5. Use the embedded **Prepared report viewer** navigation.
 6. Select **Download PDF**, then mention the HTML and JSON alternatives.
-7. For the fallback rehearsal, use the previously prepared browser/session and
+7. Open **Technical Details** and point out the separate appendix, evidence
+   JSON, and page-inventory JSON exports.
+8. For the fallback rehearsal, use the previously prepared browser/session and
    select **Open Prepared Demo Report** if live services are unavailable.
-8. Select **Reset Demo** after the rehearsal.
+9. Select **Reset Demo** after the rehearsal.
 
 ## Prepared fallback wording
 

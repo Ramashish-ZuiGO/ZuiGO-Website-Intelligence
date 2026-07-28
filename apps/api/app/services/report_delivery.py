@@ -5,6 +5,7 @@ import re
 import textwrap
 import uuid
 from datetime import UTC, datetime
+from io import BytesIO
 from typing import Any
 
 from sqlalchemy import select
@@ -17,10 +18,12 @@ from app.models import (
     AccessibilityNode,
     ActionGenerationExecution,
     ActionItem,
+    AgentArtifact,
     AgentExecution,
     AgentRun,
     AnalysisFinding,
     AnalysisRun,
+    DiscoveryRun,
     ReportArtifact,
     ReportExecution,
     ReportSection,
@@ -32,6 +35,7 @@ from app.models import (
     WebsitePage,
 )
 from app.services.agent_platform_registry import AgentRegistry
+from app.services.browser_compatibility import ENGINE_LABELS
 from app.services.scoring_formula import FORMULA_ID, FORMULA_VERSION
 
 REPORT_VERSION = "1.1.0"
@@ -379,6 +383,196 @@ def _loaded_run(db: Session, run_id: uuid.UUID) -> AnalysisRun:
     if run is None:
         raise ReportDeliveryError("ANALYSIS_RUN_NOT_FOUND", "Analysis run not found.", 404)
     return run
+
+
+def _real_evidence_summary(
+    db: Session,
+    run: AnalysisRun,
+    workflow: AgentExecution,
+    sections: list[dict[str, Any]],
+) -> dict[str, Any]:
+    discovery_id = workflow.structured_input.get("discovery_run_id")
+    discovery = db.get(DiscoveryRun, uuid.UUID(str(discovery_id))) if discovery_id else None
+    pages = list(
+        db.scalars(
+            select(WebsitePage)
+            .where(
+                WebsitePage.website_id == run.website_id,
+                *([WebsitePage.last_discovery_run_id == discovery.id] if discovery else []),
+            )
+            .order_by(WebsitePage.normalized_url, WebsitePage.id)
+        )
+    )
+    browser_artifact = db.scalar(
+        select(AgentArtifact).where(
+            AgentArtifact.execution_id == workflow.id,
+            AgentArtifact.artifact_type == "browser_compatibility_evidence",
+        )
+    )
+    browser = (
+        browser_artifact.artifact_metadata
+        if browser_artifact
+        else {
+            "status": "unavailable",
+            "engines": [],
+            "viewports": [],
+            "matrix": [],
+            "observations": [],
+            "limitations": [
+                "Cross-browser evidence was unavailable and is not represented as passed."
+            ],
+        }
+    )
+    observations_by_url: dict[str, set[str]] = {}
+    for observation in browser.get("observations", []):
+        if observation.get("state") in {"not_tested", "unavailable"}:
+            continue
+        observations_by_url.setdefault(str(observation["page_url"]), set()).add(
+            str(observation.get("engine_label") or observation.get("engine"))
+        )
+    all_findings = []
+    for section in sections:
+        values = section["content"].get("findings", [])
+        if isinstance(values, list):
+            all_findings.extend(item for item in values if isinstance(item, dict))
+    finding_by_url: dict[str, list[dict[str, Any]]] = {}
+    for finding in all_findings:
+        for occurrence in finding.get("exact_occurrences", []):
+            if isinstance(occurrence, dict) and occurrence.get("normalized_url"):
+                finding_by_url.setdefault(
+                    str(occurrence["normalized_url"]),
+                    [],
+                ).append(finding)
+    severity_order = {
+        "critical": 0,
+        "high": 1,
+        "medium": 2,
+        "low": 3,
+        "informational": 4,
+    }
+    inventory = []
+    for page in pages:
+        findings = finding_by_url.get(page.normalized_url, [])
+        highest = (
+            min(
+                (str(item.get("severity", "informational")) for item in findings),
+                key=lambda value: severity_order.get(value, 99),
+            )
+            if findings
+            else None
+        )
+        analysis_status = (
+            page.eligibility_status
+            if page.eligibility_status != "eligible"
+            else page.page_analysis_level_1_status
+        )
+        inventory.append(
+            {
+                "page_id": str(page.id),
+                "url": page.normalized_url,
+                "page_title": page.page_title,
+                "page_type": page.page_type,
+                "http_status": next(
+                    (
+                        item.http_status_code
+                        for item in page.page_analysis_runs
+                        if item.analysis_level == 1
+                    ),
+                    None,
+                ),
+                "analysis_status": analysis_status,
+                "browser_engines_tested": sorted(
+                    observations_by_url.get(
+                        page.final_url or page.normalized_url,
+                        set(),
+                    )
+                ),
+                "issue_count": len(
+                    {str(item.get("finding_id")) for item in findings if item.get("finding_id")}
+                ),
+                "highest_severity": highest,
+                "evidence_coverage": (
+                    100.0
+                    if analysis_status == "completed"
+                    else 50.0
+                    if analysis_status == "partial"
+                    else 0.0
+                ),
+            }
+        )
+    eligible = [item for item in pages if item.eligibility_status == "eligible"]
+    scheduled = eligible[: int(workflow.structured_input.get("maximum_pages") or len(eligible))]
+    successful = [item for item in scheduled if item.page_analysis_level_1_status == "completed"]
+    failed = [item for item in scheduled if item.page_analysis_level_1_status == "failed"]
+    analysed = [
+        item
+        for item in scheduled
+        if item.page_analysis_level_1_status in {"completed", "partial", "failed"}
+    ]
+    denominator = len(scheduled)
+    return {
+        "submitted_url": workflow.structured_input.get("submitted_url"),
+        "normalized_url": workflow.structured_input.get("normalized_url") or run.website.url,
+        "page_coverage": {
+            "total_urls_discovered": discovery.urls_discovered if discovery else 0,
+            "total_pages_scheduled": denominator,
+            "total_pages_visited": sum(page.final_url is not None for page in pages),
+            "successfully_analysed_pages": len(successful),
+            "analysed_pages": len(analysed),
+            "failed_pages": len(failed),
+            "skipped_pages": discovery.urls_skipped if discovery else 0,
+            "excluded_pages": discovery.urls_excluded if discovery else 0,
+            "redirected_pages": sum(
+                bool(page.final_url and page.final_url != page.normalized_url) for page in pages
+            ),
+            "duplicate_normalized_pages": (
+                max(0, discovery.urls_discovered - discovery.urls_unique) if discovery else 0
+            ),
+            "pages_with_incomplete_evidence": sum(
+                page.page_analysis_level_1_status in {"pending", "partial"} for page in scheduled
+            ),
+            "coverage_numerator": len(successful),
+            "coverage_denominator": denominator,
+            "coverage_percentage": (
+                round(len(successful) / denominator * 100, 1) if denominator else None
+            ),
+            "started_at": (
+                discovery.started_at.isoformat()
+                if discovery and discovery.started_at
+                else run.started_at.isoformat()
+                if run.started_at
+                else None
+            ),
+            "completed_at": (
+                workflow.completed_at.isoformat()
+                if workflow.completed_at
+                else run.completed_at.isoformat()
+                if run.completed_at
+                else None
+            ),
+            "duration_seconds": (
+                max(
+                    0.0,
+                    (
+                        (
+                            (workflow.completed_at or datetime.now(UTC)).replace(
+                                tzinfo=((workflow.completed_at or datetime.now(UTC)).tzinfo or UTC)
+                            )
+                        )
+                        - (
+                            (discovery.started_at or run.started_at).replace(
+                                tzinfo=((discovery.started_at or run.started_at).tzinfo or UTC)
+                            )
+                        )
+                    ).total_seconds(),
+                )
+                if discovery and (discovery.started_at or run.started_at)
+                else None
+            ),
+        },
+        "page_inventory": inventory,
+        "browser_compatibility": browser,
+    }
 
 
 def _finding_sort_key(item: dict[str, Any]) -> tuple[int, str, str]:
@@ -735,6 +929,105 @@ def _accessibility_finding_payload(
     }
 
 
+def _browser_finding_payload(
+    row: dict[str, Any],
+    artifact: AgentArtifact,
+) -> dict[str, Any]:
+    affected_engines = [
+        ENGINE_LABELS[engine]
+        for engine, state in row.get("engines", {}).items()
+        if state in {"incompatible", "partially_compatible"}
+    ]
+    working_engines = [
+        ENGINE_LABELS[engine]
+        for engine, state in row.get("engines", {}).items()
+        if state == "compatible"
+    ]
+    finding_id = uuid.uuid5(
+        artifact.artifact_id,
+        f"browser-finding:{row['page_url']}",
+    )
+    occurrence = {
+        "normalized_url": row["page_url"],
+        "status_code": None,
+        "page_title": row.get("page_title"),
+        "page_type": "unknown",
+        "section": "browser_compatibility",
+        "selector": None,
+        "resource_url": None,
+        "location": "Rendered page and critical content",
+        "observed_value": ", ".join(
+            f"{ENGINE_LABELS[engine]}: {state.replace('_', ' ')}"
+            for engine, state in row.get("engines", {}).items()
+        ),
+        "expected_value": "The page remains usable in every explicitly tested engine.",
+        "evidence_timestamp": artifact.created_at.isoformat(),
+        "analysis_provider": "Playwright browser-engine analysis",
+        "analysis_provider_version": artifact.artifact_metadata.get("profile_version"),
+        "artifact_reference": f"agent_artifact:{artifact.artifact_id}",
+        "scope": "page",
+        "browser_engines_affected": affected_engines,
+        "browser_engines_where_it_works": working_engines,
+    }
+    return {
+        "finding_id": str(finding_id),
+        "finding_code": "browser_engine_compatibility",
+        "finding_type": "browser_compatibility",
+        "issue_title": (
+            f"Browser-engine compatibility differs on {row.get('page_title') or row['page_url']}"
+        ),
+        "plain_language_explanation": (
+            "The page did not behave consistently across the explicitly tested "
+            "Playwright browser engines."
+        ),
+        "technical_explanation": occurrence["observed_value"],
+        "category": "browser_compatibility",
+        "severity": "high" if row.get("result") == "incompatible" else "medium",
+        "confidence": {"classification": "high", "percent": None},
+        "affected_pages": [occurrence],
+        "exact_occurrences": [occurrence],
+        "affected_page_count": 1,
+        "occurrence_count": 1,
+        "evidence_references": artifact.evidence_references,
+        "evidence_source": {
+            "source": "playwright_browser_engines",
+            "provider": "Playwright",
+            "provider_version": artifact.artifact_metadata.get("profile_version"),
+        },
+        "detecting_agent": "performance_agent",
+        "validating_agent": "evidence_validation_agent",
+        "likely_cause": (
+            "The retained engine observations establish a difference; source-code "
+            "ownership requires repository evidence."
+        ),
+        "technical_impact": (
+            "A rendered page, critical element, interaction, or layout differs in a tested engine."
+        ),
+        "business_impact": (
+            "Visitors using an affected engine may be unable to complete the intended task."
+        ),
+        "recommended_remediation": (
+            "Review the retained engine observations, correct the affected component, "
+            "and retest the same page, engines, and viewports."
+        ),
+        "responsible_role": "Frontend engineering",
+        "estimated_effort_band": "unestimated",
+        "verification_procedure": (
+            "Repeat the configured Chromium, Firefox, and WebKit engine tests and "
+            "confirm the page passes at every retained viewport."
+        ),
+        "related_finding_ids": [],
+        "evidence_limitations": (
+            "Results cover only the listed Playwright engines, pages, and viewports; "
+            "they do not claim every branded browser version."
+        ),
+        "evidence_state": "available",
+        "scope": "page",
+        "affected_browser_engines": affected_engines,
+        "working_browser_engines": working_engines,
+    }
+
+
 def _build_sections(
     db: Session,
     run: AnalysisRun,
@@ -836,6 +1129,23 @@ def _build_sections(
             .order_by(AgentRun.created_at, AgentRun.agent_id, AgentRun.attempt)
         )
     )
+    browser_artifact = db.scalar(
+        select(AgentArtifact).where(
+            AgentArtifact.execution_id == workflow.id,
+            AgentArtifact.artifact_type == "browser_compatibility_evidence",
+        )
+    )
+    browser_compatibility = browser_artifact.artifact_metadata if browser_artifact else {}
+    browser_findings = (
+        [
+            _browser_finding_payload(row, browser_artifact)
+            for row in browser_compatibility.get("matrix", [])
+            if row.get("result") in {"incompatible", "partially_compatible"}
+        ]
+        if browser_artifact
+        else []
+    )
+    browser_refs = browser_artifact.evidence_references if browser_artifact else []
     workflow_ref = [_evidence("agent_execution", workflow.execution_id)]
     pages = list(
         db.scalars(
@@ -909,6 +1219,7 @@ def _build_sections(
             *detailed_analysis_findings,
             *detailed_diagnostic_findings,
             *detailed_accessibility_findings,
+            *browser_findings,
         ],
         key=_finding_sort_key,
     )
@@ -919,6 +1230,7 @@ def _build_sections(
         if str(item["category"]).casefold()
         in {"security", "best_practices", "best-practices", "technical", "performance"}
     ]
+    technical_findings.extend(browser_findings)
     content_findings = [
         item
         for item in detailed_analysis_findings
@@ -1195,7 +1507,7 @@ def _build_sections(
         ),
         section(
             "performance",
-            status="available" if run.result else "unavailable",
+            status="available" if run.result or browser_artifact else "unavailable",
             content={
                 "laboratory_evidence_available": bool(
                     run.result and run.result.raw_lighthouse_data
@@ -1208,9 +1520,13 @@ def _build_sections(
                     for item in detailed_analysis_findings
                     if str(item["category"]).casefold() == "performance"
                 ],
+                "browser_compatibility": browser_compatibility,
+                "browser_engine_tests": bool(browser_artifact),
             },
-            evidence=result_ref,
-            unavailable_reason=None if run.result else "Performance evidence was not analysed.",
+            evidence=[*result_ref, *browser_refs],
+            unavailable_reason=(
+                None if run.result or browser_artifact else "Performance evidence was not analysed."
+            ),
         ),
         section(
             "accessibility",
@@ -1310,6 +1626,7 @@ def _build_sections(
             },
             evidence=[
                 *result_ref,
+                *browser_refs,
                 *[
                     reference
                     for item in technical_findings
@@ -1353,7 +1670,12 @@ def _build_sections(
                 "findings": all_detailed_findings,
                 "occurrences_are_capped": False,
             },
-            evidence=[*finding_refs, *diagnostic_refs, *accessibility_refs],
+            evidence=[
+                *finding_refs,
+                *diagnostic_refs,
+                *accessibility_refs,
+                *browser_refs,
+            ],
             unavailable_reason=(
                 None
                 if all_detailed_findings
@@ -1941,6 +2263,293 @@ def _pdf_artifact(snapshot: dict[str, Any]) -> bytes:
     return bytes(output)
 
 
+REAL_PRESENTATION_TITLES = (
+    "Cover",
+    "Executive Summary",
+    "Website Scan Coverage",
+    "Browser Compatibility",
+    "Overall and Category Scores",
+    "Top 10 Priority Findings",
+    "Performance Summary",
+    "Accessibility Summary",
+    "SEO and Content Summary",
+    "Technical and Security Summary",
+    "Page-Level Problem Summary",
+    "Priority Action Plan",
+    "Evidence Coverage and Limitations",
+    "Compact Multi-Agent Summary",
+    "Conclusion",
+)
+
+
+def _section_content(
+    snapshot: dict[str, Any],
+    section_key: str,
+) -> dict[str, Any]:
+    section = next(
+        (item for item in snapshot.get("sections", []) if item.get("section_key") == section_key),
+        None,
+    )
+    return section.get("content", {}) if section else {}
+
+
+def _presentation_lines(
+    snapshot: dict[str, Any],
+    title: str,
+) -> list[str]:
+    coverage = snapshot.get("page_coverage", {})
+    browser = snapshot.get("browser_compatibility", {})
+    findings = _section_content(snapshot, "page_level_findings").get("findings", [])
+    actions = _section_content(snapshot, "priority_action_plan").get("actions", [])
+    if title == "Executive Summary":
+        return [
+            f"Website: {snapshot.get('website_name')} - {snapshot.get('normalized_url')}",
+            f"Overall score: {snapshot.get('overall_score')}/100"
+            if snapshot.get("overall_score") is not None
+            else "Overall score: unavailable because grounded score evidence is incomplete.",
+            (
+                f"Visited {coverage.get('total_pages_visited', 0)} page(s); "
+                f"successfully analysed {coverage.get('coverage_numerator', 0)}/"
+                f"{coverage.get('coverage_denominator', 0)} "
+                f"({coverage.get('coverage_percentage')}%)."
+            ),
+            "Browser engines tested: "
+            + ", ".join(
+                item.get("label", item.get("engine", "Unknown engine"))
+                for item in browser.get("engines", [])
+            ),
+            *[
+                f"Priority problem: {item.get('issue_title')} - {item.get('business_impact')}"
+                for item in findings[:5]
+            ],
+            *[
+                f"Priority action {item.get('priority_rank')}: {item.get('title')}"
+                for item in actions[:5]
+            ],
+            "Unavailable evidence is explicitly identified and is never treated as passed.",
+        ]
+    if title == "Website Scan Coverage":
+        labels = (
+            ("Discovered", "total_urls_discovered"),
+            ("Scheduled", "total_pages_scheduled"),
+            ("Visited", "total_pages_visited"),
+            ("Analysed", "analysed_pages"),
+            ("Successfully analysed", "successfully_analysed_pages"),
+            ("Failed", "failed_pages"),
+            ("Skipped", "skipped_pages"),
+            ("Excluded", "excluded_pages"),
+            ("Redirected", "redirected_pages"),
+            ("Duplicate-normalised", "duplicate_normalized_pages"),
+            ("Incomplete evidence", "pages_with_incomplete_evidence"),
+        )
+        return [
+            *[f"{label}: {coverage.get(key, 0)}" for label, key in labels],
+            (
+                f"Page coverage: {coverage.get('coverage_numerator', 0)}/"
+                f"{coverage.get('coverage_denominator', 0)} "
+                f"({coverage.get('coverage_percentage')}%)"
+            ),
+            f"Started: {coverage.get('started_at') or 'Unavailable'}",
+            f"Completed: {coverage.get('completed_at') or 'Unavailable'}",
+            f"Duration: {coverage.get('duration_seconds') or 'Unavailable'} seconds",
+        ]
+    if title == "Browser Compatibility":
+        lines = [
+            "These are Playwright browser-engine tests, not claims about every branded version.",
+            f"Status: {browser.get('status', 'unavailable')}",
+        ]
+        lines.extend(
+            (
+                f"{item.get('engine')}: {item.get('tested_pages', 0)}/"
+                f"{item.get('eligible_pages', 0)} pages "
+                f"({item.get('percentage')}%)"
+            )
+            for item in browser.get("engine_coverage", [])
+        )
+        lines.extend(
+            (
+                f"{item.get('page_title') or item.get('page_url')}: "
+                f"{str(item.get('result', 'not_tested')).replace('_', ' ')}; "
+                f"{item.get('issue_count', 0)} issue(s)"
+            )
+            for item in browser.get("matrix", [])[:10]
+        )
+        return lines or ["Browser-engine evidence is unavailable."]
+    if title == "Overall and Category Scores":
+        scores = _section_content(snapshot, "scores")
+        return [
+            f"Overall score: {scores.get('overall_score')}/100"
+            if scores.get("overall_score") is not None
+            else "Overall score: unavailable",
+            *[
+                f"{item.get('category_id')}: {item.get('score')}/100"
+                for item in scores.get("categories", [])
+                if item.get("score") is not None
+            ],
+            f"Formula version: {scores.get('formula_version', FORMULA_VERSION)} (unchanged)",
+        ]
+    if title == "Top 10 Priority Findings":
+        return [
+            f"{index}. [{str(item.get('severity', '')).upper()}] "
+            f"{item.get('issue_title')} - {item.get('affected_page_count')} page(s). "
+            f"{item.get('recommended_remediation')}"
+            for index, item in enumerate(findings[:10], 1)
+        ] or ["No retained finding evidence is available."]
+    section_map = {
+        "Performance Summary": "performance",
+        "Accessibility Summary": "accessibility",
+        "SEO and Content Summary": "content_seo",
+        "Technical and Security Summary": "security_technical",
+    }
+    if title in section_map:
+        content = _section_content(snapshot, section_map[title])
+        values = content.get("findings", [])
+        return [
+            f"[{str(item.get('severity', '')).upper()}] {item.get('issue_title')}: "
+            f"{item.get('why_it_matters') or item.get('technical_impact')}"
+            for item in values[:8]
+        ] or ["Evidence was unavailable or no finding record was retained."]
+    if title == "Page-Level Problem Summary":
+        return [
+            f"{item.get('issue_title')}: {item.get('affected_page_count')} page(s), "
+            f"{item.get('occurrence_count')} occurrence(s); "
+            + ", ".join(
+                occurrence.get("normalized_url", "")
+                for occurrence in item.get("exact_occurrences", [])[:3]
+            )
+            for item in findings[:10]
+        ] or ["No page-level finding record was retained."]
+    if title == "Priority Action Plan":
+        return [
+            f"{item.get('priority_rank')}. {item.get('title')} - "
+            f"owner: {item.get('responsible_role')}; "
+            f"verify: {item.get('verification_method')}"
+            for item in actions[:10]
+        ] or ["No evidence-grounded action plan is available."]
+    if title == "Evidence Coverage and Limitations":
+        return [
+            (
+                f"Page coverage: {coverage.get('coverage_numerator', 0)}/"
+                f"{coverage.get('coverage_denominator', 0)} "
+                f"({coverage.get('coverage_percentage')}%)."
+            ),
+            *snapshot.get("limitations", []),
+            *browser.get("limitations", []),
+        ]
+    if title == "Compact Multi-Agent Summary":
+        agents = _section_content(snapshot, "multi_agent_execution").get("agents", [])
+        return [
+            f"{str(item.get('agent_id', '')).replace('_', ' ').title()}: "
+            f"{item.get('status')}; evidence records "
+            f"{len(item.get('evidence_produced', []))}"
+            for item in agents
+        ]
+    if title == "Conclusion":
+        return [
+            (
+                f"The analysis retained {len(findings)} finding(s) from "
+                f"{coverage.get('coverage_numerator', 0)}/"
+                f"{coverage.get('coverage_denominator', 0)} successfully analysed pages."
+            ),
+            "Complete the highest-priority actions, then create an independent reanalysis.",
+            "No prepared-demo evidence is included in this report.",
+        ]
+    return []
+
+
+def _real_presentation_pdf(snapshot: dict[str, Any]) -> bytes:
+    from reportlab.lib.colors import HexColor
+    from reportlab.lib.pagesizes import A4
+    from reportlab.pdfgen.canvas import Canvas
+
+    output = BytesIO()
+    pdf = Canvas(output, pagesize=A4, pageCompression=1, invariant=1)
+    width, height = A4
+    for page_number, title in enumerate(REAL_PRESENTATION_TITLES, 1):
+        if page_number == 1:
+            pdf.setFillColor(HexColor("#123A63"))
+            pdf.rect(0, 0, width, height, fill=1, stroke=0)
+            pdf.setFillColor(HexColor("#FFFFFF"))
+            pdf.setFont("Helvetica-Bold", 25)
+            pdf.drawString(50, height - 120, "Website Analysis")
+            pdf.drawString(50, height - 154, "Presentation Report")
+            pdf.setFont("Helvetica", 12)
+            pdf.drawString(
+                50,
+                height - 205,
+                str(snapshot.get("website_name") or "Website")[:75],
+            )
+            pdf.drawString(
+                50,
+                height - 225,
+                str(snapshot.get("normalized_url") or snapshot.get("website_url"))[:85],
+            )
+        else:
+            pdf.setFillColor(HexColor("#123A63"))
+            pdf.rect(0, height - 48, width, 48, fill=1, stroke=0)
+            pdf.setFillColor(HexColor("#172033"))
+            pdf.setFont("Helvetica-Bold", 18)
+            pdf.drawString(48, height - 82, title)
+            pdf.setStrokeColor(HexColor("#C94F1D"))
+            pdf.setLineWidth(2)
+            pdf.line(48, height - 92, width - 48, height - 92)
+            y = height - 116
+            pdf.setFont("Helvetica", 9)
+            for raw_line in _presentation_lines(snapshot, title):
+                for line in textwrap.wrap(str(raw_line), width=100) or [""]:
+                    if y < 55:
+                        break
+                    pdf.drawString(48, y, line)
+                    y -= 13
+                y -= 3
+        pdf.setFont("Helvetica", 8)
+        pdf.drawRightString(
+            width - 45,
+            24,
+            f"Page {page_number} of {len(REAL_PRESENTATION_TITLES)}",
+        )
+        pdf.showPage()
+    pdf.setTitle(f"{snapshot.get('website_name') or 'Website'} analysis presentation")
+    pdf.setAuthor("ZuiGO Website Intelligence")
+    pdf.setSubject("Evidence-grounded real website analysis")
+    pdf.save()
+    content = output.getvalue()
+    output.close()
+    return content
+
+
+def render_additional_report_artifact(
+    artifact_format: str,
+    snapshot: dict[str, Any],
+) -> tuple[bytes, str, str]:
+    safe_snapshot = sanitize_persisted_value(snapshot)
+    report_id = uuid.UUID(str(safe_snapshot["report_id"]))
+    website_name = str(safe_snapshot.get("website_name") or "website-report")
+    if artifact_format == "presentation_pdf":
+        return (
+            _real_presentation_pdf(safe_snapshot),
+            "application/pdf",
+            _safe_filename(website_name, report_id, "presentation.pdf"),
+        )
+    if artifact_format == "technical_appendix":
+        return (
+            _pdf_artifact(safe_snapshot),
+            "application/pdf",
+            _safe_filename(website_name, report_id, "technical-appendix.pdf"),
+        )
+    if artifact_format == "page_inventory":
+        return (
+            json.dumps(
+                safe_snapshot.get("page_inventory", []),
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode(),
+            "application/json",
+            _safe_filename(website_name, report_id, "page-inventory.json"),
+        )
+    raise ValueError("Unsupported additional report format.")
+
+
 def render_report_artifact(artifact_format: str, snapshot: dict[str, Any]) -> bytes:
     safe_snapshot = sanitize_persisted_value(snapshot)
     if artifact_format == "json":
@@ -1975,6 +2584,7 @@ def generate_report(
     )
     score = _latest_score(db, run.id)
     sections = _build_sections(db, run, workflow, score)
+    real_evidence = _real_evidence_summary(db, run, workflow, sections)
     evidence_references = sorted(
         {
             canonical_json(reference): reference
@@ -1994,6 +2604,7 @@ def generate_report(
         "template_id": TEMPLATE_ID,
         "template_version": TEMPLATE_VERSION,
         "sections": sections,
+        "real_evidence": real_evidence,
         "evidence_references": evidence_references,
     }
     input_fingerprint = fingerprint(evidence_input)
@@ -2107,6 +2718,11 @@ def generate_report(
         },
         "confidence_percent": report.confidence_percent,
         "overall_score": score.overall_score if score else None,
+        "submitted_url": real_evidence["submitted_url"],
+        "normalized_url": real_evidence["normalized_url"],
+        "page_coverage": real_evidence["page_coverage"],
+        "page_inventory": real_evidence["page_inventory"],
+        "browser_compatibility": real_evidence["browser_compatibility"],
         "sections": [
             {
                 **section,

@@ -603,6 +603,17 @@ def test_report_apis_filters_download_headers_and_errors(
         assert download.headers["content-disposition"].startswith("attachment; filename=")
         assert len(download.headers["x-content-sha256"]) == 64
         assert download.headers["x-content-type-options"] == "nosniff"
+    for artifact_format in (
+        "presentation_pdf",
+        "technical_appendix",
+        "page_inventory",
+    ):
+        download = client.get(f"/api/v1/reports/{report_id}/download/{artifact_format}")
+        assert download.status_code == 200, download.text
+        assert download.headers["content-disposition"].startswith("attachment; filename=")
+        assert hashlib.sha256(download.content).hexdigest() == download.headers["x-content-sha256"]
+    inventory = client.get(f"/api/v1/reports/{report_id}/download/page_inventory")
+    assert isinstance(inventory.json(), list)
     assert client.get(f"/api/v1/reports/{report_id}/download/xml").status_code == 422
     assert client.get(f"/api/v1/reports/{uuid.uuid4()}").status_code == 404
     assert (

@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -22,9 +22,9 @@ class DemoRunRequest(BaseModel):
 class DemoAgentRead(BaseModel):
     agent_id: str
     name: str
+    responsibility: str
     status: str
-    contribution: str
-    tool_ids: list[str]
+    processed_summary: str
 
 
 class DemoStageRead(BaseModel):
@@ -36,23 +36,59 @@ class DemoStageRead(BaseModel):
 
 
 class DemoFindingRead(BaseModel):
-    finding_id: UUID
     title: str
     severity: str
-    page_url: str
-    evidence_state: str
+    affected_page_count: int
+    occurrence_count: int
+    affected_browsers: list[str]
+    works_in_browsers: list[str]
+    plain_language_explanation: str
+    technical_explanation: str
+    why_it_matters: str
+    business_impact: str
+    technical_impact: str
+    evidence_summary: str
+    evidence_source: str
+    evidence_timestamp: str
+    example_pages: list[str]
+    remaining_page_count: int
+    recommended_fix: str
+    responsible_role: str
+    estimated_effort: str
+    verification: str
+    confidence: dict[str, Any]
+    detecting_agent: str
+    validating_agent: str
+    limitations: str
+    all_affected_pages: list[dict[str, Any]]
 
 
 class DemoActionRead(BaseModel):
-    action_id: UUID
+    priority_rank: int
     title: str
     priority_score: int
     responsible_role: str
-    verification: str
+    impact: str
+    effort: str
+    problem_being_solved: str
+    affected_scope: dict[str, Any]
+    affected_browsers: list[str]
+    dependencies: list[Any]
+    expected_measurable_outcome: str
+    verification_method: str
+    related_finding_ids: list[str]
+    evidence_references: list[dict[str, Any]]
 
 
 class DemoArtifactRead(BaseModel):
-    format: Literal["html", "pdf", "json"]
+    kind: Literal[
+        "presentation_html",
+        "presentation_pdf",
+        "technical_appendix",
+        "evidence_json",
+        "page_inventory",
+    ]
+    label: str
     filename: str
     size_bytes: int
     checksum_sha256: str
@@ -80,6 +116,10 @@ class PresentationDemoRead(BaseModel):
     evidence_coverage_numerator: int
     evidence_coverage_denominator: int
     evidence_coverage_percentage: float | None
+    page_coverage: dict[str, Any]
+    page_inventory: list[dict[str, Any]]
+    browser_compatibility: dict[str, Any]
+    category_scores: list[dict[str, Any]]
     agents: list[DemoAgentRead]
     stages: list[DemoStageRead]
     top_findings: list[DemoFindingRead]

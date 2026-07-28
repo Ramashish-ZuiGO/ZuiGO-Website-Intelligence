@@ -18,6 +18,7 @@ from app.models import (
 from app.schemas.agent_platform import (
     AgentDefinition,
     ExecutionStatus,
+    RepositoryAnalysisInput,
     WorkflowExecutionCreate,
 )
 from app.services.agent_platform_registry import (
@@ -379,6 +380,90 @@ def test_tool_access_permission_unavailable_and_retry_behavior(
         )
         assert record.result.status == ExecutionStatus.COMPLETED
         assert record.activity["attempts"] == 2
+
+
+def test_repository_agent_accepts_explicit_not_configured_state() -> None:
+    typed = RepositoryAnalysisInput(
+        project_id=uuid.uuid4(),
+        repository_connection_id=None,
+    )
+    assert typed.repository_connection_id is None
+    assert typed.evidence_references == []
+
+
+def test_browser_compatibility_evidence_is_retained_without_primary_result(
+    tmp_path: Path,
+) -> None:
+    factory = _session_factory(tmp_path)
+    project_id, website_id = _seed_scope(factory)
+    execution = _create(factory, _request(project_id, website_id))
+    with factory() as db:
+        persisted = db.scalar(
+            select(AgentExecution).where(AgentExecution.execution_id == execution.execution_id)
+        )
+        assert persisted is not None
+        definition = AgentRegistry.get("performance_agent")
+        assert definition is not None
+        run = AgentRun(
+            execution_id=persisted.id,
+            agent_id=definition.agent_id,
+            agent_version=definition.version,
+            input_fingerprint=persisted.input_fingerprint,
+            idempotency_key="browser-evidence-fallback",
+            structured_input={},
+        )
+        db.add(run)
+        db.flush()
+        artifact = AgentArtifact(
+            execution_id=persisted.id,
+            agent_run_id=run.id,
+            artifact_type="browser_compatibility_evidence",
+            name="Browser compatibility evidence",
+            storage_reference=f"database://agent-executions/{persisted.execution_id}/browser",
+            content_hash="a" * 64,
+            media_type="application/json",
+            artifact_metadata={
+                "status": "completed",
+                "engines": ["chromium", "firefox", "webkit"],
+                "matrix": [{"page_url": "https://example.test/"}],
+            },
+            evidence_references=[
+                {
+                    "evidence_type": "browser_compatibility_evidence",
+                    "evidence_id": str(persisted.execution_id),
+                    "source": "database",
+                }
+            ],
+        )
+        db.add(artifact)
+        db.flush()
+        result = (
+            ToolExecutionManager(
+                default_tool_adapters(),
+                sleeper=lambda _seconds: None,
+            )
+            .execute(
+                context=ToolContext(
+                    db=db,
+                    execution=persisted,
+                    agent_run=run,
+                    agent_definition=definition,
+                    execution_input=persisted.structured_input,
+                    dependency_evidence=[],
+                ),
+                tool_id="playwright_analysis",
+                payload={
+                    "execution_id": persisted.execution_id,
+                    "page_url": "https://example.test/",
+                },
+            )
+            .result
+        )
+        assert result.status == ExecutionStatus.PARTIAL
+        assert result.structured_output["browser_engine_evidence_available"] is True
+        assert result.structured_output["browser_engine_count"] == 3
+        assert result.structured_output["browser_matrix_page_count"] == 1
+        assert len(result.evidence_references) == 1
 
 
 def test_partial_failure_preserves_successful_branch_and_no_private_reasoning(

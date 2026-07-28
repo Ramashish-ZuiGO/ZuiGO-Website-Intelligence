@@ -20,13 +20,16 @@ from app.models.report_delivery import (
 )
 from app.models.website import Website
 from app.services.agent_platform_registry import AgentRegistry
+from app.services.presentation_exports import (
+    FRIENDLY_AGENT_DETAILS,
+    enrich_presentation_snapshot,
+    render_demo_export,
+)
 from app.services.report_delivery import (
-    ARTIFACT_MEDIA_TYPES,
     REPORT_VERSION,
     TEMPLATE_ID,
     TEMPLATE_VERSION,
     fingerprint,
-    render_report_artifact,
 )
 from app.services.report_demo import DEMO_GENERATED_AT, build_demonstration_snapshot
 
@@ -41,7 +44,7 @@ DEMO_PROFILE_ID = "global_general"
 DEMO_PROFILE_VERSION = "1.0.0"
 DEMO_WORKFLOW_ID = "full_website_analysis"
 DEMO_WORKFLOW_VERSION = "1.0.0"
-PREPARED_IDEMPOTENCY_KEY = "task-030-prepared-demo-v1"
+PREPARED_IDEMPOTENCY_KEY = "task-030-presentation-rescue-v2"
 DEMO_TIMESTAMP = datetime.fromisoformat(DEMO_GENERATED_AT)
 
 AGENT_CONTRIBUTIONS = {
@@ -440,6 +443,7 @@ def _persist_report(
             "score_execution_id": None,
         }
     )
+    enrich_presentation_snapshot(snapshot_payload)
     report = ReportExecution(
         report_id=report_id,
         project_id=project.id,
@@ -501,15 +505,20 @@ def _persist_report(
         )
     )
     for artifact_format in ("html", "pdf", "json"):
-        content = render_report_artifact(artifact_format, snapshot_payload)
+        export_kind = {
+            "html": "presentation-html",
+            "pdf": "presentation-pdf",
+            "json": "evidence-json",
+        }[artifact_format]
+        content, media_type, filename = render_demo_export(export_kind, snapshot_payload)
         artifact_id = uuid.uuid5(report_id, f"artifact:{artifact_format}:1")
         db.add(
             ReportArtifact(
                 artifact_id=artifact_id,
                 report_execution_id=report.id,
                 format=artifact_format,
-                media_type=ARTIFACT_MEDIA_TYPES[artifact_format],
-                filename=f"zuigo-prepared-demo-{str(report_id)[:8]}.{artifact_format}",
+                media_type=media_type,
+                filename=filename,
                 size_bytes=len(content),
                 checksum_sha256=hashlib.sha256(content).hexdigest(),
                 storage_location=f"database://report-artifacts/{artifact_id}",
@@ -525,10 +534,10 @@ def _agent_payload(execution: AgentExecution) -> list[dict[str, Any]]:
     return [
         {
             "agent_id": definition.agent_id,
-            "name": definition.name,
+            "name": FRIENDLY_AGENT_DETAILS[definition.agent_id][0],
+            "responsibility": FRIENDLY_AGENT_DETAILS[definition.agent_id][1],
             "status": statuses.get(definition.agent_id, "unavailable"),
-            "contribution": AGENT_CONTRIBUTIONS[definition.agent_id],
-            "tool_ids": list(definition.allowed_tool_ids),
+            "processed_summary": FRIENDLY_AGENT_DETAILS[definition.agent_id][2],
         }
         for definition in AgentRegistry.get_all()
     ]
@@ -559,39 +568,6 @@ def _stage_payload(execution: AgentExecution) -> list[dict[str, Any]]:
     return result
 
 
-def _report_highlights(
-    report: ReportExecution,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    payload = report.snapshot.snapshot_payload
-    findings_section = next(
-        item for item in payload["sections"] if item["section_key"] == "page_level_findings"
-    )
-    action_section = next(
-        item for item in payload["sections"] if item["section_key"] == "priority_action_plan"
-    )
-    findings = [
-        {
-            "finding_id": item["finding_id"],
-            "title": item["issue_title"],
-            "severity": item["severity"],
-            "page_url": item["exact_occurrences"][0]["normalized_url"],
-            "evidence_state": item["evidence_state"],
-        }
-        for item in findings_section["content"]["findings"][:3]
-    ]
-    actions = [
-        {
-            "action_id": item["action_id"],
-            "title": item["title"],
-            "priority_score": item["priority_score"],
-            "responsible_role": item["responsible_role"],
-            "verification": item["verification_method"],
-        }
-        for item in action_section["content"]["actions"][:5]
-    ]
-    return findings, actions
-
-
 def _presentation_payload(
     execution: AgentExecution,
     report: ReportExecution,
@@ -602,7 +578,61 @@ def _presentation_payload(
     status_message: str,
     reused: bool,
 ) -> dict[str, Any]:
-    findings, actions = _report_highlights(report)
+    snapshot = report.snapshot.snapshot_payload
+    presentation = snapshot["presentation"]
+    standard_artifacts = {artifact.format: artifact for artifact in report.artifacts}
+    artifact_specs = (
+        (
+            "presentation_html",
+            "Presentation HTML",
+            standard_artifacts["html"].filename,
+            standard_artifacts["html"].size_bytes,
+            standard_artifacts["html"].checksum_sha256,
+            f"/api/v1/reports/{report.report_id}/download/html",
+        ),
+        (
+            "presentation_pdf",
+            "Export Presentation PDF",
+            standard_artifacts["pdf"].filename,
+            standard_artifacts["pdf"].size_bytes,
+            standard_artifacts["pdf"].checksum_sha256,
+            f"/api/v1/reports/{report.report_id}/download/pdf",
+        ),
+        (
+            "evidence_json",
+            "Download Evidence JSON",
+            standard_artifacts["json"].filename,
+            standard_artifacts["json"].size_bytes,
+            standard_artifacts["json"].checksum_sha256,
+            f"/api/v1/reports/{report.report_id}/download/json",
+        ),
+    )
+    artifacts = [
+        {
+            "kind": kind,
+            "label": label,
+            "filename": filename,
+            "size_bytes": size,
+            "checksum_sha256": checksum,
+            "download_url": url,
+        }
+        for kind, label, filename, size, checksum, url in artifact_specs
+    ]
+    for kind, label, export_kind in (
+        ("technical_appendix", "Export Technical Appendix", "technical-appendix"),
+        ("page_inventory", "Download Page Inventory JSON", "page-inventory"),
+    ):
+        content, _media_type, filename = render_demo_export(export_kind, snapshot)
+        artifacts.append(
+            {
+                "kind": kind,
+                "label": label,
+                "filename": filename,
+                "size_bytes": len(content),
+                "checksum_sha256": hashlib.sha256(content).hexdigest(),
+                "download_url": (f"/api/v1/demo/reports/{report.report_id}/exports/{export_kind}"),
+            }
+        )
     return {
         "prepared": True,
         "presentation_status": presentation_status,
@@ -624,20 +654,15 @@ def _presentation_payload(
         "evidence_coverage_numerator": 15,
         "evidence_coverage_denominator": 16,
         "evidence_coverage_percentage": 93.75,
+        "page_coverage": presentation["coverage"],
+        "page_inventory": presentation["page_inventory"],
+        "browser_compatibility": presentation["browser_compatibility"],
+        "category_scores": presentation["category_scores"],
         "agents": _agent_payload(execution),
         "stages": _stage_payload(execution),
-        "top_findings": findings,
-        "top_actions": actions,
-        "artifacts": [
-            {
-                "format": artifact.format,
-                "filename": artifact.filename,
-                "size_bytes": artifact.size_bytes,
-                "checksum_sha256": artifact.checksum_sha256,
-                "download_url": (f"/api/v1/reports/{report.report_id}/download/{artifact.format}"),
-            }
-            for artifact in report.artifacts
-        ],
+        "top_findings": presentation["top_findings"],
+        "top_actions": presentation["top_actions"],
+        "artifacts": artifacts,
         "reused": reused,
     }
 
@@ -752,6 +777,10 @@ def demo_status(db: Session) -> dict[str, Any]:
             "evidence_coverage_numerator": 0,
             "evidence_coverage_denominator": 0,
             "evidence_coverage_percentage": None,
+            "page_coverage": {},
+            "page_inventory": [],
+            "browser_compatibility": {},
+            "category_scores": [],
             "agents": [],
             "stages": [],
             "top_findings": [],

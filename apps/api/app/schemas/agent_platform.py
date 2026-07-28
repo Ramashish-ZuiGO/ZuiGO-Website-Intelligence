@@ -1,7 +1,7 @@
 import re
 from datetime import datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -242,7 +242,7 @@ class WebsiteAnalysisInput(BaseModel):
 
 class RepositoryAnalysisInput(BaseModel):
     project_id: UUID
-    repository_connection_id: UUID
+    repository_connection_id: UUID | None = None
     evidence_references: list[str] = Field(default_factory=list)
 
 
@@ -322,6 +322,13 @@ class WorkflowExecutionCreate(BaseModel):
     website_id: UUID | None = None
     repository_connection_id: UUID | None = None
     page_analysis_execution_id: UUID | None = None
+    discovery_run_id: UUID | None = None
+    submitted_url: str | None = Field(default=None, max_length=2048)
+    normalized_url: str | None = Field(default=None, max_length=2048)
+    maximum_pages: int | None = Field(default=None, ge=1, le=50)
+    browser_engines: list[Literal["chromium", "firefox", "webkit"]] = Field(default_factory=list)
+    include_mobile: bool = True
+    execute_repository_agent: bool = False
     evidence_references: list[str] = Field(default_factory=list)
     idempotency_key: str = Field(min_length=1, max_length=255)
     max_concurrency: int = Field(default=3, ge=1, le=8)

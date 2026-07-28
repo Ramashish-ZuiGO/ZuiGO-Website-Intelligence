@@ -19,6 +19,21 @@ Priority Formula v1.0.0 are unchanged.
 Use the [presentation script](docs/PRESENTATION_DEMO_SCRIPT.md) and
 [readiness checklist](docs/PRESENTATION_CHECKLIST.md) before a demonstration.
 
+The presentation report separates deep evidence from executive communication:
+
+- the default dashboard uses Overview, Pages, Browser Compatibility, Findings,
+  Action Plan, Scores, Agents, and Technical Details views;
+- page coverage distinguishes discovered, scheduled, visited, analysed, failed,
+  skipped, excluded, redirected, duplicate-normalised, and incomplete states;
+- browser compatibility identifies Playwright Chromium, Firefox, and WebKit
+  engine coverage at desktop 1440 x 900 and mobile 390 x 844 viewports;
+- the concise presentation PDF is fixed at 15 pages and never exceeds 20;
+- a separate technical appendix preserves the full inventory, every occurrence,
+  selectors, browser evidence, and methodology;
+- evidence JSON and page-inventory JSON remain independently downloadable.
+
+Browser-engine results do not claim coverage for every branded browser version.
+
 ## Prerequisites
 
 - Node.js 24

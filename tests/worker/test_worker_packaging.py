@@ -17,6 +17,7 @@ def test_worker_build_packages_shared_api_app() -> None:
     assert "PYTHONPATH=/app" in dockerfile
     assert "COPY apps/api/app ./app" in dockerfile
     assert "COPY apps/worker/worker_app ./worker_app" in dockerfile
+    assert "playwright install --with-deps chromium firefox webkit" in dockerfile
     assert "httpx==0.28.1" in requirements
 
 
@@ -26,3 +27,12 @@ def test_worker_startup_modules_import_with_shared_app_services() -> None:
     ]
 
     assert {module.__name__ for module in imported_modules} == set(celery_app.conf.include)
+    assert "worker_app.tasks.real_analysis" in celery_app.conf.include
+    assert {
+        "worker.run_real_analysis_journey",
+        "worker.run_real_discovery_stage",
+        "worker.run_real_page_analysis_stage",
+        "worker.run_real_primary_analysis_stage",
+        "worker.run_real_browser_stage",
+        "worker.run_real_agent_stage",
+    } <= set(celery_app.tasks)

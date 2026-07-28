@@ -1,6 +1,8 @@
+import hashlib
 import uuid
 from datetime import UTC, datetime
 from typing import Annotated, Literal
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy import func, select
@@ -14,9 +16,14 @@ from app.models import (
     AgentRun,
     AnalysisRun,
     AnalysisStatus,
+    DiscoveryRun,
+    DiscoveryStatus,
+    PageAnalysisRun,
+    Project,
     ReportExecution,
     ScoreExecution,
     Website,
+    WebsitePage,
 )
 from app.schemas.agent_platform import WorkflowExecutionCreate
 from app.schemas.report_delivery import (
@@ -24,6 +31,9 @@ from app.schemas.report_delivery import (
     AnalysisJourneyStartRequest,
     EvidenceCoverageRead,
     PaginatedReports,
+    RealWebsiteAnalysisStartRead,
+    RealWebsiteAnalysisStartRequest,
+    RecentRealAnalysisRead,
     ReportArtifactList,
     ReportExecutionRead,
     ReportGenerateRequest,
@@ -32,18 +42,28 @@ from app.schemas.report_delivery import (
 )
 from app.services import profiles_registry
 from app.services.agent_platform_registry import WorkflowRegistry
-from app.services.analysis_queue import enqueue_analysis_journey
+from app.services.analysis_queue import (
+    enqueue_analysis_journey,
+    enqueue_real_analysis_journey,
+)
+from app.services.public_url_safety import (
+    PublicURLSafetyError,
+    validate_and_normalize_public_url,
+)
 from app.services.report_delivery import (
     ReportDeliveryError,
     generate_report,
     load_artifact,
     load_report,
+    render_additional_report_artifact,
 )
 from app.services.tool_execution import sanitize_persisted_value
 from app.services.workflow_execution import (
     TERMINAL_EXECUTION_STATUSES,
     WorkflowExecutionError,
     create_workflow_execution,
+    real_execution_is_stale,
+    real_execution_last_update,
     record_dispatch,
 )
 
@@ -65,6 +85,219 @@ def _workflow_error(exception: WorkflowExecutionError) -> ApplicationError:
         message=exception.message,
         status_code=exception.status_code,
     )
+
+
+def _real_start_read(
+    execution: AgentExecution,
+    analysis_run: AnalysisRun,
+    *,
+    reused: bool,
+) -> RealWebsiteAnalysisStartRead:
+    payload = execution.structured_input
+    return RealWebsiteAnalysisStartRead(
+        project_id=execution.project_id,
+        website_id=uuid.UUID(str(payload["website_id"])),
+        analysis_run_id=analysis_run.id,
+        discovery_run_id=uuid.UUID(str(payload["discovery_run_id"])),
+        page_analysis_execution_id=uuid.UUID(str(payload["page_analysis_execution_id"])),
+        workflow_execution_id=execution.execution_id,
+        submitted_url=str(payload["submitted_url"]),
+        normalized_url=str(payload["normalized_url"]),
+        analysis_status=analysis_run.status.value,
+        workflow_status=str(execution.structured_output.get("journey_status") or execution.status),
+        reused=reused,
+    )
+
+
+@router.post(
+    "/analysis/start",
+    response_model=RealWebsiteAnalysisStartRead,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def start_real_website_analysis(
+    request: RealWebsiteAnalysisStartRequest,
+    db: DatabaseSession,
+) -> RealWebsiteAnalysisStartRead:
+    try:
+        normalized_url = validate_and_normalize_public_url(request.website_url)
+    except PublicURLSafetyError as exception:
+        raise ApplicationError(
+            code=exception.code,
+            message=exception.safe_message,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        ) from exception
+
+    existing = db.scalar(
+        select(AgentExecution)
+        .where(
+            AgentExecution.workflow_id == "full_website_analysis",
+            AgentExecution.workflow_version == "1.0.0",
+            AgentExecution.idempotency_key == request.idempotency_key,
+        )
+        .order_by(AgentExecution.created_at.desc(), AgentExecution.id.desc())
+    )
+    if existing is not None:
+        if (
+            existing.structured_input.get("normalized_url") != normalized_url
+            or not existing.structured_input.get("discovery_run_id")
+            or existing.analysis_run_id is None
+        ):
+            raise ApplicationError(
+                code="ANALYSIS_IDEMPOTENCY_CONFLICT",
+                message="The idempotency key belongs to a different analysis request.",
+                status_code=status.HTTP_409_CONFLICT,
+            )
+        analysis_run = db.get(AnalysisRun, existing.analysis_run_id)
+        if analysis_run is None:
+            raise ApplicationError(
+                code="ANALYSIS_RUN_NOT_FOUND",
+                message="The retained analysis run is unavailable.",
+                status_code=status.HTTP_409_CONFLICT,
+            )
+        return _real_start_read(existing, analysis_run, reused=True)
+
+    website = db.scalar(
+        select(Website)
+        .where(Website.url == normalized_url)
+        .order_by(Website.created_at, Website.id)
+    )
+    if website is None:
+        hostname = urlsplit(normalized_url).hostname or "Website"
+        project = Project(
+            name=f"{hostname} website analysis",
+            description="Created from the real website analysis homepage.",
+        )
+        db.add(project)
+        db.flush()
+        website = Website(
+            project_id=project.id,
+            url=normalized_url,
+            name=hostname,
+        )
+        db.add(website)
+        db.flush()
+    project = db.get(Project, website.project_id)
+    assert project is not None
+
+    page_analysis_execution_id = uuid.uuid4()
+    discovery = DiscoveryRun(
+        website_id=website.id,
+        current_stage="queued",
+        configuration={
+            "maximum_pages": request.maximum_pages,
+            "max_html_pages": request.maximum_pages,
+            "max_lighthouse_pages": 0,
+            "browser_engines": list(request.browser_engines),
+            "include_mobile": request.include_mobile,
+            "submitted_url": request.website_url,
+            "normalized_url": normalized_url,
+            "page_analysis_execution_id": str(page_analysis_execution_id),
+        },
+    )
+    profile = profiles_registry.get_profile(website.profile_id)
+    if profile is None:
+        profile = profiles_registry.get_profile("global_general")
+    assert profile is not None
+    analysis_run = AnalysisRun(
+        website_id=website.id,
+        profile_id=profile.profile_id,
+        profile_version=profile.version,
+    )
+    db.add_all([discovery, analysis_run])
+    db.flush()
+    try:
+        execution, created = create_workflow_execution(
+            db,
+            WorkflowExecutionCreate(
+                workflow_id="full_website_analysis",
+                project_id=project.id,
+                analysis_run_id=analysis_run.id,
+                website_id=website.id,
+                page_analysis_execution_id=page_analysis_execution_id,
+                discovery_run_id=discovery.id,
+                submitted_url=request.website_url,
+                normalized_url=normalized_url,
+                maximum_pages=request.maximum_pages,
+                browser_engines=request.browser_engines,
+                include_mobile=request.include_mobile,
+                execute_repository_agent=True,
+                idempotency_key=request.idempotency_key,
+                max_concurrency=request.max_concurrency,
+            ),
+        )
+    except WorkflowExecutionError as exception:
+        db.rollback()
+        raise _workflow_error(exception) from exception
+    if not created:
+        persisted_run = db.get(AnalysisRun, execution.analysis_run_id)
+        assert persisted_run is not None
+        return _real_start_read(execution, persisted_run, reused=True)
+    try:
+        task_id = enqueue_real_analysis_journey(
+            str(analysis_run.id),
+            str(discovery.id),
+            str(page_analysis_execution_id),
+            str(execution.execution_id),
+            workflow_attempt=execution.attempt,
+        )
+    except Exception as exception:
+        analysis_run.status = AnalysisStatus.FAILED
+        analysis_run.error_code = "REAL_ANALYSIS_QUEUE_UNAVAILABLE"
+        analysis_run.error_message = "The website analysis could not be queued."
+        discovery.status = DiscoveryStatus.FAILED
+        discovery.current_stage = "failed"
+        discovery.progress_percent = 100
+        discovery.failure_code = "REAL_ANALYSIS_QUEUE_UNAVAILABLE"
+        discovery.failure_message = "The website analysis could not be queued."
+        execution.status = "failed"
+        execution.failure_details = {
+            "code": "REAL_ANALYSIS_QUEUE_UNAVAILABLE",
+            "message": "The website analysis could not be queued.",
+            "transient": True,
+        }
+        db.commit()
+        raise ApplicationError(
+            code="REAL_ANALYSIS_QUEUE_UNAVAILABLE",
+            message="The website analysis could not be queued.",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        ) from exception
+    analysis_run.celery_task_id = task_id
+    discovery.celery_task_id = task_id
+    record_dispatch(db, execution, task_id)
+    db.refresh(analysis_run)
+    db.refresh(execution)
+    return _real_start_read(execution, analysis_run, reused=False)
+
+
+@router.get("/analysis/recent", response_model=list[RecentRealAnalysisRead])
+def recent_real_analyses(
+    db: DatabaseSession,
+    limit: Annotated[int, Query(ge=1, le=20)] = 5,
+) -> list[RecentRealAnalysisRead]:
+    executions = list(
+        db.scalars(
+            select(AgentExecution)
+            .where(
+                AgentExecution.workflow_id == "full_website_analysis",
+                AgentExecution.structured_input["normalized_url"].as_string().isnot(None),
+            )
+            .order_by(AgentExecution.created_at.desc(), AgentExecution.id.desc())
+            .limit(limit)
+        )
+    )
+    return [
+        RecentRealAnalysisRead(
+            project_id=item.project_id,
+            website_id=uuid.UUID(str(item.structured_input["website_id"])),
+            analysis_run_id=uuid.UUID(str(item.structured_input["analysis_run_id"])),
+            workflow_execution_id=item.execution_id,
+            submitted_url=str(item.structured_input["submitted_url"]),
+            normalized_url=str(item.structured_input["normalized_url"]),
+            status=item.status,
+            created_at=item.created_at,
+        )
+        for item in executions
+    ]
 
 
 @router.post(
@@ -233,13 +466,14 @@ def workflow_progress(
     latest: dict[str, AgentRun] = {}
     for run in runs:
         latest.setdefault(run.agent_id, run)
+    repository_agent_enabled = bool(
+        execution.structured_input.get("repository_connection_id")
+        or execution.structured_input.get("execute_repository_agent")
+    )
     active_order = [
         agent_id
         for agent_id in workflow.deterministic_order
-        if not (
-            agent_id == "repository_intelligence_agent"
-            and not execution.structured_input.get("repository_connection_id")
-        )
+        if agent_id != "repository_intelligence_agent" or repository_agent_enabled
     ]
     completed = [
         item for item in active_order if latest.get(item) and latest[item].status == "completed"
@@ -256,21 +490,6 @@ def workflow_progress(
         for item in active_order
         if item not in latest or latest[item].status in {"pending", "running"}
     ]
-    terminal_count = sum(
-        latest[item].status in TERMINAL_EXECUTION_STATUSES
-        for item in active_order
-        if item in latest
-    )
-    progress = round(terminal_count / len(active_order) * 100, 2) if active_order else 100.0
-    running = next(
-        (item for item in active_order if item in latest and latest[item].status == "running"),
-        None,
-    )
-    current_stage = (
-        running
-        or next((item for item in active_order if item in pending), None)
-        or "workflow_complete"
-    )
     score = (
         db.scalar(
             select(ScoreExecution)
@@ -340,10 +559,396 @@ def workflow_progress(
         )
     )
     retryable = execution.status in {"failed", "partial", "unavailable", "cancelled"}
+    discovery_id = execution.structured_input.get("discovery_run_id")
+    discovery = db.get(DiscoveryRun, uuid.UUID(str(discovery_id))) if discovery_id else None
+    pages = (
+        list(
+            db.scalars(
+                select(WebsitePage)
+                .where(
+                    WebsitePage.website_id
+                    == uuid.UUID(str(execution.structured_input["website_id"])),
+                    WebsitePage.last_discovery_run_id == discovery.id,
+                )
+                .order_by(WebsitePage.normalized_url, WebsitePage.id)
+            )
+        )
+        if discovery
+        else []
+    )
+    eligible_pages = [item for item in pages if item.eligibility_status == "eligible"]
+    scheduled_pages = eligible_pages[
+        : int(execution.structured_input.get("maximum_pages") or len(eligible_pages))
+    ]
+    page_execution_id = execution.structured_input.get("page_analysis_execution_id")
+    scheduled_ids = [item.id for item in scheduled_pages]
+    level_one_runs = (
+        list(
+            db.scalars(
+                select(PageAnalysisRun)
+                .where(
+                    PageAnalysisRun.website_page_id.in_(scheduled_ids),
+                    PageAnalysisRun.page_analysis_execution_id == uuid.UUID(str(page_execution_id)),
+                    PageAnalysisRun.analysis_level == 1,
+                )
+                .order_by(PageAnalysisRun.created_at, PageAnalysisRun.id)
+            )
+        )
+        if scheduled_ids and page_execution_id
+        else []
+    )
+    page_denominator = len(scheduled_pages)
+    visited_count = sum(item.analysis_started_at is not None for item in level_one_runs)
+    successful_count = sum(
+        item.status == "completed"
+        and item.final_url is not None
+        and item.http_status_code is not None
+        for item in level_one_runs
+    )
+    failed_count = sum(item.status == "failed" for item in level_one_runs)
+    incomplete_count = sum(
+        item.status in {"pending", "running", "partial"}
+        or (
+            item.status == "completed" and (item.final_url is None or item.http_status_code is None)
+        )
+        for item in level_one_runs
+    )
+    completed_stage_ids = set(execution.structured_output.get("completed_stage_ids", []))
+    page_stage_terminal = (
+        "page_analysis" in completed_stage_ids or execution.status in TERMINAL_EXECUTION_STATUSES
+    )
+    skipped_count = max(0, page_denominator - visited_count) if page_stage_terminal else 0
+    not_scheduled_count = max(0, len(eligible_pages) - page_denominator)
+    coverage_percentage = (
+        round(successful_count / page_denominator * 100, 1) if page_denominator else None
+    )
+
+    current_journey_stage = str(execution.structured_output.get("journey_stage") or "setup")
+    journey_status = str(execution.structured_output.get("journey_status") or execution.status)
+    raw_browser = dict(execution.structured_output.get("browser_compatibility", {}))
+    raw_browser_status = str(raw_browser.get("status") or "not_started")
+    if raw_browser_status == "pending":
+        raw_browser_status = "not_started"
+    if (
+        current_journey_stage in {"browser_compatibility", "browser_engine_analysis"}
+        and journey_status == "running"
+        and raw_browser_status in {"not_started", "queued"}
+    ):
+        raw_browser_status = "running"
+    observations = list(raw_browser.get("observations", []))
+    matrix = list(raw_browser.get("matrix", []))
+    raw_engine_rows = {
+        str(item.get("engine")): item
+        for item in raw_browser.get("engines", [])
+        if isinstance(item, dict) and item.get("engine")
+    }
+    browser_eligible = min(
+        page_denominator,
+        successful_count + incomplete_count,
+    )
+    retained_browser_eligible = int(raw_browser.get("eligible_page_count") or 0)
+    if retained_browser_eligible > 0:
+        browser_eligible = min(browser_eligible, retained_browser_eligible)
+    browser_engines = []
+    for engine in execution.structured_input.get("browser_engines", []):
+        row = dict(raw_engine_rows.get(engine, {}))
+        attempted_urls = {
+            str(item.get("page_url"))
+            for item in observations
+            if item.get("engine") == engine and item.get("page_url")
+        }
+        attempted_pages = int(
+            row.get("attempted_pages") or row.get("tested_pages") or len(attempted_urls)
+        )
+        eligible_count = min(
+            page_denominator,
+            int(row.get("eligible_pages") or browser_eligible),
+        )
+        states = [
+            str(item.get("engines", {}).get(engine, "not_tested"))
+            for item in matrix
+            if isinstance(item, dict)
+        ]
+        browser_engines.append(
+            {
+                "engine": engine,
+                "eligible_pages": eligible_count,
+                "queued_pages": min(
+                    eligible_count,
+                    max(
+                        0,
+                        int(
+                            row.get(
+                                "queued_pages",
+                                eligible_count - attempted_pages,
+                            )
+                        ),
+                    ),
+                ),
+                "attempted_pages": min(eligible_count, attempted_pages),
+                "passed_pages": int(row.get("passed_pages", states.count("compatible"))),
+                "partial_pages": int(
+                    row.get(
+                        "partial_pages",
+                        states.count("partially_compatible"),
+                    )
+                ),
+                "failed_pages": int(row.get("failed_pages", states.count("incompatible"))),
+                "inconclusive_pages": int(
+                    row.get(
+                        "inconclusive_pages",
+                        states.count("inconclusive") + states.count("not_tested"),
+                    )
+                ),
+                "unavailable_pages": int(row.get("unavailable_pages", states.count("unavailable"))),
+            }
+        )
+    browser_progress = {
+        **raw_browser,
+        "status": raw_browser_status,
+        "eligible_page_count": browser_eligible,
+        "engines": browser_engines,
+    }
+
+    repository_connected = bool(execution.structured_input.get("repository_connection_id"))
+    agent_states = [
+        {
+            "agent_id": agent_id,
+            "status": (
+                "not_applicable"
+                if agent_id == "repository_intelligence_agent" and not repository_connected
+                else latest[agent_id].status
+                if agent_id in latest
+                else "running"
+                if agent_id == "discovery_agent"
+                and current_journey_stage == "website_discovery"
+                and journey_status == "running"
+                else discovery.status.value
+                if discovery
+                and hasattr(discovery.status, "value")
+                and agent_id == "discovery_agent"
+                else str(discovery.status)
+                if discovery and agent_id == "discovery_agent"
+                else "unavailable"
+                if execution.status in {"failed", "cancelled", "unavailable"}
+                else "queued"
+            ),
+        }
+        for agent_id in active_order
+    ]
+    for state in agent_states:
+        if state["status"] == "pending":
+            state["status"] = "queued"
+        if (
+            state["agent_id"] == "repository_intelligence_agent"
+            and not repository_connected
+            and state["status"] == "unavailable"
+        ):
+            state["status"] = "not_applicable"
+
+    stage_definitions = (
+        ("setup", "URL validation and setup", 5),
+        ("website_discovery", "Website discovery", 15),
+        ("page_analysis", "Page analysis", 20),
+        ("browser_compatibility", "Browser compatibility", 20),
+        ("evidence_validation", "Evidence validation", 10),
+        ("diagnostics_scoring", "Diagnostics and scoring", 15),
+        ("remediation", "Remediation", 7),
+        ("report_generation", "Report generation", 8),
+    )
+    stale = real_execution_is_stale(execution)
+    failed_stage = (
+        execution.structured_output.get("failed_stage_id")
+        or execution.failure_details.get("failed_stage")
+        if execution.status == "failed"
+        else None
+    )
+    if execution.status == "failed" and not failed_stage:
+        failed_stage = {
+            "website_discovery": "website_discovery",
+            "page_analysis": "page_analysis",
+            "primary_page_analysis": "diagnostics_scoring",
+            "browser_engine_analysis": "browser_compatibility",
+            "browser_compatibility": "browser_compatibility",
+            "multi_agent_analysis": "evidence_validation",
+        }.get(
+            str(execution.structured_output.get("journey_stage")),
+            "setup",
+        )
+    if stale:
+        failed_stage = str(execution.structured_output.get("journey_stage") or "setup")
+
+    def agent_status(agent_id: str) -> str:
+        return latest[agent_id].status if agent_id in latest else "queued"
+
+    stage_statuses: dict[str, str] = {
+        "setup": "completed",
+        "website_discovery": (
+            "failed"
+            if failed_stage == "website_discovery"
+            else "running"
+            if current_journey_stage == "website_discovery" and journey_status == "running"
+            else discovery.status.value
+            if discovery and hasattr(discovery.status, "value")
+            else str(discovery.status)
+            if discovery
+            else "queued"
+        ),
+        "page_analysis": (
+            "failed"
+            if failed_stage == "page_analysis"
+            else "completed"
+            if page_stage_terminal and page_denominator > 0 and successful_count == page_denominator
+            else "partial"
+            if page_stage_terminal and visited_count > 0
+            else "running"
+            if current_journey_stage in {"page_analysis", "primary_page_analysis"}
+            else "queued"
+        ),
+        "browser_compatibility": (
+            "failed"
+            if raw_browser_status == "failed_to_start"
+            else "unavailable"
+            if raw_browser_status == "unavailable"
+            else "running"
+            if current_journey_stage in {"browser_compatibility", "browser_engine_analysis"}
+            and journey_status == "running"
+            and raw_browser_status in {"not_started", "queued", "running"}
+            else raw_browser_status
+        ),
+        "evidence_validation": agent_status("evidence_validation_agent"),
+        "diagnostics_scoring": (
+            "running"
+            if current_journey_stage == "primary_page_analysis"
+            else "completed"
+            if score
+            and all(
+                agent_status(item) == "completed"
+                for item in (
+                    "performance_agent",
+                    "accessibility_agent",
+                    "site_diagnostics_agent",
+                )
+            )
+            else "partial"
+            if all(
+                agent_status(item) in TERMINAL_EXECUTION_STATUSES
+                for item in (
+                    "performance_agent",
+                    "accessibility_agent",
+                    "site_diagnostics_agent",
+                )
+            )
+            else "running"
+            if any(
+                agent_status(item) == "running"
+                for item in (
+                    "performance_agent",
+                    "accessibility_agent",
+                    "site_diagnostics_agent",
+                )
+            )
+            else "queued"
+        ),
+        "remediation": agent_status("remediation_agent"),
+        "report_generation": agent_status("report_agent"),
+    }
+    if failed_stage in stage_statuses:
+        stage_statuses[str(failed_stage)] = "failed"
+    terminal_stage_states = {
+        "completed",
+        "partial",
+        "unavailable",
+        "not_applicable",
+    }
+    stage_rows = [
+        {
+            "stage_id": stage_id,
+            "label": label,
+            "weight": weight,
+            "status": (
+                "queued"
+                if stage_statuses[stage_id] in {"pending", "not_started"}
+                else stage_statuses[stage_id]
+            ),
+        }
+        for stage_id, label, weight in stage_definitions
+    ]
+    progress = round(
+        sum(
+            row["weight"]
+            if row["status"] in terminal_stage_states
+            else row["weight"] * 0.5
+            if row["status"] == "running"
+            else 0
+            for row in stage_rows
+        ),
+        2,
+    )
+    if execution.status in {"completed", "partial", "unavailable"}:
+        progress = 100.0
+    active_stage = next(
+        (row["stage_id"] for row in stage_rows if row["status"] == "running"),
+        None,
+    )
+    current_stage = (
+        str(failed_stage)
+        if failed_stage
+        else active_stage
+        or next(
+            (row["stage_id"] for row in stage_rows if row["status"] not in terminal_stage_states),
+            "workflow_complete",
+        )
+    )
+    if not discovery_id:
+        terminal_count = sum(
+            latest[item].status in TERMINAL_EXECUTION_STATUSES
+            for item in active_order
+            if item in latest
+        )
+        progress = round(terminal_count / len(active_order) * 100, 2) if active_order else 100.0
+        running_agent = next(
+            (item for item in active_order if item in latest and latest[item].status == "running"),
+            None,
+        )
+        current_stage = (
+            running_agent
+            or next((item for item in active_order if item in pending), None)
+            or "workflow_complete"
+        )
+    last_progress_update = real_execution_last_update(execution)
+    display_status = (
+        "failed"
+        if stale
+        else str(
+            execution.structured_output.get("journey_status") or execution.status
+            if execution.status == "pending"
+            else execution.status
+        )
+    )
+    business_error = (
+        "The analysis stopped reporting progress. Retry can continue from retained evidence."
+        if stale
+        else str(execution.failure_details.get("message") or "") or None
+    )
+    retryable = (
+        display_status in {"failed", "partial", "unavailable", "cancelled"}
+        and execution.attempt < 3
+    )
+    report_exists = bool(
+        db.scalar(
+            select(ReportExecution.id)
+            .where(ReportExecution.analysis_run_id == execution.analysis_run_id)
+            .limit(1)
+        )
+    )
+    report_generation_available = bool(
+        report_exists or agent_status("report_agent") in {"completed", "partial", "unavailable"}
+    )
     return WorkflowProgressRead(
         execution_id=execution.execution_id,
         analysis_run_id=execution.analysis_run_id,
-        status=execution.status,
+        status=display_status,
         current_stage=current_stage,
         completed_agent_ids=completed,
         partial_agent_ids=partial,
@@ -354,13 +959,48 @@ def workflow_progress(
         evidence_coverage=coverage,
         attempt=execution.attempt,
         retry_available=retryable,
-        resume_available=retryable and resumable_checkpoint is not None,
+        resume_available=retryable and (resumable_checkpoint is not None or discovery is not None),
         started_at=execution.started_at,
         completed_at=execution.completed_at,
         elapsed_seconds=max(0.0, round((end - start).total_seconds(), 3)),
         unavailable_tools=unavailable_tools,
         unavailable_providers=unavailable_providers,
         safe_error_summaries=safe_errors,
+        submitted_website=execution.structured_input.get("submitted_url")
+        or execution.structured_input.get("website_url"),
+        page_coverage={
+            "discovery_status": (
+                discovery.status.value
+                if discovery and hasattr(discovery.status, "value")
+                else str(discovery.status)
+                if discovery
+                else "not_started"
+            ),
+            "discovered_pages": len(eligible_pages),
+            "scheduled_pages": page_denominator,
+            "not_scheduled_pages": not_scheduled_count,
+            "visited_pages": visited_count,
+            "successfully_analysed_pages": successful_count,
+            "failed_pages": failed_count,
+            "skipped_pages": skipped_count,
+            "incomplete_pages": incomplete_count,
+            "coverage_numerator": successful_count,
+            "coverage_denominator": page_denominator,
+            "coverage_percentage": coverage_percentage,
+        },
+        browser_engine_progress=browser_progress,
+        agent_states=agent_states,
+        stages=stage_rows,
+        completed_stage_ids=[
+            row["stage_id"] for row in stage_rows if row["status"] in terminal_stage_states
+        ],
+        active_stage_id=active_stage,
+        pending_stage_ids=[row["stage_id"] for row in stage_rows if row["status"] == "queued"],
+        failed_stage_id=str(failed_stage) if failed_stage else None,
+        last_progress_update=last_progress_update,
+        stale=stale,
+        business_error_message=business_error,
+        report_generation_available=report_generation_available,
     )
 
 
@@ -545,8 +1185,46 @@ def download_report(
     artifact_format: str,
     db: DatabaseSession,
 ) -> Response:
+    normalized_format = artifact_format.casefold()
+    if normalized_format in {
+        "presentation_pdf",
+        "technical_appendix",
+        "page_inventory",
+    }:
+        try:
+            report = load_report(db, report_id)
+        except ReportDeliveryError as exception:
+            raise _report_error(exception) from exception
+        if report.snapshot is None:
+            raise ApplicationError(
+                code="REPORT_SNAPSHOT_UNAVAILABLE",
+                message="The immutable report snapshot is unavailable.",
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
+        try:
+            content, media_type, filename = render_additional_report_artifact(
+                normalized_format,
+                report.snapshot.snapshot_payload,
+            )
+        except ValueError as exception:
+            raise ApplicationError(
+                code="REPORT_FORMAT_UNSUPPORTED",
+                message="The requested report format is unsupported.",
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            ) from exception
+        checksum = hashlib.sha256(content).hexdigest()
+        return Response(
+            content=content,
+            media_type=media_type,
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "X-Content-SHA256": checksum,
+                "X-Content-Type-Options": "nosniff",
+                "Cache-Control": "private, max-age=31536000, immutable",
+            },
+        )
     try:
-        artifact = load_artifact(db, report_id, artifact_format.casefold())
+        artifact = load_artifact(db, report_id, normalized_format)
     except ReportDeliveryError as exception:
         raise _report_error(exception) from exception
     return Response(

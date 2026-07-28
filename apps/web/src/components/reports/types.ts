@@ -66,6 +66,74 @@ export interface ReportArtifact {
   created_at: string;
 }
 
+export interface ReportOccurrence {
+  normalized_url: string;
+  status_code: number | null;
+  page_title: string | null;
+  page_type: string;
+  section: string;
+  selector: string | null;
+  resource_url: string | null;
+  location: string | null;
+  observed_value: string | null;
+  expected_value: string | null;
+  evidence_timestamp: string;
+  analysis_provider: string;
+  analysis_provider_version: string | null;
+  artifact_reference: unknown;
+  scope: string;
+}
+
+export interface DetailedReportFinding {
+  finding_id: string;
+  finding_code: string;
+  finding_type: string;
+  issue_title: string;
+  plain_language_explanation: string;
+  technical_explanation: string;
+  category: string;
+  severity: string;
+  confidence: { classification: string; percent: number | null };
+  affected_pages: ReportOccurrence[];
+  exact_occurrences: ReportOccurrence[];
+  affected_page_count: number;
+  occurrence_count: number;
+  evidence_references: Array<Record<string, unknown>>;
+  evidence_source: Record<string, unknown>;
+  detecting_agent: string;
+  validating_agent: string;
+  likely_cause: string;
+  technical_impact: string;
+  business_impact: string;
+  recommended_remediation: string;
+  responsible_role: string;
+  estimated_effort_band: string;
+  verification_procedure: string;
+  related_finding_ids: string[];
+  evidence_limitations: string;
+  evidence_state: "available" | "unavailable" | "incomplete";
+  scope: string;
+}
+
+export interface SectionAgentAttribution {
+  agents_involved: Array<{
+    agent_id: string;
+    agent_version: string;
+    execution_status: string;
+    tools_used: string[];
+    allowed_tool_ids: string[];
+    evidence_reference_count: number;
+    limitations: string;
+  }>;
+  tools_used: string[];
+  execution_status: string;
+  evidence_produced: Array<Record<string, unknown>>;
+  unavailable_tools: string[];
+  unavailable_providers: string[];
+  fallback_behavior: string;
+  private_reasoning_included: false;
+}
+
 export interface DeliveredReport {
   report_id: string;
   project_id: string;

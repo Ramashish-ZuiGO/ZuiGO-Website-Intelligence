@@ -589,7 +589,7 @@ Live progress reports workflow state, current stage, completed and pending agent
 coverage numerator/denominator, elapsed time, retry/resume availability, unavailable
 tools/providers, and safe errors. Once the workflow is terminal, the existing
 `report_agent` and `report_generation` tool can create an immutable, evidence-linked
-snapshot with twelve deterministic sections. The approved LLM provider remains
+snapshot with sixteen deterministic sections. The approved LLM provider remains
 optional; deterministic report generation works when it is unavailable.
 
 Every snapshot has stable database-backed HTML, PDF, and JSON artifacts with safe
@@ -597,3 +597,25 @@ filenames, SHA-256 checksums, accessible structure, explicit unavailable section
 and no secrets or internal paths. Report history never overwrites completed reports.
 See [Report Delivery](docs/REPORT_DELIVERY.md) for endpoints, evidence rules, export
 behavior, limitations, and the complete user journey.
+
+Task 029 deepens the immutable snapshot to sixteen presentation-ready sections.
+Every retained finding exposes plain-language and technical explanations,
+severity, confidence, affected pages, every exact occurrence, provider/version
+provenance, detecting and validating agents, cautious impact statements,
+remediation ownership, effort, verification, related findings, and evidence
+limitations. The viewer supports severity, category, agent, URL, scope, evidence
+state, and text filters with direct score/Action Plan links to finding details.
+
+HTML and PDF include a ZuiGO cover, score and coverage cards, readable occurrence
+tables, section-level agent/tool attribution, print-safe navigation, and explicit
+unavailable states. Generate the deterministic local demonstration without
+network or provider access:
+
+```powershell
+Set-Location apps/api
+python -m app.services.report_demo --output-dir ../../.local-reports/task-029-demo
+```
+
+Generated demonstration artifacts are ignored. They are synthetic examples, not
+real website conclusions. Overall Score Formula v1.0.0 and Priority Formula
+v1.0.0 remain unchanged.

@@ -12,11 +12,17 @@ from app.main import app
 from app.models import (
     AgentExecution,
     AgentRun,
+    AnalysisFinding,
     AnalysisResult,
     AnalysisRun,
     AnalysisScore,
+    FindingSeverity,
+    FindingSource,
     Project,
     ReportExecution,
+    SiteDiagnosticExecution,
+    SiteDiagnosticFinding,
+    SiteDiagnosticOccurrence,
     Website,
 )
 from app.services.priority import PRIORITY_FORMULA_VERSION
@@ -119,7 +125,90 @@ def report_api(
             partial_completion_details={},
             completed_at=datetime.now(UTC),
         )
-        db.add_all([result, legacy_score, workflow])
+        finding = AnalysisFinding(
+            analysis_run_id=run.id,
+            finding_code="render_blocking_demo",
+            category="performance",
+            title="Render-blocking resource",
+            description="A retained stylesheet delayed first render.",
+            severity=FindingSeverity.HIGH,
+            affected_url=website.url,
+            evidence={
+                "selector": "head > link[rel=stylesheet]",
+                "resource_url": "https://report.test/app.css",
+                "observed_value": "blocking",
+                "expected_value": "non-blocking where safe",
+                "technical_impact": "The resource delays the retained laboratory render path.",
+                "likely_cause": "The stylesheet is loaded synchronously in the document head.",
+            },
+            source=FindingSource.LIGHTHOUSE,
+            confidence_percent=90,
+        )
+        diagnostic = SiteDiagnosticExecution(
+            website_id=website.id,
+            analysis_run_id=run.id,
+            workflow_id="site_diagnostics",
+            workflow_version="1.0.0",
+            selected_profile_id="global_general",
+            selected_profile_version="1.0.0",
+            input_fingerprint="d" * 64,
+            evidence_fingerprint="e" * 64,
+            idempotency_key="report-diagnostics",
+            diagnostic_engine_version="1.0.0",
+            rule_registry_version="1.0.0",
+            status="completed",
+            total_page_count=51,
+            processed_page_count=51,
+            failed_page_count=0,
+            evidence_coverage_numerator=51,
+            evidence_coverage_denominator=51,
+            evidence_coverage_ratio=1.0,
+            error_metadata={},
+            partial_completion_metadata={},
+            completed_at=datetime.now(UTC),
+        )
+        db.add_all([result, legacy_score, workflow, finding, diagnostic])
+        db.flush()
+        diagnostic_finding = SiteDiagnosticFinding(
+            execution_id=diagnostic.id,
+            rule_id="duplicate_title_group",
+            rule_version="1.0.0",
+            category="metadata_content",
+            severity="medium",
+            confidence="high",
+            scope="template",
+            title="Repeated title template",
+            description="The same normalized title occurs on 51 retained pages.",
+            why_it_matters="Repeated titles reduce page-level metadata specificity.",
+            affected_page_count=51,
+            total_eligible_page_count=51,
+            occurrence_count=51,
+            affected_ratio=1.0,
+            evidence_summary="All 51 normalized title values are identical.",
+            evidence_references=[],
+            remediation_guidance="Provide a page-specific title in the shared template.",
+            responsible_role="Content engineering",
+            verification_guidance="Re-run title grouping and verify every page title.",
+        )
+        db.add(diagnostic_finding)
+        db.flush()
+        db.add_all(
+            [
+                SiteDiagnosticOccurrence(
+                    finding_id=diagnostic_finding.id,
+                    normalized_url=f"https://report.test/products/{index}",
+                    evidence_reference=f"demo:title:{index}",
+                    occurrence_fingerprint=f"{index:064x}",
+                    element_selector="head > title",
+                    location="document head",
+                    context={"status_code": 200, "page_title": "Repeated"},
+                    observed_value="Repeated",
+                    expected_value=f"Product {index}",
+                    supporting_evidence={},
+                )
+                for index in range(51)
+            ]
+        )
         db.commit()
         score, _ = calculate_score_execution(db, run.id, idempotency_key="report-score")
         run_id = run.id
@@ -312,7 +401,7 @@ def test_report_idempotency_history_sections_fallback_and_immutability(
         assert historical_created is True
         assert repeated.report_id == first.report_id
         assert historical.report_id != first.report_id
-        assert len(first.sections) == 12
+        assert len(first.sections) == 16
         assert [item.section_key for item in first.sections] == [
             item
             for item in (
@@ -321,13 +410,17 @@ def test_report_idempotency_history_sections_fallback_and_immutability(
                 "performance",
                 "accessibility",
                 "site_diagnostics",
+                "internal_link_graph",
+                "canonical_indexability",
                 "security_technical",
                 "content_seo",
+                "page_level_findings",
+                "repeated_template_problems",
                 "priority_action_plan",
                 "remediation",
-                "coverage_limitations",
-                "methodology",
+                "coverage_confidence",
                 "multi_agent_execution",
+                "methodology_limitations",
             )
         ]
         assert first.provider_version_metadata["generation_mode"] == "deterministic_fallback"
@@ -374,12 +467,86 @@ def test_html_pdf_json_artifacts_checksums_safety_and_repeatability(
     assert b"Page 1 of " in artifacts["pdf"].content
     assert b"Table of contents" in artifacts["pdf"].content
     json_payload = json.loads(artifacts["json"].content)
-    assert json_payload["schema_version"] == "1.0.0"
-    assert len(json_payload["sections"]) == 12
+    assert json_payload["schema_version"] == "1.1.0"
+    assert len(json_payload["sections"]) == 16
     repeated = _generate_completed_report(factory, run_id)
     assert [item.checksum_sha256 for item in repeated.artifacts] == [
         item.checksum_sha256 for item in report.artifacts
     ]
+
+
+def test_detailed_finding_contract_occurrences_attribution_and_links(
+    report_api: tuple[
+        TestClient,
+        sessionmaker[Session],
+        uuid.UUID,
+        uuid.UUID,
+        uuid.UUID,
+        list[tuple[str, str, int]],
+    ],
+) -> None:
+    _client, factory, _project_id, _website_id, run_id, _dispatched = report_api
+    report = _generate_completed_report(factory, run_id, key="detailed-report")
+    sections = {section.section_key: section.content for section in report.sections}
+    findings = sections["page_level_findings"]["findings"]
+    finding = next(item for item in findings if item["finding_code"] == "render_blocking_demo")
+    assert {
+        "finding_id",
+        "issue_title",
+        "plain_language_explanation",
+        "technical_explanation",
+        "category",
+        "severity",
+        "confidence",
+        "affected_pages",
+        "exact_occurrences",
+        "evidence_references",
+        "evidence_source",
+        "detecting_agent",
+        "validating_agent",
+        "likely_cause",
+        "technical_impact",
+        "business_impact",
+        "recommended_remediation",
+        "responsible_role",
+        "estimated_effort_band",
+        "verification_procedure",
+        "related_finding_ids",
+        "evidence_limitations",
+        "evidence_state",
+        "scope",
+    } <= set(finding)
+    assert finding["exact_occurrences"][0]["normalized_url"] == "https://report.test/"
+    assert finding["exact_occurrences"][0]["selector"] == "head > link[rel=stylesheet]"
+    assert finding["exact_occurrences"][0]["analysis_provider"] == "lighthouse"
+    assert finding["business_impact"].startswith("No quantified business impact")
+    assert finding["detecting_agent"] == "performance_agent"
+    assert finding["validating_agent"] == "evidence_validation_agent"
+    diagnostic_finding = next(
+        item for item in findings if item["finding_code"] == "duplicate_title_group"
+    )
+    assert diagnostic_finding["affected_page_count"] == 51
+    assert diagnostic_finding["occurrence_count"] == 51
+    assert len(diagnostic_finding["exact_occurrences"]) == 51
+    assert len(diagnostic_finding["affected_pages"]) == 51
+    assert all("agent_attribution" in content for content in sections.values())
+    assert sections["multi_agent_execution"]["agent_count"] == 8
+    assert {item["agent_id"] for item in sections["multi_agent_execution"]["agents"]} == {
+        "discovery_agent",
+        "performance_agent",
+        "accessibility_agent",
+        "site_diagnostics_agent",
+        "repository_intelligence_agent",
+        "evidence_validation_agent",
+        "remediation_agent",
+        "report_agent",
+    }
+    score_links = {
+        finding_id
+        for category in sections["scores"]["categories"]
+        for finding_id in category["related_finding_ids"]
+    }
+    assert finding["finding_id"] in score_links
 
 
 def test_report_apis_filters_download_headers_and_errors(

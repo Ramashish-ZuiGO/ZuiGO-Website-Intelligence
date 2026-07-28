@@ -404,7 +404,15 @@ contributions, exclusions, confidence, and evidence coverage exactly as stored.
 The Report Agent and optional narrative provider cannot override any value.
 
 An unavailable score remains unavailable in HTML, PDF, and JSON. Report-level
-coverage is the number of sections with retained evidence divided by the twelve
+coverage is the number of sections with retained evidence divided by the sixteen
 defined sections, shown separately from score evidence coverage and confidence.
 Generating a later report creates a new immutable snapshot; comparisons remain
 subject to the formula/profile compatibility rules above.
+
+Task 029 adds direct links from category and metric contribution rows to retained
+finding IDs and adds score cards to HTML/PDF presentation. These are navigation
+and presentation metadata only. The report reuses persisted category values,
+weights, contributions, exclusions, confidence, and evidence references without
+recalculation. Priority Action Plan rows expose their already-persisted priority
+components, impact, effort, owner, sequence, outcome, verification, and evidence.
+Overall Score Formula v1.0.0 and Priority Formula v1.0.0 remain unchanged.

@@ -2789,3 +2789,36 @@ Action Plan surfaces link the same progress, immutable history, evidence
 references, viewer, and export controls. Semantic landmarks, heading order,
 keyboard operation, visible focus, progress announcements, accessible tables,
 non-colour status, safe text rendering, and announced errors are required.
+
+## 18. REPORT DEPTH AND PRESENTATION READINESS
+
+The report contains sixteen deterministic sections and a reusable finding-detail
+contract. Every finding exposes what happened in plain and technical language,
+category, severity, separate confidence, affected pages, all retained
+occurrences, evidence/provider/version provenance, detecting and validating
+agents, cautious cause and impact statements, remediation, owner, effort,
+verification, related findings, limitations, scope, and availability.
+
+Occurrence rows identify URL, response status when known, page title/type/section,
+selector/resource/location, observed and expected values, timestamp,
+provider/version, artifact reference, and repeated/template/site scope. Evidence
+is never capped for display. Missing evidence remains unavailable and no empty
+result may be presented as issue-free.
+
+Every section exposes the involved subset of the existing eight agents, tools
+actually used, execution status, produced evidence, unavailable capabilities,
+and fallback behavior. Executive risks, score contributions, related findings,
+and Priority Action Plan rows link to the same finding IDs. Business impact is
+shown only from retained evidence; otherwise it is explicitly unquantified.
+
+The viewer provides severity, category, agent, page/URL, scope, evidence-state,
+and text filtering. HTML and PDF use ZuiGO identity, a report cover, score and
+coverage cards, contents, readable evidence tables, print-safe sections, and
+textual status. PDF includes presentation metadata, headers, footers, timestamp,
+and page numbers.
+
+The deterministic local demonstration uses synthetic evidence only and shows all
+eight agents, multiple severities, page and template problems, score links,
+unavailable evidence, Action Plan, and three export formats. Generated artifacts
+are ignored. Neither Overall Score Formula v1.0.0 nor Priority Formula v1.0.0 is
+changed.

@@ -427,8 +427,9 @@ def run_analysis(analysis_run_id: str) -> dict[str, str]:
                             db_session,
                             run_id,
                             context["website_id"],
+                            str(playwright_data["final_url"]),
                             axe_results,
-                            axe_version=playwright_data.get("accessibility_axe_version"),
+                            analysis_run_id=run_id,
                         )
             except Exception as e:
                 logger.error(f"Failed to collect axe accessibility evidence: {e}")

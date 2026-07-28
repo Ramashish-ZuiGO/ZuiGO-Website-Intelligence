@@ -1,4 +1,5 @@
 import uuid
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
@@ -17,11 +18,13 @@ from app.schemas.agent_platform import (
     WorkflowExecutionCreate,
     WorkflowExecutionRead,
 )
+from app.services.analysis_queue import enqueue_real_analysis_journey
 from app.services.workflow_execution import (
     WorkflowExecutionError,
     cancel_execution,
     create_workflow_execution,
     prepare_resume,
+    real_execution_is_stale,
     record_dispatch,
     validate_agent_retry,
 )
@@ -220,8 +223,13 @@ def cancel_workflow_execution(
         cancelled = cancel_execution(db, execution)
     except WorkflowExecutionError as exception:
         raise _application_error(exception) from exception
-    task_id = cancelled.provider_version_metadata.get("celery_task_id")
-    if isinstance(task_id, str) and task_id:
+    task_ids = [
+        cancelled.provider_version_metadata.get("celery_task_id"),
+        *(cancelled.provider_version_metadata.get("stage_task_ids", {}) or {}).values(),
+    ]
+    for task_id in task_ids:
+        if not isinstance(task_id, str) or not task_id:
+            continue
         try:
             revoke_workflow_task(task_id)
         except Exception:
@@ -239,15 +247,40 @@ def resume_workflow_execution(
     db: DatabaseSession,
 ) -> AgentExecution:
     execution = _execution_or_raise(db, execution_id)
+    if real_execution_is_stale(execution):
+        execution.status = ExecutionStatus.FAILED.value
+        execution.completed_at = datetime.now(UTC)
+        execution.failure_details = {
+            "code": "REAL_ANALYSIS_STALLED",
+            "message": (
+                "The analysis stopped reporting progress. A safe retry can continue "
+                "from retained evidence."
+            ),
+            "transient": True,
+            "failed_stage": execution.structured_output.get("journey_stage"),
+        }
+        db.commit()
+        db.refresh(execution)
     try:
         resumed = prepare_resume(db, execution)
     except WorkflowExecutionError as exception:
         raise _application_error(exception) from exception
     try:
-        task_id = enqueue_workflow_execution(
-            str(resumed.execution_id),
-            attempt=resumed.attempt,
-        )
+        discovery_run_id = resumed.structured_input.get("discovery_run_id")
+        page_analysis_execution_id = resumed.structured_input.get("page_analysis_execution_id")
+        if discovery_run_id and page_analysis_execution_id and resumed.analysis_run_id is not None:
+            task_id = enqueue_real_analysis_journey(
+                str(resumed.analysis_run_id),
+                str(discovery_run_id),
+                str(page_analysis_execution_id),
+                str(resumed.execution_id),
+                workflow_attempt=resumed.attempt,
+            )
+        else:
+            task_id = enqueue_workflow_execution(
+                str(resumed.execution_id),
+                attempt=resumed.attempt,
+            )
     except Exception as exception:
         resumed.status = ExecutionStatus.FAILED.value
         resumed.failure_details = {

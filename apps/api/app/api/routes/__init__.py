@@ -7,6 +7,7 @@ from app.api.routes.health import router as health_router
 from app.api.routes.metadata import router as metadata_router
 from app.api.routes.page_analysis import router as page_analysis_router
 from app.api.routes.performance import router as performance_router
+from app.api.routes.presentation_demo import router as presentation_demo_router
 from app.api.routes.projects import router as projects_router
 from app.api.routes.report_delivery import router as report_delivery_router
 from app.api.routes.repository import router as repository_router
@@ -23,6 +24,7 @@ __all__ = [
     "health_router",
     "page_analysis_router",
     "performance_router",
+    "presentation_demo_router",
     "projects_router",
     "repository_router",
     "report_delivery_router",

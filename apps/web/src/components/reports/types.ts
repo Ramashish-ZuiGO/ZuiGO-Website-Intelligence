@@ -1,5 +1,6 @@
 export type DeliveryStatus =
   | "pending"
+  | "queued"
   | "running"
   | "completed"
   | "partial"
@@ -13,6 +14,31 @@ export interface AnalysisJourneyStart {
   analysis_status: string;
   workflow_status: string;
   reused: boolean;
+}
+
+export interface RealWebsiteAnalysisStart {
+  project_id: string;
+  website_id: string;
+  analysis_run_id: string;
+  discovery_run_id: string;
+  page_analysis_execution_id: string;
+  workflow_execution_id: string;
+  submitted_url: string;
+  normalized_url: string;
+  analysis_status: string;
+  workflow_status: string;
+  reused: boolean;
+}
+
+export interface RecentRealAnalysis {
+  project_id: string;
+  website_id: string;
+  analysis_run_id: string;
+  workflow_execution_id: string;
+  submitted_url: string;
+  normalized_url: string;
+  status: string;
+  created_at: string;
 }
 
 export interface EvidenceCoverage {
@@ -43,6 +69,57 @@ export interface WorkflowProgress {
   unavailable_tools: string[];
   unavailable_providers: string[];
   safe_error_summaries: Array<{ code: string; message: string }>;
+  submitted_website: string | null;
+  page_coverage: {
+    discovery_status: string;
+    discovered_pages: number;
+    scheduled_pages: number;
+    not_scheduled_pages: number;
+    visited_pages: number;
+    successfully_analysed_pages: number;
+    failed_pages: number;
+    skipped_pages: number;
+    incomplete_pages: number;
+    coverage_numerator: number;
+    coverage_denominator: number;
+    coverage_percentage: number | null;
+  };
+  browser_engine_progress: {
+    status: string;
+    engines: Array<{
+      engine: string;
+      eligible_pages: number;
+      queued_pages: number;
+      attempted_pages: number;
+      passed_pages: number;
+      partial_pages: number;
+      failed_pages: number;
+      inconclusive_pages: number;
+      unavailable_pages: number;
+    }>;
+    matrix?: Array<{
+      page_url: string;
+      page_title: string | null;
+      result: string;
+      issue_count: number;
+      engines: Record<string, string>;
+    }>;
+  };
+  agent_states: Array<{ agent_id: string; status: string }>;
+  stages: Array<{
+    stage_id: string;
+    label: string;
+    weight: number;
+    status: string;
+  }>;
+  completed_stage_ids: string[];
+  active_stage_id: string | null;
+  pending_stage_ids: string[];
+  failed_stage_id: string | null;
+  last_progress_update: string;
+  stale: boolean;
+  business_error_message: string | null;
+  report_generation_available: boolean;
 }
 
 export interface ReportSection {

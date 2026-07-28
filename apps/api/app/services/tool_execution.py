@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.models import (
     AccessibilityAudit,
+    AgentArtifact,
     AgentExecution,
     AgentRun,
     AnalysisResult,
@@ -490,10 +491,43 @@ def _analysis_result(
 
 
 def _playwright(context: ToolContext, _input: BaseModel) -> ToolResult:
-    return _analysis_result(
+    primary = _analysis_result(
         context,
         evidence_key="playwright_analysis",
         data_key="raw_playwright_data",
+    )
+    compatibility = context.db.scalar(
+        select(AgentArtifact).where(
+            AgentArtifact.execution_id == context.execution.id,
+            AgentArtifact.artifact_type == "browser_compatibility_evidence",
+        )
+    )
+    if compatibility is None:
+        return primary
+    compatibility_status = str(compatibility.artifact_metadata.get("status", "unavailable"))
+    status = (
+        ExecutionStatus.COMPLETED
+        if primary.status == ExecutionStatus.COMPLETED and compatibility_status == "completed"
+        else ExecutionStatus.PARTIAL
+        if (
+            primary.status in {ExecutionStatus.COMPLETED, ExecutionStatus.PARTIAL}
+            or compatibility_status == "completed"
+        )
+        else primary.status
+    )
+    return ToolResult(
+        status=status,
+        structured_output={
+            **primary.structured_output,
+            "browser_engine_evidence_available": compatibility_status == "completed",
+            "browser_engine_count": len(compatibility.artifact_metadata.get("engines", [])),
+            "browser_matrix_page_count": len(compatibility.artifact_metadata.get("matrix", [])),
+        },
+        evidence_references=[
+            *primary.evidence_references,
+            *compatibility.evidence_references,
+        ],
+        provider_version_metadata=primary.provider_version_metadata,
     )
 
 

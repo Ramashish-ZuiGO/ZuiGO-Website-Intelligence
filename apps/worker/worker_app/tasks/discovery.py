@@ -25,11 +25,25 @@ from worker_app.discovery.engine import (
 logger = logging.getLogger(__name__)
 
 
-def discovery_config() -> DiscoveryConfig:
+def discovery_config(overrides: dict[str, Any] | None = None) -> DiscoveryConfig:
     settings = get_settings()
+    requested = overrides or {}
+
+    def bounded(name: str, fallback: int, maximum: int) -> int:
+        value = int(requested.get(name, fallback))
+        return max(1, min(value, maximum))
+
     return DiscoveryConfig(
-        max_discovered_urls=settings.discovery_max_urls,
-        max_html_pages=settings.discovery_max_html_pages,
+        max_discovered_urls=bounded(
+            "max_discovered_urls",
+            settings.discovery_max_urls,
+            settings.discovery_max_urls,
+        ),
+        max_html_pages=bounded(
+            "max_html_pages",
+            settings.discovery_max_html_pages,
+            settings.discovery_max_html_pages,
+        ),
         max_crawl_depth=settings.discovery_max_depth,
         max_links_per_page=settings.discovery_max_links_per_page,
         max_sitemap_files=settings.discovery_max_sitemap_files,
@@ -158,7 +172,8 @@ def run_discovery(discovery_run_id: str) -> None:
                 completed_at=utc_now(),
             )
             return
-        config = discovery_config()
+        requested_configuration = dict(run["configuration"] or {})
+        config = discovery_config(requested_configuration)
         update_discovery_run(
             session,
             run_id,
@@ -166,7 +181,7 @@ def run_discovery(discovery_run_id: str) -> None:
             current_stage="loading_robots",
             progress_percent=5,
             started_at=utc_now(),
-            configuration=config.__dict__,
+            configuration={**requested_configuration, **config.__dict__},
         )
         latest = (
             session.execute(

@@ -195,6 +195,13 @@ def create_workflow_execution(
         "page_analysis_execution_id": (
             str(request.page_analysis_execution_id) if request.page_analysis_execution_id else None
         ),
+        "discovery_run_id": (str(request.discovery_run_id) if request.discovery_run_id else None),
+        "submitted_url": request.submitted_url,
+        "normalized_url": request.normalized_url,
+        "maximum_pages": request.maximum_pages,
+        "browser_engines": list(request.browser_engines),
+        "include_mobile": request.include_mobile,
+        "execute_repository_agent": request.execute_repository_agent,
         "evidence_references": sorted(set(request.evidence_references)),
         "max_concurrency": request.max_concurrency,
     }
@@ -269,7 +276,51 @@ def record_dispatch(db: Session, execution: AgentExecution, task_id: str) -> Non
     metadata["celery_task_id"] = task_id
     metadata["dispatch_count"] = int(metadata.get("dispatch_count", 0)) + 1
     execution.provider_version_metadata = metadata
+    if execution.structured_input.get("discovery_run_id"):
+        output = dict(execution.structured_output)
+        output.update(
+            {
+                "journey_stage": "setup",
+                "journey_status": "queued",
+                "journey_updated_at": utc_now().isoformat(),
+                "completed_stage_ids": sorted({*output.get("completed_stage_ids", []), "setup"}),
+            }
+        )
+        execution.structured_output = output
     db.commit()
+
+
+REAL_EXECUTION_STALE_AFTER_SECONDS = 900
+
+
+def real_execution_last_update(execution: AgentExecution) -> datetime:
+    value = execution.structured_output.get("journey_updated_at")
+    if isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value)
+            return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+        except ValueError:
+            pass
+    started = execution.started_at
+    return started if started.tzinfo else started.replace(tzinfo=UTC)
+
+
+def real_execution_is_stale(
+    execution: AgentExecution,
+    *,
+    now: datetime | None = None,
+) -> bool:
+    if not execution.structured_input.get("discovery_run_id"):
+        return False
+    if execution.status not in {
+        ExecutionStatus.PENDING.value,
+        ExecutionStatus.RUNNING.value,
+    }:
+        return False
+    current = now or utc_now()
+    return (
+        current - real_execution_last_update(execution)
+    ).total_seconds() > REAL_EXECUTION_STALE_AFTER_SECONDS
 
 
 def latest_agent_runs(db: Session, execution: AgentExecution) -> dict[str, AgentRun]:
@@ -358,7 +409,14 @@ class DeterministicWorkflowOrchestrator:
             if execution.status == ExecutionStatus.COMPLETED.value:
                 return execution
             if execution.status == ExecutionStatus.RUNNING.value:
-                return execution
+                agent_workflow_ready = bool(execution.structured_output.get("agent_workflow_ready"))
+                has_agent_runs = bool(
+                    db.scalar(
+                        select(AgentRun.id).where(AgentRun.execution_id == execution.id).limit(1)
+                    )
+                )
+                if not agent_workflow_ready or has_agent_runs:
+                    return execution
             if execution.status in {
                 ExecutionStatus.PARTIAL.value,
                 ExecutionStatus.FAILED.value,
@@ -373,7 +431,10 @@ class DeterministicWorkflowOrchestrator:
                     "Pinned workflow definition is unavailable.",
                     409,
                 )
-            repository_configured = bool(execution.structured_input.get("repository_connection_id"))
+            repository_configured = bool(
+                execution.structured_input.get("repository_connection_id")
+                or execution.structured_input.get("execute_repository_agent")
+            )
             batches = self.execution_batches(
                 workflow,
                 repository_configured=repository_configured,
@@ -1269,11 +1330,15 @@ class DeterministicWorkflowOrchestrator:
         )
         execution.status = status.value
         execution.structured_output = {
+            **dict(execution.structured_output),
             "status": status.value,
             "completed_agent_ids": completed,
             "partial_agent_ids": partial,
             "failed_agent_ids": failed,
             "unavailable_agent_ids": unavailable,
+            "journey_stage": "workflow_complete",
+            "journey_status": status.value,
+            "journey_updated_at": utc_now().isoformat(),
         }
         execution.evidence_references = evidence
         execution.token_total = sum(latest[item].token_total for item in active_agent_ids)

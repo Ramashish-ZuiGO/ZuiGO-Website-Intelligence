@@ -13,7 +13,8 @@ WORKDIR /app
 
 COPY apps/worker/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir --requirement requirements.txt
-RUN python -m playwright install --with-deps chromium
+# Browser compatibility reports Playwright engines, not branded browser versions.
+RUN python -m playwright install --with-deps chromium firefox webkit
 
 COPY --from=lighthouse /usr/local/bin/node /usr/local/bin/node
 COPY --from=lighthouse /usr/local/lib/node_modules /usr/local/lib/node_modules

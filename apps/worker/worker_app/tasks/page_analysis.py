@@ -102,8 +102,8 @@ def run_page_analysis(discovery_run_id: str, page_analysis_execution_id: str) ->
         website_id = run["website_id"]
         config = run["configuration"]
 
-        max_l1 = config.get("max_html_pages", 50)
-        max_l2 = config.get("max_lighthouse_pages", 10)
+        max_l1 = int(config.get("maximum_pages") or config.get("max_html_pages", 50))
+        max_l2 = max(0, int(config.get("max_lighthouse_pages", 10)))
         per_page_timeout = config.get("request_timeout_seconds", 15)
         total_deadline = job_started + config.get("deadline_seconds", 300)
 
@@ -121,13 +121,6 @@ def run_page_analysis(discovery_run_id: str, page_analysis_execution_id: str) ->
                 .limit(max_l1)
             ).mappings()
         )
-
-        l1_attempted = 0
-        l1_successful = 0
-        l1_failed = 0
-        l2_attempted = 0
-        l2_successful = 0
-        l2_failed = 0
 
         for page in eligible_pages:
             if time.monotonic() >= total_deadline:
@@ -166,7 +159,6 @@ def run_page_analysis(discovery_run_id: str, page_analysis_execution_id: str) ->
             )
             session.commit()
 
-            l1_attempted += 1
             from worker_app.analysis.page_analysis import analyze_page_level_1
 
             url = str(page.get("final_url") or page["original_url"])
@@ -177,11 +169,6 @@ def run_page_analysis(discovery_run_id: str, page_analysis_execution_id: str) ->
                     timeout=per_page_timeout,
                 )
                 status = result["status"]
-                if status == "completed":
-                    l1_successful += 1
-                else:
-                    l1_failed += 1
-
                 update_values = {
                     "status": status,
                     "analysis_completed_at": utc_now(),
@@ -215,7 +202,6 @@ def run_page_analysis(discovery_run_id: str, page_analysis_execution_id: str) ->
                 session.commit()
 
             except Exception as exception:
-                l1_failed += 1
                 update_page_analysis_run(
                     session,
                     l1_run_uuid,
@@ -232,10 +218,27 @@ def run_page_analysis(discovery_run_id: str, page_analysis_execution_id: str) ->
                     exception,
                 )
 
+        refreshed_pages = list(
+            session.execute(
+                select(website_pages)
+                .where(
+                    and_(
+                        website_pages.c.website_id == website_id,
+                        website_pages.c.eligibility_status == "eligible",
+                        website_pages.c.last_discovery_run_id == run_id,
+                    )
+                )
+                .order_by(
+                    website_pages.c.crawl_depth.asc(),
+                    website_pages.c.normalized_url.asc(),
+                )
+                .limit(max_l1)
+            ).mappings()
+        )
         l2_candidates = [
-            p
-            for p in eligible_pages
-            if p.get("page_analysis_level_1_status") in ("completed", "partial")
+            page
+            for page in refreshed_pages
+            if page.get("page_analysis_level_1_status") in ("completed", "partial")
         ]
 
         l2_selected = select_level2_pages(l2_candidates, max_l2)
@@ -275,8 +278,6 @@ def run_page_analysis(discovery_run_id: str, page_analysis_execution_id: str) ->
                 )
             )
             session.commit()
-            l2_attempted += 1
-
             url = str(page.get("final_url") or page["original_url"])
 
             try:
@@ -362,10 +363,7 @@ def run_page_analysis(discovery_run_id: str, page_analysis_execution_id: str) ->
                 )
                 update_website_page_status(session, page["id"], 2, "completed", l2_run_uuid)
                 session.commit()
-                l2_successful += 1
-
             except Exception as exception:
-                l2_failed += 1
                 update_page_analysis_run(
                     session,
                     l2_run_uuid,
@@ -382,13 +380,68 @@ def run_page_analysis(discovery_run_id: str, page_analysis_execution_id: str) ->
                     exception,
                 )
 
+        selected_page_ids = [page["id"] for page in eligible_pages]
+        persisted_l1 = (
+            list(
+                session.execute(
+                    select(page_analysis_runs).where(
+                        page_analysis_runs.c.website_page_id.in_(selected_page_ids),
+                        page_analysis_runs.c.analysis_level == 1,
+                        page_analysis_runs.c.page_analysis_execution_id == execution_uuid,
+                    )
+                ).mappings()
+            )
+            if selected_page_ids
+            else []
+        )
+        persisted_l2 = (
+            list(
+                session.execute(
+                    select(page_analysis_runs).where(
+                        page_analysis_runs.c.website_page_id.in_(selected_page_ids),
+                        page_analysis_runs.c.analysis_level == 2,
+                        page_analysis_runs.c.page_analysis_execution_id == execution_uuid,
+                    )
+                ).mappings()
+            )
+            if selected_page_ids
+            else []
+        )
+        scheduled_count = len(eligible_pages)
+        persisted_attempted = sum(item["analysis_started_at"] is not None for item in persisted_l1)
+        persisted_successful = sum(
+            item["status"] == "completed"
+            and item["final_url"] is not None
+            and item["http_status_code"] is not None
+            for item in persisted_l1
+        )
+        persisted_failed = sum(item["status"] == "failed" for item in persisted_l1)
+        persisted_incomplete = sum(
+            item["status"] in {"pending", "running", "partial"}
+            or (
+                item["status"] == "completed"
+                and (item["final_url"] is None or item["http_status_code"] is None)
+            )
+            for item in persisted_l1
+        )
+        skipped_count = max(0, scheduled_count - persisted_attempted)
+        result_status = (
+            "completed"
+            if scheduled_count and persisted_successful == scheduled_count
+            else "partial"
+            if persisted_attempted or scheduled_count
+            else "unavailable"
+        )
         return {
-            "status": "completed",
+            "status": result_status,
             "discovery_run_id": discovery_run_id,
-            "l1_attempted": l1_attempted,
-            "l1_successful": l1_successful,
-            "l1_failed": l1_failed,
-            "l2_attempted": l2_attempted,
-            "l2_successful": l2_successful,
-            "l2_failed": l2_failed,
+            "scheduled": scheduled_count,
+            "l1_attempted": persisted_attempted,
+            "l1_successful": persisted_successful,
+            "l1_failed": persisted_failed,
+            "l1_incomplete": persisted_incomplete,
+            "l1_skipped": skipped_count,
+            "l2_attempted": len(persisted_l2),
+            "l2_successful": sum(item["status"] == "completed" for item in persisted_l2),
+            "l2_failed": sum(item["status"] == "failed" for item in persisted_l2),
         }

@@ -20,6 +20,21 @@ const TERMINAL_STATUSES = [
   "cancelled",
   "unavailable",
 ];
+const AGENT_LABELS: Record<string, string> = {
+  discovery_agent: "Discovery Agent",
+  performance_agent: "Performance Agent",
+  accessibility_agent: "Accessibility Agent",
+  site_diagnostics_agent: "Site Diagnostics Agent",
+  repository_intelligence_agent: "Repository Intelligence Agent",
+  evidence_validation_agent: "Evidence Validation Agent",
+  remediation_agent: "Remediation Agent",
+  report_agent: "Report Agent",
+};
+const ENGINE_LABELS: Record<string, string> = {
+  chromium: "Chromium engine",
+  firefox: "Firefox engine",
+  webkit: "WebKit engine",
+};
 
 interface ReportDeliveryPanelProps {
   projectId?: string;
@@ -40,6 +55,23 @@ function createKey(prefix: string): string {
 
 function statusLabel(status: string): string {
   return status.replaceAll("_", " ");
+}
+
+function displayStatus(status: string): string {
+  const labels: Record<string, string> = {
+    pending: "Queued",
+    queued: "Queued",
+    running: "Running",
+    completed: "Completed",
+    partial: "Partial",
+    failed: "Failed",
+    unavailable: "Unavailable",
+    cancelled: "Cancelled",
+    not_applicable: "Not applicable",
+    not_started: "Not started",
+    failed_to_start: "Failed to start",
+  };
+  return labels[status] ?? statusLabel(status);
 }
 
 function Coverage({
@@ -520,6 +552,19 @@ function ReportViewer({ report }: { report: DeliveredReport }) {
                 </span>
               </a>
             ))}
+            {[
+              ["presentation_pdf", "Presentation PDF"],
+              ["technical_appendix", "Technical Appendix"],
+              ["page_inventory", "Page Inventory JSON"],
+            ].map(([format, label]) => (
+              <a
+                className="rounded-lg border border-slate-400 px-3 py-2 text-sm font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600"
+                href={reportDeliveryApi.downloadUrl(report.report_id, format)}
+                key={format}
+              >
+                Download {label}
+              </a>
+            ))}
           </div>
         </section>
 
@@ -742,13 +787,43 @@ export function ReportDeliveryPanel({
     }
   }
 
+  async function performWorkflowAction(action: "cancel" | "resume") {
+    if (!resolvedExecutionId) return;
+    setActing(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const result =
+        action === "cancel"
+          ? await reportDeliveryApi.cancel(resolvedExecutionId)
+          : await reportDeliveryApi.resume(resolvedExecutionId);
+      setNotice(
+        action === "cancel"
+          ? "The workflow cancellation was recorded without deleting evidence."
+          : `The workflow was queued for a safe retry from retained state (${statusLabel(result.status)}).`,
+      );
+      await loadProgress();
+    } catch (requestError) {
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : `Unable to ${action} the workflow.`,
+      );
+    } finally {
+      setActing(false);
+    }
+  }
+
   const progressDescription = useMemo(() => {
     if (!progress) return "Workflow progress is unavailable.";
-    return `${progress.progress_percentage.toFixed(0)} percent complete. Current stage ${statusLabel(progress.current_stage)}.`;
+    const stage = progress.stages.find(
+      (item) => item.stage_id === progress.current_stage,
+    );
+    return `${progress.progress_percentage.toFixed(0)} percent complete. Current stage ${stage?.label ?? statusLabel(progress.current_stage)}.`;
   }, [progress]);
   const canGenerate =
     Boolean(resolvedAnalysisId) &&
-    (!progress || TERMINAL_STATUSES.includes(progress.status));
+    Boolean(progress?.report_generation_available);
 
   return (
     <section
@@ -792,6 +867,11 @@ export function ReportDeliveryPanel({
       <div aria-live="polite" className="mt-4" role="status">
         {progress ? (
           <>
+            {progress.submitted_website && (
+              <p className="mb-3 break-all text-sm">
+                <strong>Submitted website:</strong> {progress.submitted_website}
+              </p>
+            )}
             <div
               aria-label={progressDescription}
               aria-valuemax={100}
@@ -806,13 +886,125 @@ export function ReportDeliveryPanel({
               />
             </div>
             <p className="mt-2 text-sm font-semibold">
-              {statusLabel(progress.status)} · {progressDescription}
+              {displayStatus(progress.status)} · {progressDescription}
             </p>
             <p className="mt-1 text-sm">
-              Completed agents: {progress.completed_agent_ids.join(", ") || "None yet"}.
-              Partial: {progress.partial_agent_ids.join(", ") || "None"}.
-              Pending: {progress.pending_agent_ids.join(", ") || "None"}.
+              Last progress update:{" "}
+              {new Date(progress.last_progress_update).toLocaleString()}.
             </p>
+            {progress.business_error_message && (
+              <p
+                className="mt-3 rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-900"
+                role="alert"
+              >
+                <strong>
+                  {progress.failed_stage_id
+                    ? `Failed stage: ${
+                        progress.stages.find(
+                          (item) => item.stage_id === progress.failed_stage_id,
+                        )?.label ?? statusLabel(progress.failed_stage_id)
+                      }. `
+                    : ""}
+                </strong>
+                {progress.business_error_message}
+              </p>
+            )}
+            <section
+              aria-labelledby={`stage-progress-${websiteId}`}
+              className="mt-4"
+            >
+              <h3 className="font-bold" id={`stage-progress-${websiteId}`}>
+                Analysis stages
+              </h3>
+              <ol className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                {progress.stages.map((stage) => (
+                  <li className="rounded-lg border p-3 text-sm" key={stage.stage_id}>
+                    <strong>{stage.label}</strong>
+                    <br />
+                    {displayStatus(stage.status)}
+                  </li>
+                ))}
+              </ol>
+            </section>
+            <dl className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              {[
+                ["Discovered", progress.page_coverage.discovered_pages],
+                ["Scheduled", progress.page_coverage.scheduled_pages],
+                [
+                  "Not scheduled",
+                  `${progress.page_coverage.not_scheduled_pages} due to the configured page limit or scope`,
+                ],
+                ["Visited", progress.page_coverage.visited_pages],
+                ["Successfully analysed", progress.page_coverage.successfully_analysed_pages],
+                ["Failed", progress.page_coverage.failed_pages],
+                ["Skipped", progress.page_coverage.skipped_pages],
+                ["Incomplete", progress.page_coverage.incomplete_pages],
+                [
+                  "Page coverage",
+                  progress.page_coverage.coverage_percentage === null
+                    ? "Unavailable"
+                    : `${progress.page_coverage.coverage_numerator}/${progress.page_coverage.coverage_denominator} (${progress.page_coverage.coverage_percentage}%)`,
+                ],
+              ].map(([label, value]) => (
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3" key={label}>
+                  <dt className="text-xs font-bold uppercase text-slate-500">{label}</dt>
+                  <dd className="mt-1 text-lg font-black">{value}</dd>
+                </div>
+              ))}
+            </dl>
+            {selected ? (
+              <a
+                className="mt-3 inline-flex text-sm font-semibold underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600"
+                href={reportDeliveryApi.downloadUrl(
+                  selected.report_id,
+                  "page_inventory",
+                )}
+              >
+                Download Page Inventory
+              </a>
+            ) : (
+              <p className="mt-3 text-sm text-slate-600">
+                Page Inventory becomes available with the immutable report.
+              </p>
+            )}
+            <section className="mt-4" aria-labelledby={`browser-progress-${websiteId}`}>
+              <h3 className="font-bold" id={`browser-progress-${websiteId}`}>
+                Browser-engine progress
+              </h3>
+              <p className="mt-1 text-sm capitalize">
+                {displayStatus(progress.browser_engine_progress.status)}
+              </p>
+              <ul className="mt-2 grid gap-2 sm:grid-cols-3">
+                {progress.browser_engine_progress.engines.map((engine) => (
+                  <li className="rounded-lg border p-3 text-sm" key={engine.engine}>
+                    <strong>{ENGINE_LABELS[engine.engine] ?? statusLabel(engine.engine)}</strong>
+                    <br />
+                    Eligible {engine.eligible_pages} · queued {engine.queued_pages} ·
+                    attempted {engine.attempted_pages}
+                    <br />
+                    Passed {engine.passed_pages} · partial {engine.partial_pages} ·
+                    failed {engine.failed_pages}
+                    <br />
+                    Inconclusive {engine.inconclusive_pages} · unavailable{" "}
+                    {engine.unavailable_pages}
+                  </li>
+                ))}
+              </ul>
+            </section>
+            <section className="mt-4" aria-labelledby={`agent-progress-${websiteId}`}>
+              <h3 className="font-bold" id={`agent-progress-${websiteId}`}>
+                Eight-agent execution
+              </h3>
+              <ul className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                {progress.agent_states.map((agent) => (
+                  <li className="rounded-lg border p-3 text-sm" key={agent.agent_id}>
+                    <strong>{AGENT_LABELS[agent.agent_id] ?? statusLabel(agent.agent_id)}</strong>
+                    <br />
+                    <span>{displayStatus(agent.status)}</span>
+                  </li>
+                ))}
+              </ul>
+            </section>
             <Coverage
               denominator={progress.evidence_coverage.denominator}
               numerator={progress.evidence_coverage.numerator}
@@ -832,9 +1024,31 @@ export function ReportDeliveryPanel({
             )}
             {progress.safe_error_summaries.map((item) => (
               <p className="mt-1 text-sm text-red-700" key={`${item.code}-${item.message}`}>
-                {item.code}: {item.message}
+                {item.message}
               </p>
             ))}
+            <div className="mt-4 flex flex-wrap gap-2">
+              {!TERMINAL_STATUSES.includes(progress.status) && (
+                <button
+                  className="rounded border border-red-700 px-3 py-2 text-sm font-bold text-red-800 disabled:opacity-50"
+                  disabled={acting}
+                  onClick={() => void performWorkflowAction("cancel")}
+                  type="button"
+                >
+                  Cancel analysis
+                </button>
+              )}
+              {progress.retry_available && (
+                <button
+                  className="rounded border border-slate-700 px-3 py-2 text-sm font-bold disabled:opacity-50"
+                  disabled={acting || !progress.resume_available}
+                  onClick={() => void performWorkflowAction("resume")}
+                  type="button"
+                >
+                  Retry or resume analysis
+                </button>
+              )}
+            </div>
           </>
         ) : (
           <p className="text-sm text-slate-600">

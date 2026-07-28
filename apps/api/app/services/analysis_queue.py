@@ -6,6 +6,7 @@ TASK_NAME = "worker.run_analysis"
 DISCOVERY_TASK_NAME = "worker.run_discovery"
 PAGE_ANALYSIS_TASK_NAME = "worker.run_page_analysis"
 WORKFLOW_TASK_NAME = "worker.run_workflow_execution"
+REAL_ANALYSIS_TASK_NAME = "worker.run_real_analysis_journey"
 
 
 def enqueue_analysis(analysis_run_id: str) -> str:
@@ -46,6 +47,33 @@ def enqueue_analysis_journey(
         )
         pipeline.apply_async()
         return analysis_task_id, workflow_task_id
+    finally:
+        queue_client.close()
+
+
+def enqueue_real_analysis_journey(
+    analysis_run_id: str,
+    discovery_run_id: str,
+    page_analysis_execution_id: str,
+    workflow_execution_id: str,
+    *,
+    workflow_attempt: int,
+) -> str:
+    redis_url = get_settings().redis_url
+    queue_client = Celery("website_intelligence_api", broker=redis_url)
+    task_id = f"real-analysis:{workflow_execution_id}:attempt:{workflow_attempt}"
+    try:
+        result = queue_client.send_task(
+            REAL_ANALYSIS_TASK_NAME,
+            args=[
+                analysis_run_id,
+                discovery_run_id,
+                page_analysis_execution_id,
+                workflow_execution_id,
+            ],
+            task_id=task_id,
+        )
+        return result.id
     finally:
         queue_client.close()
 

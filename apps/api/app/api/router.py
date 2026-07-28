@@ -10,6 +10,7 @@ from app.api.routes import (
     metadata_router,
     page_analysis_router,
     performance_router,
+    presentation_demo_router,
     projects_router,
     report_delivery_router,
     repository_router,
@@ -33,6 +34,7 @@ v1_router.include_router(repository_router)
 v1_router.include_router(report_delivery_router)
 v1_router.include_router(metadata_router)
 v1_router.include_router(performance_router)
+v1_router.include_router(presentation_demo_router)
 v1_router.include_router(websites_router)
 v1_router.include_router(accessibility_router)
 v1_router.include_router(site_diagnostics_router)

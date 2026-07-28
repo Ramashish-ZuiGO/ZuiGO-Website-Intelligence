@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { apiRequest } from "@/lib/api";
@@ -183,6 +183,10 @@ function DiagnosticCard({ name, diagnostic }: { name: string; diagnostic: Diagno
 
 export default function AnalysisReportPage() {
   const { analysisRunId } = useParams<{ analysisRunId: string }>();
+  const searchParams = useSearchParams();
+  const projectId = searchParams.get("projectId") ?? undefined;
+  const websiteId = searchParams.get("websiteId") ?? undefined;
+  const workflowExecutionId = searchParams.get("workflowExecutionId") ?? undefined;
   const [report, setReport] = useState<AnalysisReport | null>(null);
   const [performanceData, setPerformanceData] = useState<Record<string, unknown>[]>([]);
   const [accessibilityData, setAccessibilityData] = useState<AccessibilityData | null>(null);
@@ -238,6 +242,34 @@ export default function AnalysisReportPage() {
     return () => { cancelled = true; };
   }, [analysisRunId]);
 
+  if (!report && websiteId && workflowExecutionId) {
+    return (
+      <main className="mx-auto min-h-screen max-w-6xl px-6 py-12">
+        <Link className="text-sm font-semibold text-slate-600" href="/">
+          ← Start another analysis
+        </Link>
+        <h1 className="mt-6 text-3xl font-bold">Website analysis in progress</h1>
+        <p className="mt-2 text-slate-600">
+          Real evidence is being collected from the submitted website. No prepared
+          demo evidence is used in this analysis.
+        </p>
+        {loading && <p className="mt-4" role="status">Loading analysis progress…</p>}
+        {error && (
+          <p className="mt-4 text-amber-800" role="status">
+            The final report is not available yet. Progress and safe recovery actions
+            remain available below.
+          </p>
+        )}
+        <ReportDeliveryPanel
+          analysisRunId={analysisRunId}
+          projectId={projectId}
+          showStartAction={false}
+          websiteId={websiteId}
+          workflowExecutionId={workflowExecutionId}
+        />
+      </main>
+    );
+  }
   if (loading) return <main className="mx-auto max-w-6xl px-6 py-12"><p role="status">Loading analysis report…</p></main>;
   if (error || !report) return <main className="mx-auto max-w-6xl px-6 py-12"><h1 className="text-3xl font-bold">Report unavailable</h1><p className="mt-4 text-red-700" role="alert">{error ?? "The report could not be found."}</p></main>;
 
@@ -393,8 +425,10 @@ export default function AnalysisReportPage() {
       />
       <ReportDeliveryPanel
         analysisRunId={analysisRunId}
+        projectId={projectId}
         showStartAction={false}
         websiteId={report.website.id}
+        workflowExecutionId={workflowExecutionId}
       />
 
       <div className="mt-8">

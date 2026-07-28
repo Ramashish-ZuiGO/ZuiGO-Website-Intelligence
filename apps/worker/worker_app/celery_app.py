@@ -13,6 +13,8 @@ celery_app.conf.update(
         "worker_app.tasks.health",
         "worker_app.tasks.analysis",
         "worker_app.tasks.discovery",
+        "worker_app.tasks.page_analysis",
+        "worker_app.tasks.real_analysis",
         "worker_app.tasks.agent_platform",
     ],
     task_serializer="json",

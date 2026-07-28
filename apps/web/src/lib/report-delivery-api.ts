@@ -3,6 +3,8 @@ import type {
   AnalysisJourneyStart,
   DeliveredReport,
   PaginatedReports,
+  RealWebsiteAnalysisStart,
+  RecentRealAnalysis,
   WorkflowProgress,
 } from "@/components/reports/types";
 
@@ -16,6 +18,21 @@ function query(values: Record<string, string | number | undefined>): string {
 }
 
 export const reportDeliveryApi = {
+  startRealAnalysis: (input: {
+    website_url: string;
+    idempotency_key: string;
+    maximum_pages: number;
+    browser_engines: Array<"chromium" | "firefox" | "webkit">;
+    include_mobile: boolean;
+  }) =>
+    apiRequest<RealWebsiteAnalysisStart>("/api/v1/analysis/start", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  recentRealAnalyses: (limit = 5) =>
+    apiRequest<RecentRealAnalysis[]>(
+      `/api/v1/analysis/recent${query({ limit })}`,
+    ),
   startAnalysis: (
     projectId: string,
     websiteId: string,
@@ -61,4 +78,14 @@ export const reportDeliveryApi = {
     ),
   downloadUrl: (reportId: string, format: string) =>
     `${apiUrl}/api/v1/reports/${encodeURIComponent(reportId)}/download/${encodeURIComponent(format)}`,
+  cancel: (executionId: string) =>
+    apiRequest<{ status: string }>(
+      `/api/v1/workflow-executions/${encodeURIComponent(executionId)}/cancel`,
+      { method: "POST", body: JSON.stringify({}) },
+    ),
+  resume: (executionId: string) =>
+    apiRequest<{ status: string }>(
+      `/api/v1/workflow-executions/${encodeURIComponent(executionId)}/resume`,
+      { method: "POST", body: JSON.stringify({}) },
+    ),
 };

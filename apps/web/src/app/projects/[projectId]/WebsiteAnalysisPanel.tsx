@@ -11,6 +11,9 @@ import { AccessibilityIntelligence, AccessibilityData } from '@/components/acces
 import { ScoreValue } from "@/components/metrics/ScoreValue";
 import { SiteDiagnosticsPanel } from "@/components/diagnostics/SiteDiagnosticsPanel";
 import { AgentExecutionPanel } from "@/components/agents/AgentExecutionPanel";
+import { ScoringIntelligencePanel } from "@/components/scoring/ScoringIntelligencePanel";
+import { ReportDeliveryPanel } from "@/components/reports/ReportDeliveryPanel";
+import { reportDeliveryApi } from "@/lib/report-delivery-api";
 
 interface WebsiteAnalysisPanelProps {
   projectId?: string;
@@ -46,6 +49,7 @@ export function WebsiteAnalysisPanel({
 
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
+  const [workflowExecutionId, setWorkflowExecutionId] = useState<string>();
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<AnalysisResults | null>(null);
   const latestRun = history[0];
@@ -129,10 +133,27 @@ export function WebsiteAnalysisPanel({
     setError(null);
     setResults(null);
     try {
-      const analysisRun = await apiRequest<AnalysisRun>(
-        `/api/v1/websites/${websiteId}/analysis-runs`,
-        { method: "POST" },
-      );
+      const analysisRun = projectId
+        ? await reportDeliveryApi
+            .startAnalysis(
+              projectId,
+              websiteId,
+              `full-analysis-${new Date().toISOString()}-${crypto.randomUUID()}`,
+            )
+            .then(async (journey) => {
+              setWorkflowExecutionId(journey.workflow_execution_id);
+              window.localStorage.setItem(
+                `analysis-journey:${projectId}:${websiteId}`,
+                journey.workflow_execution_id,
+              );
+              return apiRequest<AnalysisRun>(
+                `/api/v1/analysis-runs/${journey.analysis_run_id}`,
+              );
+            })
+        : await apiRequest<AnalysisRun>(
+            `/api/v1/websites/${websiteId}/analysis-runs`,
+            { method: "POST" },
+          );
       setHistory((current) => [analysisRun, ...current]);
     } catch (requestError) {
       setError(
@@ -174,10 +195,17 @@ export function WebsiteAnalysisPanel({
             </p>
           )}
         </div>
+        <form
+          aria-label="Start a complete website analysis"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void startAnalysis();
+          }}
+        >
         <button
           className="rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
           disabled={starting || isActive(latestRun)}
-          onClick={() => void startAnalysis()}
+          type="submit"
         >
           {starting
             ? "Queueing…"
@@ -187,6 +215,7 @@ export function WebsiteAnalysisPanel({
                 ? "Start new analysis"
                 : "Start analysis"}
         </button>
+        </form>
       </div>
 
       {latestRun && (
@@ -276,6 +305,19 @@ export function WebsiteAnalysisPanel({
         compact
         projectId={projectId}
         websiteId={websiteId}
+      />
+      <ScoringIntelligencePanel
+        analysisRunId={latestRun?.status === "completed" ? latestRun.id : undefined}
+        compact
+        websiteId={websiteId}
+      />
+      <ReportDeliveryPanel
+        analysisRunId={latestRun?.id}
+        compact
+        projectId={projectId}
+        showStartAction={false}
+        websiteId={websiteId}
+        workflowExecutionId={workflowExecutionId}
       />
 
       <button className="mt-3 text-xs font-semibold text-slate-600" onClick={() => void loadHistory().catch((requestError: unknown) => setError(requestError instanceof Error ? requestError.message : "Unable to refresh analysis history."))}>Refresh analysis history</button>

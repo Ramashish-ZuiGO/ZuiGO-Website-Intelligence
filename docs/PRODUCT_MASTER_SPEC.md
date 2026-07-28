@@ -2686,7 +2686,7 @@ unchanged.
 The platform registers eight domain agents (`discovery_agent`,
 `performance_agent`, `accessibility_agent`, `site_diagnostics_agent`,
 `repository_intelligence_agent`, `evidence_validation_agent`,
-`remediation_agent`, and `report_agent`), fourteen typed tools, and three
+`remediation_agent`, and `report_agent`), fifteen typed tools, and three
 deterministic workflows (`full_website_analysis`, `repository_remediation`, and
 `reanalysis`). Agents own versioned goal contracts, tools expose bounded
 capabilities, services implement existing product behavior, and the orchestrator
@@ -2727,3 +2727,65 @@ The six metadata and seven execution endpoints, registry IDs, DAGs, persistence
 semantics, security model, and interface behavior are specified in
 [MULTI_AGENT_ARCHITECTURE.md](MULTI_AGENT_ARCHITECTURE.md). This orchestration
 layer leaves Overall Score Formula v1.0.0 and Priority Formula v1.0.0 unchanged.
+
+## 16. EXPLAINABLE SCORING INTELLIGENCE
+
+Every repeatable scoring calculation has an independent execution UUID and
+immutable snapshot. It pins formula, scoring-profile, and Metric Registry
+versions; fingerprints the retained input evidence; stores idempotency scope;
+and preserves overall/category values, confidence, coverage numerator and
+denominator, exclusions, weights, contributions, thresholds, deductions,
+normalization, caps/floors, adjustments, evidence references, and limitations.
+
+Overall Score Formula v1.0.0 remains the five-category weighted mean documented
+in `SCORING_METHODOLOGY.md`, including round-half-up and normalization over
+available weights. Priority Formula v1.0.0 remains separate and unchanged.
+Missing evidence is excluded with a reason and reduces coverage/confidence; it
+is never replaced by zero or a perfect value.
+
+Historical trends expose current/previous score, category, and coverage deltas
+as improved, declined, unchanged, or unavailable. Formula and profile ID/version
+must match for direct comparison; otherwise the state is incompatible. Bands
+are profile-versioned descriptive interpretations derived transparently from
+approved internal thresholds and make no competitor or search-ranking claim.
+
+The scoring service is a deterministic multi-agent tool, not a ninth agent.
+Evidence Validation precedes calculation; Report and Remediation may consume
+persisted references; no LLM may calculate, change, or override scores. The
+report, project, Website Analysis, Page Analysis, Action Plan, and agent
+execution interfaces link to the same persisted breakdown.
+
+## 17. END-TO-END ANALYSIS JOURNEY AND REPORT DELIVERY
+
+The primary journey is Website/Project â†’ Start full analysis â†’ Track execution
+â†’ Review grounded results â†’ Generate immutable report â†’ Export HTML/PDF/JSON
+â†’ Review report history. One scoped start validates ownership, creates or reuses
+an analysis run through idempotency, and dispatches existing evidence collection
+before the versioned `full_website_analysis` workflow. New keys preserve
+independent historical runs.
+
+Progress must expose queued, running, partial, completed, failed, cancelled, and
+unavailable states using text as well as visual treatment. It includes current
+stage, completed/pending/failed/unavailable agents, percentage, elapsed duration,
+coverage numerator/denominator, retry/resume availability, unavailable
+tools/providers, and redacted safe errors.
+
+Each report execution owns an independent UUID and immutable snapshot. The report
+pins analysis, workflow, score, template, report, formula, and provider versions;
+retains input fingerprint and idempotency scope; and records coverage, confidence,
+unavailable sections, partial/failure details, evidence references, sections, and
+artifacts. Factual content must reference persisted evidence. Passed, failed,
+unavailable, incomplete, excluded, and not-analysed states remain distinct.
+
+HTML, PDF, and JSON exports use deterministic section order, stable safe filenames,
+accessible HTML, PDF table of contents/page numbers/timestamp, SHA-256 checksums,
+and database storage references rather than internal file paths. Exported content
+must not contain secrets or private reasoning. The existing Report Agent may add
+grounded narrative only under its optional approved-provider policy; its
+deterministic fallback is always available and may not calculate scores or metrics.
+
+The project page, Website Analysis, analysis-run report, Agent Execution, and
+Action Plan surfaces link the same progress, immutable history, evidence
+references, viewer, and export controls. Semantic landmarks, heading order,
+keyboard operation, visible focus, progress announcements, accessible tables,
+non-colour status, safe text rendering, and announced errors are required.

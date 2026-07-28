@@ -71,7 +71,7 @@ AGENT_TOOL_PLAN: dict[str, tuple[str, ...]] = {
     "accessibility_agent": ("axe_accessibility", "accessibility_aggregation"),
     "site_diagnostics_agent": ("site_diagnostics", "evidence_retrieval"),
     "repository_intelligence_agent": ("repository_scanning", "evidence_retrieval"),
-    "evidence_validation_agent": ("evidence_retrieval",),
+    "evidence_validation_agent": ("evidence_retrieval", "scoring_intelligence"),
     "remediation_agent": (
         "remediation_generation",
         "evidence_retrieval",

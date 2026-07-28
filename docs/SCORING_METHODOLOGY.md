@@ -349,7 +349,7 @@ Formula v1.0.0 or Priority Formula v1.0.0.
 
 ## Multi-agent orchestration and scoring
 
-The eight-agent, fourteen-tool platform coordinates existing evidence-producing
+The eight-agent, fifteen-tool platform coordinates existing evidence-producing
 services through three versioned deterministic workflows. Agent status, workflow
 progress, retry attempts, tool availability, evidence counts, checkpoints, token
 totals, and provider costs are operational metadata. They are not score inputs,
@@ -363,3 +363,48 @@ silently alter them.
 
 Consequently, Task 026 makes no mathematical or version change to Overall Score
 Formula v1.0.0 or Priority Formula v1.0.0.
+
+## Explainable scoring executions
+
+Task 027 does not alter either approved formula. It materializes each calculation
+as an independent UUID-backed execution with a snapshot of category inputs,
+configured weights, normalized available weights, metric contributions, raw
+weighted total, round-half-up result, technical deductions, confidence,
+evidence-coverage numerator/denominator, exclusions, and source references.
+Formula, profile, and Metric Registry versions plus the deterministic evidence
+fingerprint make the result reproducible.
+
+The five category inputs are the only metric contributions to Overall Score
+Formula v1.0.0. An unavailable category has no normalized value or contribution;
+its configured weight is redistributed across available categories exactly as
+before. Coverage is `available scoring inputs / 5 × 100`. Confidence continues
+to use the unchanged 60/25/10/5 evidence-completeness formula and is classified
+for presentation as high (90–100), medium (70–89), low (1–69), or unavailable.
+
+Each profile retains its registered thresholds. Descriptive score bands split
+the registered outer ranges transparently: critical below 25, poor below 50,
+needs improvement below 90, good below 95, and excellent from 95. These are
+internal descriptions, not competitor, industry, Google, global-site, or
+search-engine rankings, and they never alter a numeric score.
+
+Trends compare executions only when formula ID/version and profile ID/version
+match. Compatible history exposes overall, category, and evidence-coverage
+deltas; incompatible history exposes no direct delta. The deterministic scoring
+tool runs after Evidence Validation and supplies persisted references to report,
+remediation, and Action Plan surfaces. LLMs are explicitly prohibited from
+score calculation or modification, and private chain-of-thought is neither
+stored nor exposed.
+
+## Immutable report snapshots
+
+Task 028 report delivery consumes persisted scoring executions; it never
+recalculates or modifies them. Report sections retain the score execution
+reference, Overall Score Formula v1.0.0, Priority Formula v1.0.0, category values,
+contributions, exclusions, confidence, and evidence coverage exactly as stored.
+The Report Agent and optional narrative provider cannot override any value.
+
+An unavailable score remains unavailable in HTML, PDF, and JSON. Report-level
+coverage is the number of sections with retained evidence divided by the twelve
+defined sections, shown separately from score evidence coverage and confidence.
+Generating a later report creates a new immutable snapshot; comparisons remain
+subject to the formula/profile compatibility rules above.

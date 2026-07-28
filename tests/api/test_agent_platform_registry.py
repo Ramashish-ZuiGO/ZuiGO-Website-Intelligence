@@ -36,6 +36,7 @@ EXPECTED_TOOL_IDS = {
     "axe_accessibility",
     "accessibility_aggregation",
     "site_diagnostics",
+    "scoring_intelligence",
     "repository_scanning",
     "remediation_generation",
     "report_generation",
@@ -56,7 +57,7 @@ def test_exact_versioned_agent_and_tool_ids() -> None:
     assert {agent.agent_id for agent in agents} == EXPECTED_AGENT_IDS
     assert {tool.tool_id for tool in tools} == EXPECTED_TOOL_IDS
     assert len(agents) == 8
-    assert len(tools) == 14
+    assert len(tools) == 15
     assert all(agent.version == "1.0.0" for agent in agents)
     assert all(tool.version == "1.0.0" for tool in tools)
     assert ToolRegistry.get("approved_llm_completion").availability_state == "conditional"

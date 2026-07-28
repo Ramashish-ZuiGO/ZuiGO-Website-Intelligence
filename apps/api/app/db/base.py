@@ -21,6 +21,12 @@ from app.models.analysis_score import AnalysisScore  # noqa: E402, F401
 from app.models.discovery_run import DiscoveryRun  # noqa: E402, F401
 from app.models.page_analysis_run import PageAnalysisRun  # noqa: E402, F401
 from app.models.project import Project  # noqa: E402, F401
+from app.models.report_delivery import (  # noqa: E402, F401
+    ReportArtifact,
+    ReportExecution,
+    ReportSection,
+    ReportSnapshot,
+)
 from app.models.repository import (  # noqa: E402, F401
     ActionMatchingExecution,  # noqa: F401
     ActionRepositoryMatch,  # noqa: F401
@@ -28,6 +34,13 @@ from app.models.repository import (  # noqa: E402, F401
     RepositoryConnection,  # noqa: F401
     RepositoryFileIndex,  # noqa: F401
     RepositoryScanExecution,  # noqa: F401
+)
+from app.models.score_intelligence import (  # noqa: E402, F401
+    CategoryScore,
+    MetricContribution,
+    ScoreExecution,
+    ScoreExplanation,
+    ScoreSnapshot,
 )
 from app.models.website import Website  # noqa: E402, F401
 from app.models.website_page import WebsitePage  # noqa: E402, F401

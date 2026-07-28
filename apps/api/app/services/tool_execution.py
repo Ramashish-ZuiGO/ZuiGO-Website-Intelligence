@@ -34,7 +34,12 @@ from app.schemas.agent_platform import (
 )
 from app.services.action_generation import generate_actions
 from app.services.agent_platform_registry import AgentRegistry, SchemaRegistry, ToolRegistry
+from app.services.report_delivery import ReportDeliveryError, generate_report
 from app.services.repository.git_scanner import RepositoryScannerService
+from app.services.scoring_intelligence import (
+    ScoringIntelligenceError,
+    calculate_score_execution,
+)
 from app.services.site_diagnostics_service import SiteDiagnosticsService
 
 SECRET_KEY_MARKERS = (
@@ -634,6 +639,46 @@ def _site_diagnostics(context: ToolContext, _input: BaseModel) -> ToolResult:
     )
 
 
+def _scoring_intelligence(context: ToolContext, _input: BaseModel) -> ToolResult:
+    analysis_run_id = _input_uuid(context, "analysis_run_id")
+    if analysis_run_id is None:
+        return ToolResult(
+            status=ExecutionStatus.UNAVAILABLE,
+            failure_code="analysis_run_required",
+            failure_message="An analysis run is required for scoring.",
+        )
+    try:
+        execution, _created = calculate_score_execution(
+            context.db,
+            analysis_run_id,
+            idempotency_key=f"{context.execution.idempotency_key}:scoring",
+        )
+    except ScoringIntelligenceError as exception:
+        return ToolResult(
+            status=(
+                ExecutionStatus.UNAVAILABLE
+                if exception.status_code in {404, 409}
+                else ExecutionStatus.FAILED
+            ),
+            failure_code=exception.code.casefold(),
+            failure_message=exception.safe_message,
+        )
+    return ToolResult(
+        status=ExecutionStatus(execution.status),
+        structured_output={
+            "score_execution_id": str(execution.execution_id),
+            "overall_score": execution.overall_score,
+            "confidence_percent": execution.confidence_percent,
+            "evidence_coverage_percentage": execution.evidence_coverage_percentage,
+            "formula_version": execution.formula_version,
+            "llm_calculated": False,
+        },
+        evidence_references=[
+            _evidence("score_execution", execution.execution_id, source="database")
+        ],
+    )
+
+
 def _repository_scan(context: ToolContext, _input: BaseModel) -> ToolResult:
     connection_id = _input_uuid(context, "repository_connection_id")
     if connection_id is None:
@@ -712,14 +757,23 @@ def _report(context: ToolContext, _input: BaseModel) -> ToolResult:
             },
             evidence_references=context.dependency_evidence,
         )
-    result = context.db.scalar(
-        select(AnalysisResult).where(AnalysisResult.analysis_run_id == analysis_run_id)
-    )
-    if result is None:
+    try:
+        report, _created = generate_report(
+            context.db,
+            analysis_run_id,
+            idempotency_key=f"{context.execution.idempotency_key}:report-agent",
+            workflow_execution_id=context.execution.execution_id,
+            allow_active_workflow=True,
+        )
+    except ReportDeliveryError as exception:
         return ToolResult(
-            status=ExecutionStatus.PARTIAL,
-            failure_code="analysis_report_unavailable",
-            failure_message="No completed analysis result is available.",
+            status=(
+                ExecutionStatus.PARTIAL
+                if exception.status_code in {404, 409}
+                else ExecutionStatus.FAILED
+            ),
+            failure_code=exception.code.casefold(),
+            failure_message=exception.safe_message,
             deterministic_fallback=True,
             structured_output={
                 "mode": "evidence_reference_report",
@@ -728,12 +782,21 @@ def _report(context: ToolContext, _input: BaseModel) -> ToolResult:
             evidence_references=context.dependency_evidence,
         )
     return ToolResult(
-        status=ExecutionStatus.COMPLETED,
-        structured_output={"report_reference": f"analysis-run:{analysis_run_id}:report"},
+        status=ExecutionStatus(report.status),
+        structured_output={
+            "report_reference": f"report:{report.report_id}",
+            "score_execution_reference": (
+                str(report.score_execution_id) if report.score_execution_id else None
+            ),
+            "score_calculated_by_llm": False,
+            "generation_mode": "deterministic_fallback",
+            "artifact_formats": ["html", "json", "pdf"],
+        },
         evidence_references=[
-            _evidence("analysis_result", result.id, source="database"),
+            _evidence("report_execution", report.report_id, source="database"),
             *context.dependency_evidence,
         ],
+        deterministic_fallback=True,
     )
 
 
@@ -835,6 +898,7 @@ def default_tool_adapters() -> ToolAdapterRegistry:
         FunctionalToolAdapter("axe_accessibility", _accessibility),
         FunctionalToolAdapter("accessibility_aggregation", _accessibility),
         FunctionalToolAdapter("site_diagnostics", _site_diagnostics),
+        FunctionalToolAdapter("scoring_intelligence", _scoring_intelligence),
         FunctionalToolAdapter("repository_scanning", _repository_scan),
         FunctionalToolAdapter("remediation_generation", _remediation),
         FunctionalToolAdapter("report_generation", _report),

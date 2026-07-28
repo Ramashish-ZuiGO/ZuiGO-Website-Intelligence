@@ -21,7 +21,7 @@ def test_agent_tool_and_workflow_metadata_endpoints() -> None:
             item["workflow_id"] for item in workflows.json()
         )
         assert len(agents.json()) == 8
-        assert len(tools.json()) == 14
+        assert len(tools.json()) == 15
         assert len(workflows.json()) == 3
         assert all(item["version"] == "1.0.0" for item in agents.json())
         assert all(item["version"] == "1.0.0" for item in tools.json())

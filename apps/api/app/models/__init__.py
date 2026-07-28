@@ -32,6 +32,12 @@ from app.models.discovery_run import DiscoveryRun, DiscoveryStatus
 from app.models.page_analysis_run import PageAnalysisRun, PageAnalysisStatus
 from app.models.performance import PerformanceSnapshot
 from app.models.project import Project
+from app.models.report_delivery import (
+    ReportArtifact,
+    ReportExecution,
+    ReportSection,
+    ReportSnapshot,
+)
 from app.models.repository import (
     ActionMatchingExecution,
     ActionRepositoryMatch,
@@ -46,6 +52,13 @@ from app.models.repository import (
     RepositoryProvider,
     RepositoryScanExecution,
     ScanStatus,
+)
+from app.models.score_intelligence import (
+    CategoryScore,
+    MetricContribution,
+    ScoreExecution,
+    ScoreExplanation,
+    ScoreSnapshot,
 )
 from app.models.site_diagnostic import (
     DiagnosticScopeEnum,
@@ -103,11 +116,20 @@ __all__ = [
     "RepositoryFileIndex",
     "RepositoryProvider",
     "RepositoryScanExecution",
+    "ReportArtifact",
+    "ReportExecution",
+    "ReportSection",
+    "ReportSnapshot",
     "ScanStatus",
     "SiteDiagnosticExecution",
     "SiteDiagnosticExecutionStatusEnum",
     "SiteDiagnosticFinding",
     "SiteDiagnosticOccurrence",
+    "ScoreExecution",
+    "ScoreSnapshot",
+    "CategoryScore",
+    "MetricContribution",
+    "ScoreExplanation",
     "Website",
     "WebsitePage",
     "validate_action_transition",

@@ -2,6 +2,23 @@
 
 Monorepo foundation for the ZuiGO Website Intelligence platform.
 
+## Presentation mode
+
+Task 030 provides a deterministic local presentation journey at
+`http://localhost:3000/presentation`. It uses persisted synthetic evidence and
+the existing eight-agent workflow, scoring, diagnostics, Action Plan, report,
+and HTML/PDF/JSON export contracts. It does not crawl a public website, call a
+public API, or require an LLM.
+
+The screen supports **Run Demo Analysis**, **Open Prepared Demo Report**, and
+**Reset Demo**. Repeating the same run is idempotent. A failed live execution is
+preserved as failed; the interface may open the last verified prepared report
+only with a visible prepared-fallback label. Overall Score Formula v1.0.0 and
+Priority Formula v1.0.0 are unchanged.
+
+Use the [presentation script](docs/PRESENTATION_DEMO_SCRIPT.md) and
+[readiness checklist](docs/PRESENTATION_CHECKLIST.md) before a demonstration.
+
 ## Prerequisites
 
 - Node.js 24

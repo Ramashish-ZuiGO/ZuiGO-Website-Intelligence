@@ -46,12 +46,20 @@ export default function Home() {
         <p className="mt-4 text-lg leading-8 text-slate-600">
           The frontend foundation is running. Backend connectivity is shown below.
         </p>
-        <Link
-          className="mt-6 inline-flex rounded-lg bg-slate-950 px-5 py-3 font-semibold text-white"
-          href="/projects"
-        >
-          Manage projects
-        </Link>
+        <div className="mt-6 flex flex-wrap gap-3">
+          <Link
+            className="inline-flex rounded-lg bg-orange-500 px-5 py-3 font-bold text-slate-950 focus-visible:outline-4 focus-visible:outline-offset-4 focus-visible:outline-slate-950"
+            href="/presentation"
+          >
+            Open presentation mode
+          </Link>
+          <Link
+            className="inline-flex rounded-lg bg-slate-950 px-5 py-3 font-semibold text-white focus-visible:outline-4 focus-visible:outline-offset-4 focus-visible:outline-orange-500"
+            href="/projects"
+          >
+            Manage projects
+          </Link>
+        </div>
 
         <div className="mt-8 rounded-xl bg-slate-50 p-5" aria-live="polite">
           <p className="text-sm font-medium text-slate-600">API status</p>

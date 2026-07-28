@@ -161,3 +161,23 @@ The progress projection exposes only persisted statuses, stage order, agent
 attempts, coverage, checkpoints, unavailable tools/providers, timestamps, and
 redacted error summaries. It excludes prompts, credentials, private reasoning,
 and raw secret-bearing tool payloads.
+
+## Report-depth projection
+
+Task 029 keeps exactly the same eight agents, fifteen tools, and three workflows.
+It projects their persisted results into sixteen report sections without adding
+an autonomous agent or execution path. Each section lists involved agents,
+actual tool activity, execution status, evidence references, unavailable
+tools/providers, and deterministic fallback behavior.
+
+Finding attribution uses the producing agent (`performance_agent`,
+`accessibility_agent`, or `site_diagnostics_agent`) and identifies
+`evidence_validation_agent` where validation applies. Repository intelligence
+and remediation attribution is shown only when those stages ran; unavailable
+stages remain visible. `report_agent` assembles and presents the snapshot but
+cannot turn missing evidence into a finding, business claim, score, or passed
+result.
+
+The local demonstration fixture simulates the same contracts without creating an
+agent execution or calling a public site, API, LLM, or remote provider. Its HTML,
+PDF, JSON, and checksum manifest are generated under an ignored local directory.

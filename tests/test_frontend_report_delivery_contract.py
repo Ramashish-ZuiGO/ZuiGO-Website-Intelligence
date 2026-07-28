@@ -34,6 +34,9 @@ def test_exact_report_delivery_frontend_api_contract() -> None:
         "DeliveredReport",
         "ReportSection",
         "ReportArtifact",
+        "ReportOccurrence",
+        "DetailedReportFinding",
+        "SectionAgentAttribution",
         "PaginatedReports",
     ):
         assert f"interface {name}" in types
@@ -82,6 +85,35 @@ def test_report_accessibility_safe_rendering_and_non_colour_status() -> None:
         assert contract in component
     assert "dangerouslySetInnerHTML" not in component
     assert "No report has been generated. This does not mean that no issues exist." in component
+
+
+def test_report_finding_filters_navigation_and_agent_attribution() -> None:
+    component = _text(COMPONENT)
+    for contract in (
+        "Finding explorer",
+        "Search findings",
+        "Page or URL",
+        'label="Severity"',
+        'label="Category"',
+        'label="Agent"',
+        'label="Scope"',
+        'label="Evidence state"',
+        "Exact affected locations",
+        "Technical explanation",
+        "Business impact",
+        "Recommended remediation",
+        "Responsible role",
+        "Estimated effort",
+        "Verification",
+        "Section agent attribution",
+        "Agents and evidence production",
+        "Unavailable tools/providers",
+        "href={`#finding-${findingId}`}",
+        "collectFindingIds",
+    ):
+        assert contract in component
+    assert ".slice(0, 50)" not in component
+    assert ".slice(0,50)" not in component
 
 
 def test_report_delivery_integrates_required_frontend_surfaces() -> None:

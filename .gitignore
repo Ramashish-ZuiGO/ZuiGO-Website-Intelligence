@@ -31,5 +31,6 @@ Thumbs.db
 coverage/
 htmlcov/
 .coverage
+.local-reports/
 
 *.tsbuildinfo

@@ -1,4 +1,5 @@
 import React from 'react';
+import { ConceptInfoButton } from "@/components/metrics/ConceptInfoButton";
 import { MetricInfoButton } from "@/components/metrics/MetricInfoButton";
 
 export interface AccessibilityNodeData {
@@ -79,7 +80,13 @@ export function AccessibilityIntelligence({ accessibilityData }: { accessibility
           <p className="text-2xl font-bold text-amber-600 mt-1">{audit.incomplete_count}</p>
         </div>
         <div className="bg-slate-50 p-4 rounded-lg border border-slate-100">
-          <p className="text-sm font-medium text-slate-800">Inapplicable</p>
+          <p className="flex items-center gap-1 text-sm font-medium text-slate-800">
+            Inapplicable
+            <ConceptInfoButton
+              conceptId="accessibility_inapplicable_rules"
+              title="Inapplicable accessibility rules"
+            />
+          </p>
           <p className="text-2xl font-bold text-slate-600 mt-1">{audit.inapplicable_count}</p>
         </div>
       </div>

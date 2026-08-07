@@ -31,6 +31,10 @@ class AnalysisRun(Base):
             "progress_percent >= 0 AND progress_percent <= 100",
             name="ck_analysis_runs_progress_percent_range",
         ),
+        CheckConstraint(
+            "baseline_analysis_run_id IS NULL OR baseline_analysis_run_id <> id",
+            name="ck_analysis_runs_distinct_baseline",
+        ),
         Index("ix_analysis_runs_status", "status"),
         Index("ix_analysis_runs_created_at", "created_at"),
     )
@@ -38,6 +42,10 @@ class AnalysisRun(Base):
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     website_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("websites.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    baseline_analysis_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("analysis_runs.id", ondelete="SET NULL"),
+        index=True,
     )
     status: Mapped[AnalysisStatus] = mapped_column(
         Enum(

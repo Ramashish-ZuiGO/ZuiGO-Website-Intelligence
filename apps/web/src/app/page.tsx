@@ -40,7 +40,6 @@ export default function Home() {
   const router = useRouter();
   const idempotencyKey = useRef("");
   const [websiteUrl, setWebsiteUrl] = useState("");
-  const [maximumPages, setMaximumPages] = useState(10);
   const [engines, setEngines] = useState<BrowserEngine[]>([
     "chromium",
     "firefox",
@@ -93,7 +92,6 @@ export default function Home() {
       const started = await reportDeliveryApi.startRealAnalysis({
         website_url: websiteUrl,
         idempotency_key: idempotencyKey.current,
-        maximum_pages: maximumPages,
         browser_engines: engines,
         include_mobile: includeMobile,
       });
@@ -164,19 +162,6 @@ export default function Home() {
                 type="text"
                 value={websiteUrl}
               />
-              <label className="mt-5 block text-sm font-bold" htmlFor="maximum-pages">
-                Maximum pages: {maximumPages}
-              </label>
-              <input
-                className="mt-2 w-full accent-orange-600"
-                id="maximum-pages"
-                max={50}
-                min={1}
-                onChange={(event) => setMaximumPages(Number(event.target.value))}
-                type="range"
-                value={maximumPages}
-              />
-
               <details className="mt-5 rounded-lg border border-slate-300 p-4">
                 <summary className="cursor-pointer font-bold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600">
                   Advanced settings

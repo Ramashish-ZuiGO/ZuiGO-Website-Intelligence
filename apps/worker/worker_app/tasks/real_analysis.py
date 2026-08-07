@@ -17,6 +17,11 @@ from app.services.browser_compatibility import (
     CompatibilityProfile,
     run_compatibility_analysis,
 )
+from app.services.page_selection import select_scheduled_pages
+from app.services.resource_classification import (
+    ResourceClassification,
+    classify_resource,
+)
 from celery import chain
 from sqlalchemy import select
 
@@ -38,7 +43,6 @@ REAL_STAGE_NAMES = (
     "browser-compatibility",
     "agent-workflow",
 )
-REAL_BROWSER_PAGE_SAMPLE_LIMIT: int = 1
 REAL_BROWSER_NAVIGATION_TIMEOUT_MS: int = 15_000
 TERMINAL_REAL_EXECUTION_STATUSES = frozenset(
     {"completed", "partial", "failed", "cancelled", "unavailable"}
@@ -155,6 +159,7 @@ def _begin_journey(execution_id: str) -> tuple[AgentExecution, bool]:
                             "eligible_pages": 0,
                             "queued_pages": 0,
                             "attempted_pages": 0,
+                            "tested_pages": 0,
                             "passed_pages": 0,
                             "partial_pages": 0,
                             "failed_pages": 0,
@@ -274,6 +279,12 @@ def _browser_engine_progress(
         attempted_urls = {
             str(item["page_url"]) for item in observations if item.get("engine") == engine
         }
+        tested_urls = {
+            str(item["page_url"])
+            for item in observations
+            if item.get("engine") == engine
+            and item.get("state") not in {"not_tested", "unavailable"}
+        }
         states = [str(item.get("engines", {}).get(engine, "not_tested")) for item in matrix]
         summaries.append(
             {
@@ -281,6 +292,7 @@ def _browser_engine_progress(
                 "eligible_pages": eligible_page_count,
                 "queued_pages": max(0, eligible_page_count - len(attempted_urls)),
                 "attempted_pages": len(attempted_urls),
+                "tested_pages": len(tested_urls),
                 "passed_pages": states.count("compatible"),
                 "partial_pages": states.count("partially_compatible"),
                 "failed_pages": states.count("incompatible"),
@@ -311,33 +323,103 @@ def collect_real_browser_compatibility(
         )
         if existing is not None:
             return dict(existing.artifact_metadata)
-        pages = list(
+        page_execution_id = uuid.UUID(str(execution.structured_input["page_analysis_execution_id"]))
+        page_runs = list(
             db.scalars(
-                select(WebsitePage)
-                .where(
-                    WebsitePage.website_id
-                    == uuid.UUID(str(execution.structured_input["website_id"])),
-                    WebsitePage.last_discovery_run_id == parsed_discovery_id,
-                    WebsitePage.eligibility_status == "eligible",
-                    WebsitePage.page_analysis_level_1_status.in_(("completed", "partial")),
+                select(PageAnalysisRun).where(
+                    PageAnalysisRun.discovery_run_id == parsed_discovery_id,
+                    PageAnalysisRun.page_analysis_execution_id == page_execution_id,
+                    PageAnalysisRun.analysis_level == 1,
                 )
-                .order_by(WebsitePage.crawl_depth, WebsitePage.normalized_url)
             )
         )
+        runs_by_page_id = {item.website_page_id: item for item in page_runs}
+        selected_ids = {
+            uuid.UUID(str(item))
+            for item in execution.structured_output.get("page_analysis_summary", {}).get(
+                "selected_page_ids", []
+            )
+        } or set(runs_by_page_id)
+        pages = (
+            list(
+                db.scalars(
+                    select(WebsitePage)
+                    .where(
+                        WebsitePage.website_id
+                        == uuid.UUID(str(execution.structured_input["website_id"])),
+                        WebsitePage.last_discovery_run_id == parsed_discovery_id,
+                        WebsitePage.id.in_(selected_ids),
+                    )
+                    .order_by(WebsitePage.crawl_depth, WebsitePage.normalized_url)
+                )
+            )
+            if selected_ids
+            else select_scheduled_pages(
+                list(
+                    db.scalars(
+                        select(WebsitePage)
+                        .where(
+                            WebsitePage.website_id
+                            == uuid.UUID(str(execution.structured_input["website_id"])),
+                            WebsitePage.last_discovery_run_id == parsed_discovery_id,
+                            WebsitePage.eligibility_status == "eligible",
+                        )
+                        .order_by(WebsitePage.crawl_depth, WebsitePage.normalized_url)
+                    )
+                ),
+                execution.structured_input.get("maximum_pages"),
+            )
+        )
+        pages = [
+            page
+            for page in pages
+            if (
+                classify_resource(
+                    page.normalized_url,
+                    final_url=(
+                        runs_by_page_id[page.id].final_url
+                        if page.id in runs_by_page_id
+                        else page.final_url
+                    ),
+                    content_type=(
+                        runs_by_page_id[page.id].content_type
+                        if page.id in runs_by_page_id
+                        else None
+                    ),
+                    failure_code=(
+                        runs_by_page_id[page.id].failure_reason_code
+                        if page.id in runs_by_page_id
+                        else None
+                    ),
+                    eligibility_status=page.eligibility_status,
+                    exclusion_reason=page.exclusion_reason,
+                    skip_reason=page.skip_reason,
+                    origin_relation=page.origin_relation,
+                ).classification
+                == ResourceClassification.ELIGIBLE_HTML_PAGE
+            )
+        ]
         page_records = [
             {
-                "url": page.final_url or page.normalized_url,
+                "url": (
+                    runs_by_page_id[page.id].final_url
+                    if page.id in runs_by_page_id and runs_by_page_id[page.id].final_url
+                    else page.final_url or page.normalized_url
+                ),
                 "title": page.page_title,
                 "page_type": page.page_type,
-                "analysis_status": page.page_analysis_level_1_status,
+                "analysis_status": (
+                    runs_by_page_id[page.id].status
+                    if page.id in runs_by_page_id
+                    else page.page_analysis_level_1_status
+                ),
                 "critical": page.crawl_depth == 0,
             }
             for page in pages
         ]
         engine_values = tuple(execution.structured_input.get("browser_engines") or ())
-        configured_page_limit = int(execution.structured_input.get("maximum_pages") or 50)
-        browser_page_limit = min(configured_page_limit, REAL_BROWSER_PAGE_SAMPLE_LIMIT)
-        browser_eligible_count = min(len(page_records), browser_page_limit)
+        browser_eligible_count = len(page_records)
+        browser_page_limit = browser_eligible_count
         profile = CompatibilityProfile(
             profile_id="real_website_cross_browser",
             engines=engine_values or ("chromium", "firefox", "webkit"),
@@ -357,6 +439,7 @@ def collect_real_browser_compatibility(
                     "eligible_pages": browser_eligible_count,
                     "queued_pages": browser_eligible_count,
                     "attempted_pages": 0,
+                    "tested_pages": 0,
                     "passed_pages": 0,
                     "partial_pages": 0,
                     "failed_pages": 0,
@@ -624,6 +707,7 @@ def run_real_browser_stage(
                     "eligible_pages": eligible_count,
                     "queued_pages": 0,
                     "attempted_pages": 0,
+                    "tested_pages": 0,
                     "passed_pages": 0,
                     "partial_pages": 0,
                     "failed_pages": 0,

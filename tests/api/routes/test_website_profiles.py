@@ -1,12 +1,13 @@
 import uuid
 from collections.abc import Iterator
+from datetime import UTC, datetime
 
 import app.db.base  # noqa: F401
 import pytest
 from app.db.base import Base
 from app.db.session import get_db
 from app.main import app
-from app.models import Project
+from app.models import AnalysisResult, AnalysisRun, AnalysisStatus, Project
 from app.models.website import Website
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event
@@ -127,3 +128,39 @@ def test_get_website_metric_interpretations_empty(
     response = client.get(f"/api/v1/websites/{website_id}/metric-interpretations")
     assert response.status_code == 200
     assert response.json() == []
+
+
+def test_get_website_metric_interpretations_uses_persisted_lighthouse_data(
+    client: TestClient, db_session: Session, test_project: dict
+) -> None:
+    website = Website(
+        project_id=test_project["id"],
+        url="https://metrics.example",
+        profile_id="global_general",
+    )
+    run = AnalysisRun(
+        website=website,
+        status=AnalysisStatus.COMPLETED,
+        profile_id="global_general",
+    )
+    now = datetime.now(UTC)
+    run.result = AnalysisResult(
+        requested_url=website.url,
+        final_url=website.url,
+        http_status_code=200,
+        analysis_started_at=now,
+        analysis_completed_at=now,
+        raw_lighthouse_data={
+            "audits": {
+                "largest-contentful-paint": {"numericValue": 1800},
+            }
+        },
+        raw_playwright_data={},
+    )
+    db_session.add(run)
+    db_session.commit()
+
+    response = client.get(f"/api/v1/websites/{website.id}/metric-interpretations")
+
+    assert response.status_code == 200
+    assert "lighthouse_lcp" in {item["metric_id"] for item in response.json()}

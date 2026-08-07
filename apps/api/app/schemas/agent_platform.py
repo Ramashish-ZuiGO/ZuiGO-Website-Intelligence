@@ -235,6 +235,7 @@ class WorkflowDefinition(RegistryModel):
 class WebsiteAnalysisInput(BaseModel):
     project_id: UUID
     analysis_run_id: UUID | None = None
+    baseline_analysis_run_id: UUID | None = None
     website_id: UUID
     repository_connection_id: UUID | None = None
     page_analysis_execution_id: UUID | None = None
@@ -319,13 +320,14 @@ class WorkflowExecutionCreate(BaseModel):
     workflow_id: str
     project_id: UUID
     analysis_run_id: UUID | None = None
+    baseline_analysis_run_id: UUID | None = None
     website_id: UUID | None = None
     repository_connection_id: UUID | None = None
     page_analysis_execution_id: UUID | None = None
     discovery_run_id: UUID | None = None
     submitted_url: str | None = Field(default=None, max_length=2048)
     normalized_url: str | None = Field(default=None, max_length=2048)
-    maximum_pages: int | None = Field(default=None, ge=1, le=50)
+    maximum_pages: int | None = Field(default=None, ge=1, le=10000)
     browser_engines: list[Literal["chromium", "firefox", "webkit"]] = Field(default_factory=list)
     include_mobile: bool = True
     execute_repository_agent: bool = False

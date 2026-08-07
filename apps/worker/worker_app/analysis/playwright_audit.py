@@ -421,9 +421,7 @@ def inspect_page(
                 # Run axe-core accessibility audit
                 try:
                     axe = Axe()
-                    options = {
-                        "resultTypes": ["violations", "incomplete", "passes", "inapplicable"]
-                    }
+                    options = {"resultTypes": ["violations", "incomplete"]}
                     axe_results = axe.run(page, options=options)
                     measurements["accessibility_axe_results"] = axe_results.response
                     measurements["accessibility_axe_version"] = axe_results.response.get(

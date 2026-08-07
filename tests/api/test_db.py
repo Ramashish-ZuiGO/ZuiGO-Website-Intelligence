@@ -18,6 +18,8 @@ def test_database_foundation_uses_psycopg_with_mvp_tables() -> None:
         "action_matching_executions",
         "action_repository_matches",
         "analysis_findings",
+        "analysis_comparison_artifacts",
+        "analysis_comparisons",
         "analysis_diagnostics",
         "analysis_interpretations",
         "analysis_results",

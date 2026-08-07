@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from io import BytesIO
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
@@ -24,6 +24,7 @@ from app.models import (
     AnalysisFinding,
     AnalysisRun,
     DiscoveryRun,
+    PageAnalysisRun,
     ReportArtifact,
     ReportExecution,
     ReportSection,
@@ -36,6 +37,15 @@ from app.models import (
 )
 from app.services.agent_platform_registry import AgentRegistry
 from app.services.browser_compatibility import ENGINE_LABELS
+from app.services.canonical_report_metrics import (
+    deduplicate_limitations,
+    reconcile_affected_pages,
+)
+from app.services.page_selection import select_scheduled_pages
+from app.services.resource_classification import (
+    ResourceClassification,
+    classify_resource,
+)
 from app.services.scoring_formula import FORMULA_ID, FORMULA_VERSION
 
 REPORT_VERSION = "1.1.0"
@@ -47,6 +57,16 @@ ARTIFACT_MEDIA_TYPES = {
     "json": "application/json",
 }
 TERMINAL_WORKFLOW_STATUSES = {"completed", "partial", "failed", "cancelled", "unavailable"}
+FRIENDLY_FINDING_LABELS = {
+    "CSP_MISSING": "Content Security Policy missing",
+    "HSTS_MISSING": "Strict Transport Security missing",
+    "FRAME_PROTECTION_MISSING": "Frame protection missing",
+    "FAILED_NETWORK_REQUESTS": "Failed network requests",
+    "duplicate_meta_description_group": "Duplicate meta descriptions",
+    "duplicate_normalized_internal_target": "Duplicate normalized link targets",
+    "duplicate_normalized_targets": "Duplicate normalized link targets",
+    "duplicate_title_group": "Duplicate page titles",
+}
 SECTION_DEFINITIONS = (
     ("executive_summary", "Executive Summary"),
     ("scores", "Overall and Category Scores"),
@@ -261,6 +281,7 @@ def _agent_attribution(
     agent_runs: list[AgentRun],
     *,
     fallback_behavior: str,
+    repository_connected: bool,
 ) -> dict[str, Any]:
     latest_runs: dict[str, AgentRun] = {}
     for run in agent_runs:
@@ -296,8 +317,15 @@ def _agent_attribution(
         agents.append(
             {
                 "agent_id": agent_id,
+                "agent_name": definition.name,
                 "agent_version": run.agent_version if run else definition.version,
-                "execution_status": run.status if run else "unavailable",
+                "execution_status": (
+                    "not_applicable"
+                    if agent_id == "repository_intelligence_agent" and not repository_connected
+                    else run.status
+                    if run
+                    else "execution_status_not_recorded"
+                ),
                 "tools_used": tools_used,
                 "allowed_tool_ids": list(definition.allowed_tool_ids),
                 "evidence_reference_count": len(run.evidence_references) if run else 0,
@@ -311,7 +339,11 @@ def _agent_attribution(
             "failed"
             if any(item["execution_status"] == "failed" for item in agents)
             else "partial"
-            if any(item["execution_status"] in {"partial", "unavailable"} for item in agents)
+            if any(
+                item["execution_status"]
+                in {"partial", "unavailable", "execution_status_not_recorded"}
+                for item in agents
+            )
             else "completed"
         ),
         "evidence_produced": evidence_produced,
@@ -385,6 +417,34 @@ def _loaded_run(db: Session, run_id: uuid.UUID) -> AnalysisRun:
     return run
 
 
+def _discovery_message(
+    stage_status: str | None,
+    completeness: str | None,
+    discovery: Any,
+) -> str:
+    _PENDING = {"queued", "pending", "initializing", "not_started"}
+    if stage_status in _PENDING:
+        return "Website discovery is waiting to start."
+    if stage_status == "running":
+        return (
+            "Website discovery is in progress. "
+            "Full-site coverage will be evaluated after completion."
+        )
+    if completeness == "complete":
+        return "Website discovery completed. Full-site coverage was established."
+    if completeness == "partial":
+        return (
+            "Website discovery completed with partial coverage. "
+            "Some website areas may not have been discovered."
+        )
+    if completeness == "failed":
+        reason = discovery.failure_message if discovery else "unknown reason"
+        return f"Website discovery failed: {reason or 'unknown reason'}."
+    if completeness == "inconclusive":
+        return "Website discovery was inconclusive. Full-site coverage could not be established."
+    return "Website discovery status is not yet available."
+
+
 def _real_evidence_summary(
     db: Session,
     run: AnalysisRun,
@@ -393,16 +453,111 @@ def _real_evidence_summary(
 ) -> dict[str, Any]:
     discovery_id = workflow.structured_input.get("discovery_run_id")
     discovery = db.get(DiscoveryRun, uuid.UUID(str(discovery_id))) if discovery_id else None
+    raw_discovery_status = (
+        discovery.status.value
+        if discovery and hasattr(discovery.status, "value")
+        else str(discovery.status)
+        if discovery
+        else None
+    )
+    _TERMINAL_COMPLETENESS = {
+        "completed": "complete",
+        "partial": "partial",
+        "failed": "failed",
+        "inconclusive": "inconclusive",
+    }
+    _ACTIVE_STATUSES = {"queued", "pending", "running", "initializing"}
+    if raw_discovery_status is None:
+        discovery_completeness = None
+        discovery_stage_status = "not_started"
+    elif raw_discovery_status in _ACTIVE_STATUSES:
+        discovery_completeness = None
+        discovery_stage_status = raw_discovery_status
+    else:
+        discovery_completeness = _TERMINAL_COMPLETENESS.get(raw_discovery_status, "inconclusive")
+        discovery_stage_status = raw_discovery_status
+    discovery_complete = discovery_completeness == "complete"
+    _raw_limit = workflow.structured_input.get("maximum_pages")
+    page_limit = int(_raw_limit) if _raw_limit is not None else None
+    page_execution_id = workflow.structured_input.get("page_analysis_execution_id")
+    page_runs = (
+        list(
+            db.scalars(
+                select(PageAnalysisRun)
+                .where(
+                    PageAnalysisRun.page_analysis_execution_id == uuid.UUID(str(page_execution_id)),
+                    PageAnalysisRun.discovery_run_id == discovery.id,
+                    PageAnalysisRun.analysis_level == 1,
+                )
+                .order_by(PageAnalysisRun.created_at, PageAnalysisRun.id)
+            )
+        )
+        if discovery and page_execution_id
+        else []
+    )
+    historical_page_ids = {item.website_page_id for item in page_runs}
     pages = list(
         db.scalars(
             select(WebsitePage)
             .where(
                 WebsitePage.website_id == run.website_id,
-                *([WebsitePage.last_discovery_run_id == discovery.id] if discovery else []),
+                *(
+                    [
+                        or_(
+                            WebsitePage.last_discovery_run_id == discovery.id,
+                            WebsitePage.id.in_(historical_page_ids),
+                        )
+                    ]
+                    if discovery
+                    else []
+                ),
             )
-            .order_by(WebsitePage.normalized_url, WebsitePage.id)
+            .order_by(WebsitePage.crawl_depth, WebsitePage.normalized_url, WebsitePage.id)
         )
     )
+    page_run_by_page_id = {item.website_page_id: item for item in page_runs}
+    classifications = {
+        page.id: classify_resource(
+            page.normalized_url,
+            final_url=(
+                page_run_by_page_id[page.id].final_url
+                if page.id in page_run_by_page_id
+                else page.final_url
+            ),
+            content_type=(
+                page_run_by_page_id[page.id].content_type
+                if page.id in page_run_by_page_id
+                else None
+            ),
+            failure_code=(
+                page_run_by_page_id[page.id].failure_reason_code
+                if page.id in page_run_by_page_id
+                else None
+            ),
+            eligibility_status=page.eligibility_status,
+            exclusion_reason=page.exclusion_reason,
+            skip_reason=page.skip_reason,
+            origin_relation=page.origin_relation,
+        )
+        for page in pages
+    }
+    eligible = [
+        item
+        for item in pages
+        if classifications[item.id].classification == ResourceClassification.ELIGIBLE_HTML_PAGE
+    ]
+    selected_ids = {
+        uuid.UUID(str(item))
+        for item in workflow.structured_output.get("page_analysis_summary", {}).get(
+            "selected_page_ids", []
+        )
+    } or set(page_run_by_page_id)
+    scheduled = (
+        [item for item in eligible if item.id in selected_ids]
+        if selected_ids
+        else select_scheduled_pages(eligible, page_limit)
+    )
+    scheduled_ids = {item.id for item in scheduled}
     browser_artifact = db.scalar(
         select(AgentArtifact).where(
             AgentArtifact.execution_id == workflow.id,
@@ -410,7 +565,7 @@ def _real_evidence_summary(
         )
     )
     browser = (
-        browser_artifact.artifact_metadata
+        dict(browser_artifact.artifact_metadata)
         if browser_artifact
         else {
             "status": "unavailable",
@@ -424,12 +579,14 @@ def _real_evidence_summary(
         }
     )
     observations_by_url: dict[str, set[str]] = {}
+    tested_urls_by_engine: dict[str, set[str]] = {}
     for observation in browser.get("observations", []):
         if observation.get("state") in {"not_tested", "unavailable"}:
             continue
-        observations_by_url.setdefault(str(observation["page_url"]), set()).add(
-            str(observation.get("engine_label") or observation.get("engine"))
-        )
+        page_url = str(observation["page_url"])
+        engine = str(observation.get("engine"))
+        observations_by_url.setdefault(page_url, set()).add(engine)
+        tested_urls_by_engine.setdefault(engine, set()).add(page_url)
     all_findings = []
     for section in sections:
         values = section["content"].get("findings", [])
@@ -452,6 +609,27 @@ def _real_evidence_summary(
     }
     inventory = []
     for page in pages:
+        page_run = page_run_by_page_id.get(page.id)
+        resource = classifications[page.id]
+        is_eligible = resource.classification == ResourceClassification.ELIGIBLE_HTML_PAGE
+        is_scheduled = page.id in scheduled_ids
+        visited = bool(is_eligible and page_run and page_run.analysis_started_at)
+        successfully_analysed = bool(
+            is_eligible
+            and page_run
+            and page_run.status == "completed"
+            and page_run.final_url
+            and page_run.http_status_code is not None
+        )
+        result = (
+            resource.classification.value
+            if not is_eligible
+            else "not_scheduled"
+            if not is_scheduled
+            else page_run.status
+            if page_run
+            else "skipped"
+        )
         findings = finding_by_url.get(page.normalized_url, [])
         highest = (
             min(
@@ -461,31 +639,61 @@ def _real_evidence_summary(
             if findings
             else None
         )
-        analysis_status = (
-            page.eligibility_status
-            if page.eligibility_status != "eligible"
-            else page.page_analysis_level_1_status
-        )
         inventory.append(
             {
-                "page_id": str(page.id),
                 "url": page.normalized_url,
-                "page_title": page.page_title,
+                "page_title": page_run.page_title
+                if page_run and page_run.page_title
+                else page.page_title,
                 "page_type": page.page_type,
-                "http_status": next(
-                    (
-                        item.http_status_code
-                        for item in page.page_analysis_runs
-                        if item.analysis_level == 1
-                    ),
-                    None,
+                "http_status": page_run.http_status_code if page_run else None,
+                "final_url": page_run.final_url if page_run else page.final_url,
+                "response_content_type": page_run.content_type if page_run else None,
+                "detected_content_type": None,
+                "content_type_detection": (
+                    "No independent content sniff was persisted."
+                    if page_run and page_run.content_type
+                    else "Content type evidence was unavailable."
                 ),
-                "analysis_status": analysis_status,
+                "resource_classification": resource.classification.value,
+                "classification_basis": resource.evidence_basis,
+                "eligibility": (
+                    "eligible"
+                    if resource.classification == ResourceClassification.ELIGIBLE_HTML_PAGE
+                    else "not_eligible"
+                ),
+                "scheduled": is_scheduled,
+                "visited": visited,
+                "analysed": successfully_analysed,
+                "analysis_status": result,
                 "browser_engines_tested": sorted(
                     observations_by_url.get(
-                        page.final_url or page.normalized_url,
+                        page_run.final_url
+                        if page_run and page_run.final_url
+                        else page.normalized_url,
                         set(),
                     )
+                ),
+                "result": result,
+                "exclusion_reason": (
+                    resource.classification.value
+                    if not is_eligible
+                    else "Not scheduled for analysis"
+                    if not is_scheduled
+                    else None
+                ),
+                "failure_reason": page_run.failure_reason_text if page_run else page.skip_reason,
+                "failure_stage": (
+                    "Page analysis response validation"
+                    if page_run and page_run.failure_reason_code == "unsupported_content_type"
+                    else "Page analysis"
+                    if page_run and page_run.status == "failed"
+                    else None
+                ),
+                "browser_navigation": (
+                    "Eligible for browser navigation."
+                    if is_eligible
+                    else "Not browser-eligible HTML; asset navigation was not attempted."
                 ),
                 "issue_count": len(
                     {str(item.get("finding_id")) for item in findings if item.get("finding_id")}
@@ -493,34 +701,96 @@ def _real_evidence_summary(
                 "highest_severity": highest,
                 "evidence_coverage": (
                     100.0
-                    if analysis_status == "completed"
+                    if successfully_analysed
                     else 50.0
-                    if analysis_status == "partial"
+                    if page_run and page_run.status == "partial"
                     else 0.0
                 ),
             }
         )
-    eligible = [item for item in pages if item.eligibility_status == "eligible"]
-    scheduled = eligible[: int(workflow.structured_input.get("maximum_pages") or len(eligible))]
-    successful = [item for item in scheduled if item.page_analysis_level_1_status == "completed"]
-    failed = [item for item in scheduled if item.page_analysis_level_1_status == "failed"]
-    analysed = [
+    scheduled_page_runs = [item for item in page_runs if item.website_page_id in scheduled_ids]
+    successful = [
         item
-        for item in scheduled
-        if item.page_analysis_level_1_status in {"completed", "partial", "failed"}
+        for item in scheduled_page_runs
+        if item.status == "completed" and item.final_url and item.http_status_code is not None
     ]
-    denominator = len(scheduled)
+    failed = [item for item in scheduled_page_runs if item.status == "failed"]
+    incomplete = [
+        item
+        for item in scheduled_page_runs
+        if item.status in {"pending", "running", "partial"}
+        or (
+            item.status == "completed" and (item.final_url is None or item.http_status_code is None)
+        )
+    ]
+    visited = [item for item in scheduled_page_runs if item.analysis_started_at is not None]
+    skipped = [item for item in scheduled_page_runs if item.status == "skipped"]
+    skipped_count = len(skipped) + max(0, len(scheduled) - len(scheduled_page_runs))
+    denominator = len(eligible)
+    analysed_page_coverage = round(len(successful) / denominator * 100, 1) if denominator else None
+    engine_rows = {
+        str(item.get("engine")): dict(item)
+        for item in browser.get("engines", [])
+        if isinstance(item, dict) and item.get("engine")
+    }
+    unavailable_engines: set[str] = set()
+    for observation in browser.get("observations", []):
+        if observation.get("state") == "unavailable":
+            unavailable_engines.add(str(observation.get("engine")))
+    browser_engines = []
+    for engine in workflow.structured_input.get("browser_engines", []):
+        row = engine_rows.get(engine, {})
+        tested_pages = len(tested_urls_by_engine.get(engine, set()))
+        all_unavailable = engine in unavailable_engines and tested_pages == 0
+        browser_engines.append(
+            {
+                **row,
+                "engine": engine,
+                "eligible_pages": len(scheduled),
+                "tested_pages": tested_pages,
+                "attempted_pages": int(row.get("attempted_pages") or tested_pages),
+                "queued_pages": max(0, len(scheduled) - int(row.get("attempted_pages") or 0)),
+                "availability_status": "unavailable" if all_unavailable else "available",
+            }
+        )
+    browser = {
+        **browser,
+        "eligible_page_count": len(scheduled),
+        "engines": browser_engines,
+        "engine_coverage": browser_engines,
+    }
     return {
         "submitted_url": workflow.structured_input.get("submitted_url"),
         "normalized_url": workflow.structured_input.get("normalized_url") or run.website.url,
         "page_coverage": {
+            "discovery_stage_status": discovery_stage_status,
+            "discovery_status": raw_discovery_status,
+            "discovery_completeness": discovery_completeness,
+            "discovery_completeness_message": _discovery_message(
+                discovery_stage_status,
+                discovery_completeness,
+                discovery,
+            ),
+            "discovery_failure_code": discovery.failure_code if discovery else None,
+            "discovery_failure_message": discovery.failure_message if discovery else None,
             "total_urls_discovered": discovery.urls_discovered if discovery else 0,
-            "total_pages_scheduled": denominator,
-            "total_pages_visited": sum(page.final_url is not None for page in pages),
+            "normalized_pages": discovery.urls_unique if discovery else len(pages),
+            "eligible_pages": len(eligible),
+            "total_pages_scheduled": len(scheduled),
+            "not_scheduled_pages": max(0, len(eligible) - len(scheduled)),
+            "total_pages_visited": len(visited),
             "successfully_analysed_pages": len(successful),
-            "analysed_pages": len(analysed),
+            "analysed_pages": len(successful),
             "failed_pages": len(failed),
-            "skipped_pages": discovery.urls_skipped if discovery else 0,
+            "document_assets": sum(
+                item.classification == ResourceClassification.DOCUMENT_ASSET
+                for item in classifications.values()
+            ),
+            "media_static_assets": sum(
+                item.classification == ResourceClassification.MEDIA_STATIC_ASSET
+                for item in classifications.values()
+            ),
+            "skipped_pages": skipped_count,
             "excluded_pages": discovery.urls_excluded if discovery else 0,
             "redirected_pages": sum(
                 bool(page.final_url and page.final_url != page.normalized_url) for page in pages
@@ -528,13 +798,20 @@ def _real_evidence_summary(
             "duplicate_normalized_pages": (
                 max(0, discovery.urls_discovered - discovery.urls_unique) if discovery else 0
             ),
-            "pages_with_incomplete_evidence": sum(
-                page.page_analysis_level_1_status in {"pending", "partial"} for page in scheduled
-            ),
+            "pages_with_incomplete_evidence": len(incomplete),
             "coverage_numerator": len(successful),
             "coverage_denominator": denominator,
-            "coverage_percentage": (
-                round(len(successful) / denominator * 100, 1) if denominator else None
+            "coverage_percentage": analysed_page_coverage,
+            "analysed_page_coverage_percentage": analysed_page_coverage,
+            "full_site_coverage_percentage": (
+                analysed_page_coverage if discovery_complete else None
+            ),
+            "full_site_coverage_confidence": (
+                "established"
+                if discovery_complete
+                else "pending"
+                if discovery_completeness is None
+                else "not_established"
             ),
             "started_at": (
                 discovery.started_at.isoformat()
@@ -583,6 +860,273 @@ def _finding_sort_key(item: dict[str, Any]) -> tuple[int, str, str]:
     )
 
 
+def _friendly_finding_title(code: str, fallback: str) -> str:
+    if code.startswith("repeated_missing_security_header:"):
+        header = code.partition(":")[2]
+        header_names = {
+            "content_security_policy": "Content Security Policy",
+            "permissions_policy": "Permissions Policy",
+            "referrer_policy": "Referrer Policy",
+            "strict_transport_security": "Strict Transport Security",
+            "x_content_type_options": "X-Content-Type-Options",
+            "x_frame_options": "X-Frame-Options",
+        }
+        return f"{header_names.get(header, header.replace('_', ' ').title())} missing"
+    return FRIENDLY_FINDING_LABELS.get(code, fallback)
+
+
+def _category_has_dedicated_audit(
+    category_id: str,
+    *,
+    accessibility_available: bool,
+    diagnostics_available: bool,
+    performance_available: bool,
+) -> bool:
+    return {
+        "performance": performance_available,
+        "accessibility": accessibility_available,
+        "best_practices": diagnostics_available,
+        "seo": diagnostics_available,
+        "technical_quality": diagnostics_available,
+    }.get(category_id, False)
+
+
+def _category_score_limitation(
+    category_id: str,
+    *,
+    score_value: int | None,
+    included: bool,
+    accessibility_available: bool,
+    diagnostics_available: bool,
+    performance_available: bool,
+) -> str | None:
+    if not included or score_value is None:
+        return None
+    has_audit = _category_has_dedicated_audit(
+        category_id,
+        accessibility_available=accessibility_available,
+        diagnostics_available=diagnostics_available,
+        performance_available=performance_available,
+    )
+    if has_audit:
+        return None
+    label = category_id.replace("_", " ")
+    return (
+        f"Score calculated from available formula inputs; "
+        f"dedicated {label} audit evidence was unavailable."
+    )
+
+
+def _human_timestamp(value: str) -> str:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return value
+    return f"{parsed.day} {parsed.strftime('%B %Y, %I:%M %p')} UTC"
+
+
+_SEVERITY_EFFORT = {
+    "critical": ("high", "developer"),
+    "high": ("high", "developer"),
+    "medium": ("medium", "developer"),
+    "low": ("low", "developer"),
+    "informational": ("low", "content_editor"),
+    "info": ("low", "content_editor"),
+}
+_SEVERITY_PRIORITY = {
+    "critical": 95,
+    "high": 80,
+    "medium": 60,
+    "low": 40,
+    "informational": 20,
+    "info": 20,
+}
+
+
+def _deterministic_actions_from_findings(
+    all_findings: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    sorted_findings = sorted(
+        all_findings,
+        key=lambda f: SEVERITY_ORDER.get(str(f.get("severity", "")).casefold(), 99),
+    )
+    actions: list[dict[str, Any]] = []
+    seen_titles: set[str] = set()
+    for finding in sorted_findings:
+        title = str(finding.get("issue_title", "")).strip()
+        if not title or title.casefold() in seen_titles:
+            continue
+        seen_titles.add(title.casefold())
+        severity = str(finding.get("severity", "medium")).casefold()
+        effort, role = _SEVERITY_EFFORT.get(severity, ("medium", "developer"))
+        priority_score = _SEVERITY_PRIORITY.get(severity, 40)
+        rank = len(actions) + 1
+        actions.append(
+            {
+                "action_id": f"det-{rank}",
+                "priority_rank": rank,
+                "title": title,
+                "severity": severity,
+                "priority_score": priority_score,
+                "priority_formula_version": "1.0.0",
+                "score_contribution": None,
+                "impact": (
+                    finding.get("business_impact")
+                    or f"Resolve {severity}-severity {finding.get('category', 'issue')}"
+                ),
+                "effort": effort,
+                "responsible_role": role,
+                "affected_scope": {
+                    "page_count": len(finding.get("exact_occurrences", []) or []) or 1,
+                    "requested_url": finding.get("requested_url"),
+                    "final_url": finding.get("final_url"),
+                },
+                "dependencies": [],
+                "recommended_sequence": rank,
+                "expected_measurable_outcome": finding.get("recommendation", f"Fix: {title}"),
+                "verification_method": (
+                    f"Re-run analysis and confirm the finding '{title}' no longer appears."
+                ),
+                "evidence_references": finding.get("evidence_references", []),
+                "related_agents": [],
+                "related_finding_ids": (
+                    [finding.get("finding_id")] if finding.get("finding_id") else []
+                ),
+                "status": "pending",
+                "generation_method": "deterministic_from_findings",
+            }
+        )
+        if rank >= 20:
+            break
+    return actions
+
+
+def _group_detailed_findings(
+    findings: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    grouped: dict[tuple[str, str, str, str, str, str, str], dict[str, Any]] = {}
+    for finding in findings:
+        occurrences = [
+            item for item in finding.get("exact_occurrences", []) if isinstance(item, dict)
+        ]
+        observed_signature = canonical_json(
+            sorted(
+                {
+                    str(item.get("observed_value", "")).strip().casefold()
+                    for item in occurrences
+                    if item.get("observed_value")
+                }
+            )
+        )
+        browser_signature = canonical_json(
+            sorted(
+                {
+                    str(browser).casefold()
+                    for item in occurrences
+                    for browser in item.get("browser_engines_affected", [])
+                }
+            )
+        )
+        resource_signature = canonical_json(
+            sorted(
+                {
+                    "resource"
+                    if item.get("resource_url")
+                    else "element"
+                    if item.get("selector")
+                    else "location"
+                    if item.get("location")
+                    else "page"
+                    for item in occurrences
+                }
+            )
+        )
+        is_browser_compat = (
+            str(finding.get("finding_code", "")).casefold() == "browser_engine_compatibility"
+        )
+        key = (
+            str(
+                finding.get("rule_signature")
+                or finding.get("finding_code")
+                or finding.get("issue_title", "")
+            ).casefold(),
+            "" if is_browser_compat else str(finding.get("issue_title", "")).casefold(),
+            str(finding.get("category", "")).casefold(),
+            str(finding.get("scope", "")).casefold(),
+            "" if is_browser_compat else observed_signature,
+            browser_signature,
+            resource_signature,
+        )
+        if key not in grouped:
+            grouped[key] = dict(finding)
+            continue
+        retained = grouped[key]
+        retained["severity"] = min(
+            (retained.get("severity", "informational"), finding.get("severity", "informational")),
+            key=lambda value: SEVERITY_ORDER.get(str(value).casefold(), 99),
+        )
+        retained["exact_occurrences"] = list(retained.get("exact_occurrences", [])) + list(
+            finding.get("exact_occurrences", [])
+        )
+        retained["evidence_references"] = list(
+            {
+                canonical_json(reference): reference
+                for reference in [
+                    *retained.get("evidence_references", []),
+                    *finding.get("evidence_references", []),
+                ]
+            }.values()
+        )
+        retained["related_finding_ids"] = sorted(
+            {
+                *retained.get("related_finding_ids", []),
+                *finding.get("related_finding_ids", []),
+                str(finding.get("finding_id", "")),
+            }
+            - {"", str(retained.get("finding_id", ""))}
+        )
+
+    output = []
+    for retained in grouped.values():
+        occurrences = list(
+            {
+                canonical_json(occurrence): occurrence
+                for occurrence in retained.get("exact_occurrences", [])
+            }.values()
+        )
+        occurrences.sort(
+            key=lambda item: (
+                str(item.get("normalized_url", "")),
+                str(item.get("selector") or item.get("resource_url") or item.get("location") or ""),
+                canonical_json(item),
+            )
+        )
+        affected_pages = list(
+            {
+                str(item.get("normalized_url")): item
+                for item in occurrences
+                if item.get("normalized_url")
+            }.values()
+        )
+        retained["exact_occurrences"] = occurrences
+        retained["affected_pages"] = affected_pages
+        retained["affected_page_count"] = len(affected_pages)
+        retained["occurrence_count"] = len(occurrences)
+        if (
+            str(retained.get("finding_code", "")).casefold() == "browser_engine_compatibility"
+            and len(affected_pages) > 1
+        ):
+            engines = sorted(
+                {str(b) for occ in occurrences for b in occ.get("browser_engines_affected", [])}
+            )
+            retained["issue_title"] = (
+                f"Browser-engine compatibility differs across {len(affected_pages)} pages"
+                + (f" ({', '.join(engines)})" if engines else "")
+            )
+        output.append(retained)
+    return sorted(output, key=_finding_sort_key)
+
+
 def _page_detail(
     *,
     normalized_url: str,
@@ -599,10 +1143,15 @@ def _page_detail(
     provider_version: str | None,
     artifact_reference: Any = None,
     scope: str = "page",
+    final_url: str | None = None,
+    collection_status: str | None = None,
 ) -> dict[str, Any]:
     return {
         "normalized_url": normalized_url,
+        "final_url": final_url or normalized_url,
         "status_code": status_code,
+        "collection_status": collection_status
+        or (f"HTTP {status_code}" if status_code is not None else "Evidence recorded"),
         "page_title": page.page_title if page and page.page_title else page_title,
         "page_type": page.page_type if page else "unknown",
         "section": (
@@ -638,6 +1187,7 @@ def _analysis_finding_payload(
     *,
     run: AnalysisRun,
     page_by_url: dict[str, WebsitePage],
+    page_run_by_url: dict[str, PageAnalysisRun],
     actions_by_identity: dict[str, ActionItem],
     related_ids: list[str],
 ) -> dict[str, Any]:
@@ -657,11 +1207,18 @@ def _analysis_finding_payload(
         else "http-persisted"
     )
     page = page_by_url.get(item.affected_url)
+    page_run = page_run_by_url.get(item.affected_url)
     occurrence = _page_detail(
         normalized_url=item.affected_url,
         page=page,
-        status_code=run.result.http_status_code if run.result else None,
-        page_title=run.result.page_title if run.result else None,
+        status_code=(
+            page_run.http_status_code
+            if page_run
+            else run.result.http_status_code
+            if run.result and item.affected_url in {run.result.requested_url, run.result.final_url}
+            else None
+        ),
+        page_title=page_run.page_title if page_run else page.page_title if page else None,
         selector=evidence.get("selector"),
         resource_url=evidence.get("resource_url"),
         location=evidence.get("location"),
@@ -676,12 +1233,18 @@ def _analysis_finding_payload(
         provider_version=provider_version,
         artifact_reference=evidence.get("artifact_reference")
         or evidence.get("screenshot_reference"),
+        final_url=page_run.final_url if page_run else page.final_url if page else None,
+        collection_status=(
+            page_run.status
+            if page_run
+            else "Evidence recorded; HTTP status was not retained for this occurrence."
+        ),
     )
     return {
         "finding_id": str(item.id),
         "finding_code": item.finding_code,
         "finding_type": "page_analysis",
-        "issue_title": item.title,
+        "issue_title": _friendly_finding_title(item.finding_code, item.title),
         "plain_language_explanation": item.description,
         "technical_explanation": evidence.get("technical_explanation", item.description),
         "category": item.category,
@@ -779,6 +1342,11 @@ def _diagnostic_finding_payload(
             provider_version=diagnostic.diagnostic_engine_version,
             artifact_reference=occurrence.supporting_evidence.get("artifact_reference"),
             scope=item.scope,
+            final_url=(
+                str(occurrence.context["final_url"])
+                if occurrence.context.get("final_url")
+                else occurrence.normalized_url
+            ),
         )
         for occurrence in item.occurrences
     ]
@@ -786,11 +1354,38 @@ def _diagnostic_finding_payload(
         {occurrence["normalized_url"]: occurrence for occurrence in occurrences}.values()
     )
     unavailable = item.category == "evidence_availability"
+    rule_signature = next(
+        (
+            str(reference["source_rule_id"])
+            for reference in item.evidence_references
+            if isinstance(reference, dict) and reference.get("source_rule_id")
+        ),
+        next(
+            (
+                str(occurrence.context["source_rule_id"])
+                for occurrence in item.occurrences
+                if occurrence.context.get("source_rule_id")
+            ),
+            next(
+                (
+                    str(occurrence.context["diagnostic_subtype"])
+                    for occurrence in item.occurrences
+                    if occurrence.context.get("diagnostic_subtype")
+                ),
+                item.rule_id,
+            ),
+        ),
+    )
     return {
         "finding_id": str(item.id),
         "finding_code": item.rule_id,
+        "rule_signature": rule_signature,
         "finding_type": "site_diagnostic",
-        "issue_title": item.title,
+        "issue_title": (
+            f"{_friendly_finding_title(rule_signature, item.title)} repeated across pages"
+            if item.rule_id == "repeated_issue_pattern"
+            else item.title
+        ),
         "plain_language_explanation": item.description,
         "technical_explanation": item.evidence_summary,
         "category": item.category,
@@ -859,6 +1454,8 @@ def _accessibility_finding_payload(
             provider=audit.provider,
             provider_version=audit.provider_version,
             artifact_reference=None,
+            final_url=audit.normalized_url,
+            collection_status=audit.status,
         )
         for node in nodes
     ]
@@ -877,6 +1474,8 @@ def _accessibility_finding_payload(
                 evidence_timestamp=item.created_at,
                 provider=audit.provider,
                 provider_version=audit.provider_version,
+                final_url=audit.normalized_url,
+                collection_status=audit.status,
             )
         ]
     return {
@@ -949,7 +1548,9 @@ def _browser_finding_payload(
     )
     occurrence = {
         "normalized_url": row["page_url"],
+        "final_url": row.get("final_url") or row["page_url"],
         "status_code": None,
+        "collection_status": "Browser navigation evidence recorded",
         "page_title": row.get("page_title"),
         "page_type": "unknown",
         "section": "browser_compatibility",
@@ -1136,11 +1737,21 @@ def _build_sections(
         )
     )
     browser_compatibility = browser_artifact.artifact_metadata if browser_artifact else {}
+    _browser_unavailable_engines = {
+        str(obs.get("engine"))
+        for obs in browser_compatibility.get("observations", [])
+        if obs.get("state") == "unavailable"
+    }
     browser_findings = (
         [
             _browser_finding_payload(row, browser_artifact)
             for row in browser_compatibility.get("matrix", [])
             if row.get("result") in {"incompatible", "partially_compatible"}
+            and any(
+                engine not in _browser_unavailable_engines
+                for engine, state in row.get("engines", {}).items()
+                if state in {"incompatible", "partially_compatible"}
+            )
         ]
         if browser_artifact
         else []
@@ -1155,6 +1766,29 @@ def _build_sections(
         )
     )
     page_by_url = {page.normalized_url: page for page in pages}
+    page_execution_id = workflow.structured_input.get("page_analysis_execution_id")
+    report_page_runs = (
+        list(
+            db.scalars(
+                select(PageAnalysisRun).where(
+                    PageAnalysisRun.page_analysis_execution_id == uuid.UUID(str(page_execution_id)),
+                    PageAnalysisRun.analysis_level == 1,
+                )
+            )
+        )
+        if page_execution_id
+        else []
+    )
+    page_run_by_url: dict[str, PageAnalysisRun] = {}
+    page_url_by_id = {page.id: page.normalized_url for page in pages}
+    for page_run in report_page_runs:
+        for page_url in (
+            page_run.requested_url,
+            page_run.final_url,
+            page_url_by_id.get(page_run.website_page_id),
+        ):
+            if page_url:
+                page_run_by_url[page_url] = page_run
     actions_by_identity = {item.source_finding_identity: item for item in actions}
 
     analysis_related = {
@@ -1186,6 +1820,7 @@ def _build_sections(
             item,
             run=run,
             page_by_url=page_by_url,
+            page_run_by_url=page_run_by_url,
             actions_by_identity=actions_by_identity,
             related_ids=analysis_related[str(item.id)],
         )
@@ -1214,14 +1849,13 @@ def _build_sections(
         )
         for item in accessibility_findings
     ]
-    all_detailed_findings = sorted(
+    all_detailed_findings = _group_detailed_findings(
         [
             *detailed_analysis_findings,
             *detailed_diagnostic_findings,
             *detailed_accessibility_findings,
             *browser_findings,
-        ],
-        key=_finding_sort_key,
+        ]
     )
 
     technical_findings = [
@@ -1327,13 +1961,27 @@ def _build_sections(
     agent_summary = [
         {
             "agent_id": agent_id,
+            "agent_name": AGENT_DEFINITION_BY_ID[agent_id].name,
             "agent_version": (
                 agent_run_by_id[agent_id].agent_version
                 if agent_id in agent_run_by_id
                 else AGENT_DEFINITION_BY_ID[agent_id].version
             ),
             "status": (
-                agent_run_by_id[agent_id].status if agent_id in agent_run_by_id else "unavailable"
+                "not_applicable"
+                if agent_id == "repository_intelligence_agent"
+                and not workflow.structured_input.get("repository_connection_id")
+                else agent_run_by_id[agent_id].status
+                if agent_id in agent_run_by_id
+                else "execution_status_not_recorded"
+            ),
+            "status_explanation": (
+                "Not applicable — no repository connected"
+                if agent_id == "repository_intelligence_agent"
+                and not workflow.structured_input.get("repository_connection_id")
+                else "Execution status was not recorded for this run"
+                if agent_id not in agent_run_by_id
+                else None
             ),
             "tools_used": _tool_ids(agent_run_by_id.get(agent_id)),
             "evidence_produced": (
@@ -1368,9 +2016,19 @@ def _build_sections(
                 key,
                 agent_runs,
                 fallback_behavior=fallback_behavior,
+                repository_connected=bool(
+                    workflow.structured_input.get("repository_connection_id")
+                ),
             ),
             unavailable_reason=unavailable_reason,
         )
+
+    final_actions = ranked_actions
+    action_gen_status = action_generation.status if action_generation else "not_analysed"
+    if not final_actions and all_detailed_findings:
+        final_actions = _deterministic_actions_from_findings(all_detailed_findings)
+        action_gen_status = "deterministic_from_findings"
+    action_plan_available = bool(final_actions) or bool(action_generation)
 
     sections = [
         section(
@@ -1418,15 +2076,15 @@ def _build_sections(
                     "score_percentage": score.evidence_coverage_percentage if score else None,
                 },
                 "score_confidence_percent": score.confidence_percent if score else None,
-                "five_most_important_actions": ranked_actions[:5],
+                "five_most_important_actions": final_actions[:5],
                 "quick_wins": [
                     item
-                    for item in ranked_actions
+                    for item in final_actions
                     if str(item["effort"]).casefold() in {"low", "small", "quick"}
                 ][:5],
                 "strategic_fixes": [
                     item
-                    for item in ranked_actions
+                    for item in final_actions
                     if str(item["effort"]).casefold() not in {"low", "small", "quick"}
                 ][:5],
                 "unavailable_evidence": (
@@ -1461,6 +2119,22 @@ def _build_sections(
                             "score": item.final_score,
                             "band": item.band,
                             "included": item.included,
+                            "exclusion_reason": item.exclusion_reason,
+                            "evidence_available": item.included and item.final_score is not None,
+                            "dedicated_audit_available": _category_has_dedicated_audit(
+                                item.category_id,
+                                accessibility_available=bool(accessibility),
+                                diagnostics_available=bool(diagnostics),
+                                performance_available=bool(run.result),
+                            ),
+                            "score_limitation": _category_score_limitation(
+                                item.category_id,
+                                score_value=item.final_score,
+                                included=item.included,
+                                accessibility_available=bool(accessibility),
+                                diagnostics_available=bool(diagnostics),
+                                performance_available=bool(run.result),
+                            ),
                             "contribution": item.contribution,
                             "related_finding_ids": [
                                 finding["finding_id"]
@@ -1500,6 +2174,7 @@ def _build_sections(
                     if score
                     else []
                 ),
+                "unavailable_metrics": score.unavailable_metrics if score else [],
                 "calculated_by_llm": False,
             },
             evidence=score_ref,
@@ -1536,13 +2211,30 @@ def _build_sections(
                 "completed_audit_count": sum(item.status == "completed" for item in accessibility),
                 "violation_count": sum(item.violation_count or 0 for item in accessibility),
                 "incomplete_count": sum(item.incomplete_count or 0 for item in accessibility),
+                "pass_count": sum(item.pass_count or 0 for item in accessibility),
+                "inapplicable_count": sum(item.inapplicable_count or 0 for item in accessibility),
+                "count_unit": (
+                    "Automated rule results aggregated across audited pages; violations "
+                    "contain separately counted element occurrences."
+                ),
+                "inapplicable_definition": (
+                    "Rules whose target condition was not present on the audited page; "
+                    "this is not a page count and does not establish accessibility compliance."
+                ),
                 "automated_checks_establish_compliance": False,
                 "manual_review_required": True,
                 "findings": detailed_accessibility_findings,
             },
             evidence=accessibility_refs,
             unavailable_reason=(
-                None if accessibility else "Accessibility evidence was not analysed."
+                None
+                if accessibility
+                else (
+                    "Automated accessibility auditing (axe-core) did not"
+                    " produce results for this analysis run. This may be"
+                    " because the accessibility agent was unavailable or"
+                    " no eligible pages were audited."
+                )
             ),
         ),
         section(
@@ -1571,32 +2263,31 @@ def _build_sections(
         ),
         section(
             "internal_link_graph",
-            status=(
-                "unavailable"
-                if not diagnostics
-                or any(
-                    item["finding_code"] == "unavailable_link_graph_evidence"
-                    for item in link_findings
-                )
-                else "available"
-            ),
+            status=("unavailable" if not diagnostics else "available"),
             content={
                 "finding_count": len(link_findings),
                 "findings": link_findings,
+                "link_evidence_partial": any(
+                    item["finding_code"] == "unavailable_link_graph_evidence"
+                    for item in link_findings
+                ),
                 "limitations": (
-                    "The graph covers bounded persisted discovery evidence only; external, "
-                    "mailto, tel, and javascript links are excluded."
+                    "The graph covers bounded persisted discovery evidence"
+                    " only; external, mailto, tel, and javascript links"
+                    " are excluded."
+                    + (
+                        " Some pages lack complete internal-link evidence."
+                        if any(
+                            item["finding_code"] == "unavailable_link_graph_evidence"
+                            for item in link_findings
+                        )
+                        else ""
+                    )
                 ),
             },
             evidence=diagnostic_refs,
             unavailable_reason=(
-                "Internal-link graph evidence is incomplete or unavailable."
-                if not diagnostics
-                or any(
-                    item["finding_code"] == "unavailable_link_graph_evidence"
-                    for item in link_findings
-                )
-                else None
+                "Site-wide diagnostics were not analysed." if not diagnostics else None
             ),
         ),
         section(
@@ -1699,45 +2390,74 @@ def _build_sections(
                 None if diagnostics else "Repeated-pattern evidence was not analysed."
             ),
         ),
+    ]
+
+    sections_continued = [
         section(
             "priority_action_plan",
-            status="available" if action_generation else "unavailable",
+            status="available" if action_plan_available else "unavailable",
             content={
-                "generation_status": (
-                    action_generation.status if action_generation else "not_analysed"
-                ),
-                "action_count": len(actions),
-                "actions": ranked_actions,
+                "generation_status": action_gen_status,
+                "action_count": len(final_actions),
+                "actions": final_actions,
                 "ordering": "priority_score_descending_then_stable_id",
                 "priority_formula_version": "1.0.0",
             },
             evidence=action_refs,
             unavailable_reason=(
-                None if action_generation else "No persisted action-plan generation exists."
+                None
+                if action_plan_available
+                else "No persisted action-plan generation exists and no findings are available."
             ),
         ),
         section(
             "remediation",
-            status="available" if actions else "unavailable",
+            status=("available" if actions or final_actions else "unavailable"),
             content={
-                "guidance": [
-                    {
-                        "action_id": str(item.id),
-                        "exact_correction": item.exact_correction,
-                        "implementation_steps": item.implementation_steps,
-                        "verification_steps": item.verification_steps,
-                        "responsible_role": item.responsible_role,
-                        "estimated_effort_band": item.estimated_effort,
-                        "expected_measurable_outcome": item.expected_result,
-                        "evidence_references": [_evidence("action_item", item.id)],
-                        "limitations": item.limitations,
-                    }
-                    for item in actions
-                ],
-                "narrative_provider": "deterministic_fallback",
+                "guidance": (
+                    [
+                        {
+                            "action_id": str(item.id),
+                            "exact_correction": item.exact_correction,
+                            "implementation_steps": item.implementation_steps,
+                            "verification_steps": item.verification_steps,
+                            "responsible_role": item.responsible_role,
+                            "estimated_effort_band": item.estimated_effort,
+                            "expected_measurable_outcome": item.expected_result,
+                            "evidence_references": [_evidence("action_item", item.id)],
+                            "limitations": item.limitations,
+                        }
+                        for item in actions
+                    ]
+                    if actions
+                    else [
+                        {
+                            "action_id": act["action_id"],
+                            "exact_correction": act.get("expected_measurable_outcome", ""),
+                            "implementation_steps": act.get("verification_method", ""),
+                            "verification_steps": act.get("verification_method", ""),
+                            "responsible_role": act.get("responsible_role", "developer"),
+                            "estimated_effort_band": act.get("effort", "medium"),
+                            "expected_measurable_outcome": act.get(
+                                "expected_measurable_outcome", ""
+                            ),
+                            "evidence_references": act.get("evidence_references", []),
+                            "limitations": (
+                                "Generated from verified findings using"
+                                " deterministic remediation rules."
+                            ),
+                        }
+                        for act in final_actions[:10]
+                    ]
+                ),
+                "narrative_provider": (
+                    "persisted_action_items" if actions else "deterministic_from_findings"
+                ),
             },
             evidence=action_refs,
-            unavailable_reason=None if actions else "No grounded remediation guidance exists.",
+            unavailable_reason=(
+                None if actions or final_actions else "No grounded remediation guidance exists."
+            ),
         ),
         section(
             "coverage_confidence",
@@ -1772,10 +2492,30 @@ def _build_sections(
                     if item["evidence_state"] == "unavailable"
                 ],
                 "limitations": [
-                    "Unavailable evidence is not interpreted as a successful result.",
-                    "Automated accessibility evidence cannot prove complete compliance.",
-                    "Laboratory performance evidence is not field evidence.",
-                    "No competitor or search-engine ranking comparison is made.",
+                    item.message
+                    for item in deduplicate_limitations(
+                        [
+                            {
+                                "message": "Unavailable evidence is not interpreted"
+                                " as a successful result.",
+                                "source": "coverage",
+                            },
+                            {
+                                "message": "Automated accessibility evidence"
+                                " cannot prove complete compliance.",
+                                "source": "coverage",
+                            },
+                            {
+                                "message": "Laboratory performance evidence is not field evidence.",
+                                "source": "coverage",
+                            },
+                            {
+                                "message": "No competitor or search-engine"
+                                " ranking comparison is made.",
+                                "source": "coverage",
+                            },
+                        ]
+                    )
                 ],
             },
             evidence=[*score_ref, *workflow_ref],
@@ -1830,7 +2570,20 @@ def _build_sections(
             evidence=[*score_ref, *workflow_ref],
         ),
     ]
-    return sections
+    all_sections = sections + sections_continued
+    coverage_section = next(
+        (s for s in all_sections if s.get("section_id") == "coverage_confidence"),
+        None,
+    )
+    if coverage_section and isinstance(coverage_section.get("content"), dict):
+        available_count = sum(1 for s in all_sections if s.get("status") == "available")
+        unavailable_count = sum(1 for s in all_sections if s.get("status") == "unavailable")
+        coverage_section["content"]["report_section_coverage"] = {
+            "total": len(SECTION_DEFINITIONS),
+            "available": available_count,
+            "unavailable": unavailable_count,
+        }
+    return all_sections
 
 
 def _json_artifact(snapshot: dict[str, Any]) -> bytes:
@@ -1860,11 +2613,20 @@ def _first_present(value: dict[str, Any], *keys: str) -> Any:
     return next((value.get(key) for key in keys if value.get(key)), None)
 
 
+def _html_occurrence_status(item: dict[str, Any]) -> Any:
+    return (
+        item.get("status_code")
+        if item.get("status_code") is not None
+        else item.get("collection_status")
+    )
+
+
 def _html_occurrence_table(items: list[dict[str, Any]]) -> str:
     rows = "".join(
         "<tr>"
         f"<td>{_html_value(item.get('normalized_url'))}</td>"
-        f"<td>{_html_value(item.get('status_code'))}</td>"
+        f"<td>{_html_value(item.get('final_url') or item.get('normalized_url'))}</td>"
+        f"<td>{_html_value(_html_occurrence_status(item))}</td>"
         f"<td>{_html_value(item.get('page_type'))}</td>"
         f"<td>{_html_value(_first_present(item, 'selector', 'resource_url', 'location'))}</td>"
         f"<td>{_html_value(item.get('observed_value'))}</td>"
@@ -1877,7 +2639,7 @@ def _html_occurrence_table(items: list[dict[str, Any]]) -> str:
     return (
         '<div class="table-wrap"><table class="occurrences">'
         "<caption>Page-level occurrences</caption><thead><tr>"
-        '<th scope="col">Page</th><th scope="col">Status</th>'
+        '<th scope="col">Page</th><th scope="col">Final URL</th><th scope="col">Status</th>'
         '<th scope="col">Type</th><th scope="col">Location</th>'
         '<th scope="col">Observed</th><th scope="col">Expected</th>'
         '<th scope="col">Provider</th></tr></thead>'
@@ -1890,6 +2652,11 @@ def _html_structured(value: Any, *, key: str = "", depth: int = 0) -> str:
         if key.endswith("finding_id") and value:
             safe_id = html.escape(str(value))
             return f'<a href="#finding-{safe_id}">{safe_id}</a>'
+        if key in {"detecting_agent", "validating_agent", "agent_id"} and isinstance(value, str):
+            definition = AGENT_DEFINITION_BY_ID.get(value)
+            return _html_value(definition.name if definition else value.replace("_", " ").title())
+        if key in {"category", "category_id"} and isinstance(value, str):
+            return _html_label(value)
         return _html_value(value)
     if isinstance(value, list):
         if not value:
@@ -2023,8 +2790,9 @@ def _html_artifact(snapshot: dict[str, Any]) -> bytes:
         "999px;padding:.15rem .55rem;margin:.1rem .35rem .1rem 0;font-size:.78rem;font-weight:700;"
         "text-transform:uppercase}.severity-critical,.severity-high{color:#8b1e1e}.severity-medium"
         "{color:#7a4b00}.severity-low,.severity-info,.severity-informational{color:#245c3a}"
-        ".table-wrap{overflow-x:auto}table{border-collapse:collapse;width:100%}th,td{padding:.6rem;"
-        "border:1px solid var(--line);text-align:left;vertical-align:top}th{background:var(--soft)}"
+        ".table-wrap{max-width:100%;overflow-x:auto}table{border-collapse:collapse;width:100%;"
+        "table-layout:fixed}th,td{padding:.6rem;border:1px solid var(--line);text-align:left;"
+        "vertical-align:top;overflow-wrap:anywhere;word-break:break-word}th{background:var(--soft)}"
         ".detail-grid{display:grid;grid-template-columns:minmax(10rem,14rem) 1fr;margin:.5rem 0}"
         ".detail-grid>dt,.detail-grid>dd{padding:.4rem;margin:0;border-bottom:1px solid #e2e8f0}"
         ".detail-grid>dt{font-weight:700}.structured-list{padding-left:1.35rem}.finding-card{"
@@ -2033,7 +2801,8 @@ def _html_artifact(snapshot: dict[str, Any]) -> bytes:
         "@media print{@page{size:A4;margin:18mm 13mm}.cover{break-after:page;border-radius:0;"
         "min-height:245mm}.report-section{break-before:page;border:0;padding:0}.finding-card,"
         "tr{break-inside:avoid}nav{break-after:page}body{max-width:none;padding:0}.table-wrap{"
-        "overflow:visible}.occurrences{font-size:8pt}}"
+        "overflow:visible}table{table-layout:fixed}.occurrences{font-size:7pt}th,td{padding:.35rem;"
+        "overflow-wrap:anywhere;word-break:break-word}}"
         '</style></head><body><header class="cover"><p class="brand">ZuiGO Website Intelligence'
         "</p><h1>"
         f"{html.escape(snapshot['title'])}</h1>{score_card}"
@@ -2042,7 +2811,8 @@ def _html_artifact(snapshot: dict[str, Any]) -> bytes:
         f"<br>{html.escape(snapshot.get('website_url', 'Unavailable'))}</p>"
         "<p><strong>Project</strong><br>"
         f"{html.escape(snapshot.get('project_name', 'Unavailable'))}</p>"
-        f"<p><strong>Generated</strong><br>{html.escape(snapshot['generated_at'])}</p>"
+        f"<p><strong>Generated</strong><br>"
+        f"{html.escape(_human_timestamp(snapshot['generated_at']))}</p>"
         "<p><strong>Report version</strong><br>"
         f"{html.escape(snapshot.get('schema_version', 'Unavailable'))}</p>"
         f"<p><strong>Report ID</strong><br>{html.escape(snapshot['report_id'])}</p>"
@@ -2064,6 +2834,11 @@ def _pdf_structured_lines(value: Any, *, label: str = "", indent: int = 0) -> li
     prefix = "  " * indent
     heading = f"{label.replace('_', ' ').title()}: " if label else ""
     if value is None or isinstance(value, (str, int, float, bool)):
+        if label in {"detecting_agent", "validating_agent", "agent_id"} and isinstance(value, str):
+            definition = AGENT_DEFINITION_BY_ID.get(value)
+            value = definition.name if definition else value.replace("_", " ").title()
+        elif label in {"category", "category_id"} and isinstance(value, str):
+            value = value.replace("_", " ").title()
         rendered = "Unavailable" if value is None else str(value)
         return textwrap.wrap(f"{prefix}{heading}{rendered}", width=88) or [prefix]
     if isinstance(value, list):
@@ -2154,7 +2929,7 @@ def _pdf_artifact(snapshot: dict[str, Any]) -> bytes:
             f"({snapshot['evidence_coverage']['percentage']}%)",
             f"Report ID: {snapshot['report_id']}",
             f"Report version: {snapshot['schema_version']}",
-            f"Generated: {snapshot['generated_at']}",
+            f"Generated: {_human_timestamp(snapshot['generated_at'])}",
             "",
             "Table of contents",
             *[
@@ -2215,7 +2990,7 @@ def _pdf_artifact(snapshot: dict[str, Any]) -> bytes:
                 "/F1 9 Tf",
                 "54 28 Td",
                 f"(ZuiGO - Page {index + 1} of {page_count} - "
-                f"{_pdf_escape(snapshot['generated_at'])}) Tj",
+                f"{_pdf_escape(_human_timestamp(snapshot['generated_at']))}) Tj",
                 "ET",
             ]
         )
@@ -2293,6 +3068,46 @@ def _section_content(
     return section.get("content", {}) if section else {}
 
 
+def _coverage_summary_lines(coverage: dict[str, Any]) -> list[str]:
+    completeness = coverage.get("discovery_completeness")
+    stage = coverage.get("discovery_stage_status")
+    _PENDING_STAGES = {"queued", "pending", "initializing", "not_started"}
+    if completeness:
+        completeness_label = str(completeness).replace("_", " ").title()
+    elif stage == "running":
+        completeness_label = "In Progress"
+    elif stage in _PENDING_STAGES:
+        completeness_label = "Pending"
+    else:
+        completeness_label = "Not Available"
+    numerator = int(coverage.get("coverage_numerator") or 0)
+    denominator = int(coverage.get("coverage_denominator") or 0)
+    percentage = coverage.get("analysed_page_coverage_percentage")
+    percentage_str = f"{percentage}%" if percentage is not None else "N/A"
+    lines = [
+        f"Discovery completeness: {completeness_label}",
+        (
+            f"Analysed-page coverage: {numerator}/{denominator} discovered eligible "
+            f"page(s) ({percentage_str})."
+        ),
+    ]
+    if completeness == "complete":
+        lines.append(f"Full-site coverage: {percentage_str} of eligible HTML pages.")
+    elif completeness is None:
+        lines.append(
+            coverage.get("discovery_completeness_message")
+            or "Full-site coverage will be evaluated after discovery completes."
+        )
+    else:
+        lines.append(
+            coverage.get("discovery_completeness_message")
+            or "Full-site coverage: Not established because website discovery was incomplete."
+        )
+        if coverage.get("discovery_failure_message"):
+            lines.append(f"Discovery limitation: {coverage['discovery_failure_message']}")
+    return lines
+
+
 def _presentation_lines(
     snapshot: dict[str, Any],
     title: str,
@@ -2307,12 +3122,7 @@ def _presentation_lines(
             f"Overall score: {snapshot.get('overall_score')}/100"
             if snapshot.get("overall_score") is not None
             else "Overall score: unavailable because grounded score evidence is incomplete.",
-            (
-                f"Visited {coverage.get('total_pages_visited', 0)} page(s); "
-                f"successfully analysed {coverage.get('coverage_numerator', 0)}/"
-                f"{coverage.get('coverage_denominator', 0)} "
-                f"({coverage.get('coverage_percentage')}%)."
-            ),
+            *_coverage_summary_lines(coverage),
             "Browser engines tested: "
             + ", ".join(
                 item.get("label", item.get("engine", "Unknown engine"))
@@ -2344,11 +3154,7 @@ def _presentation_lines(
         )
         return [
             *[f"{label}: {coverage.get(key, 0)}" for label, key in labels],
-            (
-                f"Page coverage: {coverage.get('coverage_numerator', 0)}/"
-                f"{coverage.get('coverage_denominator', 0)} "
-                f"({coverage.get('coverage_percentage')}%)"
-            ),
+            *_coverage_summary_lines(coverage),
             f"Started: {coverage.get('started_at') or 'Unavailable'}",
             f"Completed: {coverage.get('completed_at') or 'Unavailable'}",
             f"Duration: {coverage.get('duration_seconds') or 'Unavailable'} seconds",
@@ -2428,11 +3234,7 @@ def _presentation_lines(
         ] or ["No evidence-grounded action plan is available."]
     if title == "Evidence Coverage and Limitations":
         return [
-            (
-                f"Page coverage: {coverage.get('coverage_numerator', 0)}/"
-                f"{coverage.get('coverage_denominator', 0)} "
-                f"({coverage.get('coverage_percentage')}%)."
-            ),
+            *_coverage_summary_lines(coverage),
             *snapshot.get("limitations", []),
             *browser.get("limitations", []),
         ]
@@ -2449,7 +3251,8 @@ def _presentation_lines(
             (
                 f"The analysis retained {len(findings)} finding(s) from "
                 f"{coverage.get('coverage_numerator', 0)}/"
-                f"{coverage.get('coverage_denominator', 0)} successfully analysed pages."
+                f"{coverage.get('coverage_denominator', 0)} successfully analysed "
+                "discovered eligible pages."
             ),
             "Complete the highest-priority actions, then create an independent reanalysis.",
             "No prepared-demo evidence is included in this report.",
@@ -2585,6 +3388,137 @@ def generate_report(
     score = _latest_score(db, run.id)
     sections = _build_sections(db, run, workflow, score)
     real_evidence = _real_evidence_summary(db, run, workflow, sections)
+    section_by_key = {section["section_key"]: section for section in sections}
+    page_coverage = real_evidence["page_coverage"]
+    browser_compatibility = real_evidence["browser_compatibility"]
+    finding_content = section_by_key["page_level_findings"]["content"]
+    grouped_findings = finding_content.get("findings", [])
+    eligible_urls = {
+        str(item["url"])
+        for item in real_evidence["page_inventory"]
+        if item.get("resource_classification") == "eligible_html_page"
+    }
+    all_affected_urls = {
+        str(occurrence.get("normalized_url"))
+        for finding in grouped_findings
+        for occurrence in finding.get("exact_occurrences", [])
+        if occurrence.get("normalized_url")
+    }
+    affected_eligible_count = reconcile_affected_pages(grouped_findings, eligible_urls)
+    finding_content.update(
+        {
+            "unique_finding_count": len(grouped_findings),
+            "total_occurrence_count": sum(
+                int(item.get("occurrence_count") or 0) for item in grouped_findings
+            ),
+            "affected_page_count": affected_eligible_count,
+            "affected_total_count": len(all_affected_urls),
+            "page_inventory": real_evidence["page_inventory"],
+        }
+    )
+    executive = section_by_key["executive_summary"]["content"]
+    score_content = section_by_key["scores"]["content"]
+    executive.update(
+        {
+            "website_analysed": real_evidence["normalized_url"],
+            "analysis_date": (
+                workflow.completed_at.isoformat()
+                if workflow.completed_at
+                else run.completed_at.isoformat()
+                if run.completed_at
+                else run.updated_at.isoformat()
+            ),
+            "page_coverage": page_coverage,
+            "browser_coverage": [
+                {
+                    "engine": item.get("engine"),
+                    "tested_pages": int(item.get("tested_pages") or 0),
+                    "eligible_pages": int(item.get("eligible_pages") or 0),
+                    "availability_status": item.get("availability_status", "available"),
+                }
+                for item in browser_compatibility.get("engines", [])
+            ],
+            "category_scores": score_content.get("categories", []),
+            "top_five_problems": [
+                {
+                    "title": item["issue_title"],
+                    "severity": item["severity"],
+                    "affected_page_count": item["affected_page_count"],
+                    "occurrence_count": item["occurrence_count"],
+                }
+                for item in grouped_findings
+                if item["severity"] in {"critical", "high"}
+            ][:5],
+            "top_five_recommended_actions": executive.get("five_most_important_actions", [])[:5],
+            "important_limitations": [
+                item.message
+                for item in deduplicate_limitations(
+                    [
+                        *(
+                            [
+                                {
+                                    "message": (
+                                        "Website discovery was incomplete, so full-site "
+                                        "coverage is not established. "
+                                        f"{page_coverage.get('discovery_failure_message') or ''}"
+                                    ).strip(),
+                                    "source": "discovery",
+                                }
+                            ]
+                            if page_coverage["discovery_completeness"] != "complete"
+                            else []
+                        ),
+                        *(
+                            [
+                                {
+                                    "message": (
+                                        f"{page_coverage['not_scheduled_pages']} eligible "
+                                        "pages were not scheduled for analysis."
+                                    ),
+                                    "source": "page_coverage",
+                                }
+                            ]
+                            if page_coverage["not_scheduled_pages"]
+                            else []
+                        ),
+                        *(
+                            [
+                                {
+                                    "message": (
+                                        "Some advanced data sources were unavailable. "
+                                        "Core page analysis completed."
+                                    ),
+                                    "source": "evidence",
+                                }
+                            ]
+                            if any(
+                                section["status"] == "unavailable"
+                                for section in sections
+                                if section["section_key"]
+                                not in {"executive_summary", "page_level_findings"}
+                            )
+                            else []
+                        ),
+                        {
+                            "message": (
+                                "Evidence completeness and website page coverage "
+                                "are separate measures."
+                            ),
+                            "source": "methodology",
+                        },
+                    ]
+                )
+            ],
+        }
+    )
+    section_by_key["coverage_confidence"]["content"].update(
+        {
+            "website_page_coverage": page_coverage,
+            "evidence_completeness_definition": (
+                "Required evidence groups available; this is not website page coverage."
+            ),
+        }
+    )
     evidence_references = sorted(
         {
             canonical_json(reference): reference
@@ -2641,6 +3575,68 @@ def generate_report(
     numerator = len(sections) - len(unavailable)
     denominator = len(sections)
     coverage = round(numerator / denominator * 100, 2) if denominator else None
+    formula_confidence = (
+        score.confidence_percent if score else run.score.confidence_percent if run.score else None
+    )
+    page_confidence = page_coverage.get("coverage_percentage")
+    discovery_confidence = {
+        "complete": 100,
+        "partial": 50,
+        "failed": 0,
+        "inconclusive": 0,
+    }.get(str(page_coverage.get("discovery_completeness")), 0)
+    available_engines = [
+        item
+        for item in browser_compatibility.get("engines", [])
+        if item.get("availability_status") != "unavailable"
+    ]
+    browser_eligible_pages = int(browser_compatibility.get("eligible_page_count") or 0)
+    browser_expected_attempts = browser_eligible_pages * len(available_engines)
+    browser_tested_attempts = sum(int(item.get("tested_pages") or 0) for item in available_engines)
+    browser_confidence = (
+        round(browser_tested_attempts / browser_expected_attempts * 100, 2)
+        if browser_expected_attempts
+        else None
+    )
+    confidence_components = {
+        "formula_determinism_percent": formula_confidence,
+        "evidence_completeness_percent": coverage,
+        "analysed_page_coverage_percent": page_confidence,
+        "full_site_coverage_confidence_percent": discovery_confidence,
+        "browser_coverage_percent": browser_confidence,
+    }
+    confidence_values = [
+        float(value) for value in confidence_components.values() if value is not None
+    ]
+    report_confidence = int(min(confidence_values)) if confidence_values else None
+    confidence_explanation = (
+        "The score formula is deterministic, while report confidence is limited by the "
+        "least complete of discovery completeness, retained evidence, eligible-page "
+        "analysis, and requested browser-engine coverage."
+    )
+    executive.update(
+        {
+            "confidence_components": confidence_components,
+            "confidence_explanation": confidence_explanation,
+        }
+    )
+    score_content.update(
+        {
+            "formula_determinism_confidence_percent": formula_confidence,
+            "report_evidence_confidence_percent": report_confidence,
+        }
+    )
+    section_by_key["coverage_confidence"]["content"].update(
+        {
+            "confidence_components": confidence_components,
+            "confidence_explanation": confidence_explanation,
+        }
+    )
+    full_page_coverage = bool(
+        page_coverage["discovery_completeness"] == "complete"
+        and page_coverage["coverage_denominator"]
+        and page_coverage["coverage_numerator"] == page_coverage["coverage_denominator"]
+    )
     report = ReportExecution(
         report_id=report_id,
         project_id=run.website.project_id,
@@ -2654,17 +3650,11 @@ def generate_report(
         template_version=TEMPLATE_VERSION,
         input_fingerprint=input_fingerprint,
         idempotency_key=normalized_key,
-        status="partial" if unavailable else "completed",
+        status="completed" if full_page_coverage and not unavailable else "partial",
         evidence_coverage_numerator=numerator,
         evidence_coverage_denominator=denominator,
         evidence_coverage_percentage=coverage,
-        confidence_percent=(
-            score.confidence_percent
-            if score
-            else run.score.confidence_percent
-            if run.score
-            else None
-        ),
+        confidence_percent=report_confidence,
         unavailable_sections=unavailable,
         provider_version_metadata={
             "generation_mode": "deterministic_fallback",
@@ -2674,7 +3664,14 @@ def generate_report(
             "report_generation_tool_version": "1.0.0",
         },
         failure_details={},
-        partial_completion_details=({"unavailable_sections": unavailable} if unavailable else {}),
+        partial_completion_details=(
+            {
+                "unavailable_sections": unavailable,
+                "page_coverage": page_coverage,
+            }
+            if unavailable or not full_page_coverage
+            else {}
+        ),
         started_at=generated_at,
         completed_at=generated_at,
     )
@@ -2732,10 +3729,45 @@ def generate_report(
             for position, section in enumerate(sections, 1)
         ],
         "limitations": [
-            "Unavailable evidence is not represented as passed.",
-            "Narrative generation used the deterministic fallback.",
-            "No private reasoning, secrets, or internal file paths are included.",
+            item.message
+            for item in deduplicate_limitations(
+                [
+                    {
+                        "message": "Unavailable evidence is not represented as passed.",
+                        "source": "report",
+                    },
+                    {
+                        "message": "Narrative generation used the deterministic fallback.",
+                        "source": "report",
+                    },
+                    {
+                        "message": "No private reasoning, secrets,"
+                        " or internal file paths are included.",
+                        "source": "report",
+                    },
+                ]
+            )
         ],
+        "canonical_metrics": {
+            "report_section_coverage": {
+                "numerator": numerator,
+                "denominator": denominator,
+                "percentage": coverage,
+                "label": "report sections with available evidence",
+            },
+            "score_category_coverage": {
+                "numerator": score.evidence_coverage_numerator if score else 0,
+                "denominator": score.evidence_coverage_denominator if score else 5,
+                "percentage": score.evidence_coverage_percentage if score else None,
+                "label": "scoring categories with available evidence",
+            },
+            "affected_eligible_page_count": affected_eligible_count,
+            "affected_total_count": len(all_affected_urls),
+            "eligible_page_count": int(page_coverage.get("eligible_pages", 0)),
+            "report_confidence_percent": report_confidence,
+            "formula_determinism_percent": formula_confidence,
+            "confidence_components": confidence_components,
+        },
     }
     snapshot = ReportSnapshot(
         snapshot_id=uuid.uuid5(report_id, "snapshot:1"),

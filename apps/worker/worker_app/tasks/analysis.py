@@ -111,6 +111,8 @@ def persist_results(
     diagnostics: dict[str, dict[str, object]],
     started_at: datetime,
     completed_at: datetime,
+    *,
+    extracted_content: dict[str, object] | None = None,
 ) -> None:
     metrics = parse_lighthouse(lighthouse_data)
     session.execute(
@@ -148,6 +150,7 @@ def persist_results(
             analysis_completed_at=completed_at,
             raw_lighthouse_data=lighthouse_data,
             raw_playwright_data=playwright_data,
+            extracted_content=extracted_content,
             created_at=now,
             updated_at=now,
         )
@@ -503,6 +506,28 @@ def run_analysis(analysis_run_id: str) -> dict[str, str]:
                 logger.error(f"Failed to collect lighthouse evidence: {e}")
 
             findings = generate_findings(playwright_data, metrics)
+            extracted_content: dict[str, object] = {}
+            try:
+                from worker_app.analysis.content_extraction import extract_content
+
+                raw_html_for_extraction = str(playwright_data.get("_html", ""))
+                if raw_html_for_extraction:
+                    extracted_content = extract_content(
+                        raw_html_for_extraction,
+                        str(playwright_data["final_url"]),
+                    )
+                    logger.info(
+                        "content_extraction_complete analysis_run_id=%s status=%s words=%s",
+                        run_id,
+                        extracted_content.get("extraction_status"),
+                        extracted_content.get("content_stats", {}).get("word_count", 0),
+                    )
+            except Exception as content_exc:
+                logger.warning(
+                    "content_extraction_failed analysis_run_id=%s error=%s",
+                    run_id,
+                    type(content_exc).__name__,
+                )
             try:
                 diagnostics = build_diagnostics(
                     playwright_data,
@@ -528,6 +553,8 @@ def run_analysis(analysis_run_id: str) -> dict[str, str]:
                 FORMULA_VERSION,
             )
             stage(session, run_id, 85, "saving_report")
+            playwright_data.pop("script_evidence", None)
+            playwright_data.pop("_html", None)
             completed_at = utc_now()
             persist_results(
                 session,
@@ -540,6 +567,7 @@ def run_analysis(analysis_run_id: str) -> dict[str, str]:
                 diagnostics,
                 started_at,
                 completed_at,
+                extracted_content=extracted_content or None,
             )
             interpretation_deadline_available = (
                 time.monotonic() + settings.ai_timeout_seconds + 5 < job_deadline

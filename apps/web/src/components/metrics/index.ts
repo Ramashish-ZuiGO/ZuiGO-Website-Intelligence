@@ -5,4 +5,5 @@ export * from "./ScoreValue";
 export * from "./PercentageValue";
 export * from "./ConfidenceBadge";
 export * from "./MetricInfoButton";
+export * from "./ConceptInfoButton";
 export * from "./MetricCard";

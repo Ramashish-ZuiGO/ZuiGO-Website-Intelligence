@@ -1,12 +1,19 @@
+import inspect
 from types import SimpleNamespace
 
 import pytest
 from worker_app.tasks import real_analysis
 
 
-def test_real_browser_collection_is_bounded_and_time_limited() -> None:
-    assert real_analysis.REAL_BROWSER_PAGE_SAMPLE_LIMIT == 1
+def test_real_browser_collection_uses_the_configured_page_limit() -> None:
+    assert not hasattr(real_analysis, "REAL_BROWSER_PAGE_SAMPLE_LIMIT")
     assert real_analysis.REAL_BROWSER_NAVIGATION_TIMEOUT_MS == 15_000
+    source = inspect.getsource(real_analysis.collect_real_browser_compatibility)
+    assert "browser_page_limit = browser_eligible_count" in source
+    assert "browser_eligible_count = len(page_records)" in source
+    assert 'PageAnalysisRun.status.in_(("completed", "partial"))' not in source
+    assert "selected_page_ids" in source
+    assert "ResourceClassification.ELIGIBLE_HTML_PAGE" in source
 
 
 def test_real_analysis_dispatches_deterministic_stage_chain_once(

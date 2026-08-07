@@ -11,7 +11,8 @@ def test_page_analysis_panel_has_required_sections() -> None:
     assert "scores" in source
     assert "recommendations" in source
     assert "failed" in source
-    assert "AccessibleExplanation" in source or "MetricInfoButton" in source
+    assert "ConceptInfoButton" in source
+    assert "MetricInfoButton" in source
     assert "ScoreValue" in source
     assert "StatusBadge" in source
     assert "AnalysisLevelBadge" in source
@@ -57,7 +58,10 @@ def test_information_icon_accessibility() -> None:
     source = Path("apps/web/src/app/projects/[projectId]/PageAnalysisPanel.tsx").read_text(
         encoding="utf-8"
     )
-    assert "AccessibleExplanation" in source or "aria-label" in source
+    assert "ConceptInfoButton" in source
+    assert 'conceptId="page_selected"' in source
+    assert 'conceptId="page_level_1"' in source
+    assert 'conceptId="page_level_2"' in source
 
 
 def test_page_url_attribution_in_table() -> None:

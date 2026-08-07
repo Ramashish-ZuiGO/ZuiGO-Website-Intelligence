@@ -30,7 +30,8 @@ def discovery_config(overrides: dict[str, Any] | None = None) -> DiscoveryConfig
     requested = overrides or {}
 
     def bounded(name: str, fallback: int, maximum: int) -> int:
-        value = int(requested.get(name, fallback))
+        raw = requested.get(name)
+        value = int(raw) if raw is not None else fallback
         return max(1, min(value, maximum))
 
     return DiscoveryConfig(
@@ -45,6 +46,7 @@ def discovery_config(overrides: dict[str, Any] | None = None) -> DiscoveryConfig
             settings.discovery_max_html_pages,
         ),
         max_crawl_depth=settings.discovery_max_depth,
+        max_query_variants_per_path=settings.discovery_max_query_variants_per_path,
         max_links_per_page=settings.discovery_max_links_per_page,
         max_sitemap_files=settings.discovery_max_sitemap_files,
         max_sitemap_depth=settings.discovery_max_sitemap_depth,
@@ -53,6 +55,8 @@ def discovery_config(overrides: dict[str, Any] | None = None) -> DiscoveryConfig
         deadline_seconds=settings.discovery_deadline_seconds,
         max_response_bytes=settings.discovery_max_response_bytes,
         include_verified_subdomains=settings.discovery_include_verified_subdomains,
+        max_fetch_attempts=settings.discovery_max_fetch_attempts,
+        retry_backoff_seconds=settings.discovery_retry_backoff_seconds,
     )
 
 
@@ -218,6 +222,13 @@ def run_discovery(discovery_run_id: str) -> None:
             )
             stage(session, run_id, 90, "saving_coverage")
             counts = result["counts"]
+            completeness_evidence = {
+                **result["safety_limits"],
+                "counts": counts,
+                "remaining_unique_candidate_count": result["remaining_unique_candidate_count"],
+                "depth_blocked_count": result["depth_blocked_count"],
+                "maximum_depth_reached": result["maximum_depth_reached"],
+            }
             update_discovery_run(
                 session,
                 run_id,
@@ -226,6 +237,11 @@ def run_discovery(discovery_run_id: str) -> None:
                 progress_percent=100,
                 robots_details=result["robots"],
                 sitemap_details=result["sitemaps"],
+                configuration={
+                    **requested_configuration,
+                    **config.__dict__,
+                    "discovery_completeness_evidence": completeness_evidence,
+                },
                 urls_discovered=counts["discovered"],
                 urls_unique=counts["unique"],
                 urls_eligible=counts["eligible"],
@@ -236,7 +252,7 @@ def run_discovery(discovery_run_id: str) -> None:
                 maximum_depth_reached=result["maximum_depth_reached"],
                 failure_code=(result["errors"][0]["code"] if result["errors"] else None),
                 failure_message=(
-                    "Discovery completed with bounded partial failures."
+                    " ".join(dict.fromkeys(item["message"] for item in result["errors"]))
                     if result["errors"]
                     else None
                 ),

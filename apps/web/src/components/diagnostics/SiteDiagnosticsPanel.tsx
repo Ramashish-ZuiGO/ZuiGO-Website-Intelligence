@@ -470,7 +470,7 @@ export function SiteDiagnosticsPanel({
             </p>
             <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <div className="rounded-xl bg-slate-50 p-4">
-                <p className="flex items-center justify-between text-xs text-slate-600">Evidence coverage <MetricInfoButton metricId="site_diagnostic_coverage_percentage" /></p>
+                <div className="flex items-center justify-between text-xs text-slate-600">Evidence coverage <MetricInfoButton metricId="site_diagnostic_coverage_percentage" /></div>
                 <p className="mt-1 text-2xl font-bold"><PercentageValue metricId="site_diagnostic_coverage_percentage" value={execution.evidence_coverage_ratio * 100} /></p>
                 <p className="text-xs text-slate-600">{execution.evidence_coverage_numerator} of {execution.evidence_coverage_denominator} pages</p>
               </div>

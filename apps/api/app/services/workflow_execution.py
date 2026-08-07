@@ -157,6 +157,27 @@ def create_workflow_execution(
             )
         website = website or run_website
 
+    if request.baseline_analysis_run_id is not None:
+        baseline_run = db.get(AnalysisRun, request.baseline_analysis_run_id)
+        if baseline_run is None:
+            raise WorkflowExecutionError(
+                "BASELINE_ANALYSIS_RUN_NOT_FOUND",
+                "Baseline analysis run not found.",
+                404,
+            )
+        if website is None or baseline_run.website_id != website.id:
+            raise WorkflowExecutionError(
+                "WORKFLOW_SCOPE_MISMATCH",
+                "Baseline and current analysis runs must belong to the same website.",
+                422,
+            )
+        if analysis_run is not None and baseline_run.id == analysis_run.id:
+            raise WorkflowExecutionError(
+                "INVALID_BASELINE_ANALYSIS_RUN",
+                "Baseline and current analysis runs must be different.",
+                422,
+            )
+
     connection: RepositoryConnection | None = None
     if request.repository_connection_id is not None:
         connection = db.get(RepositoryConnection, request.repository_connection_id)
@@ -189,6 +210,9 @@ def create_workflow_execution(
     execution_input = {
         "project_id": str(request.project_id),
         "analysis_run_id": str(analysis_run.id) if analysis_run else None,
+        "baseline_analysis_run_id": (
+            str(request.baseline_analysis_run_id) if request.baseline_analysis_run_id else None
+        ),
         "website_id": str(website.id) if website else None,
         "website_url": website.url if website else None,
         "repository_connection_id": str(connection.id) if connection else None,

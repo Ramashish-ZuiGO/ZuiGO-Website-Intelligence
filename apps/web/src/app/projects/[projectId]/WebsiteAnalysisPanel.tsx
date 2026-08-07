@@ -24,6 +24,29 @@ function isActive(run: AnalysisRun | undefined): boolean {
   return run?.status === "queued" || run?.status === "running";
 }
 
+function scoreChangeFromPrevious(history: AnalysisRun[], index: number): number | null {
+  const current = history[index];
+  const previous = history
+    .slice(index + 1)
+    .find(
+      (candidate) =>
+        candidate.status === "completed" &&
+        candidate.result_summary?.overall_score != null,
+    );
+  const currentScore = current.result_summary?.overall_score;
+  const previousScore = previous?.result_summary?.overall_score;
+  return current.status === "completed" &&
+    currentScore != null &&
+    previousScore != null
+    ? currentScore - previousScore
+    : null;
+}
+
+function scoreChangeLabel(history: AnalysisRun[], index: number): string {
+  const change = scoreChangeFromPrevious(history, index);
+  return change === null ? "" : ` · ${change > 0 ? "+" : ""}${change} from previous`;
+}
+
 export function WebsiteAnalysisPanel({
   projectId,
   websiteId,
@@ -50,6 +73,7 @@ export function WebsiteAnalysisPanel({
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
   const [workflowExecutionId, setWorkflowExecutionId] = useState<string>();
+  const [selectedComparisonRuns, setSelectedComparisonRuns] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<AnalysisResults | null>(null);
   const latestRun = history[0];
@@ -168,6 +192,18 @@ export function WebsiteAnalysisPanel({
     if (!latestRun) return "Not started";
     return latestRun.status.charAt(0).toUpperCase() + latestRun.status.slice(1);
   }, [latestRun]);
+  const comparisonHref = useMemo(() => {
+    if (selectedComparisonRuns.length !== 2) return null;
+    const selected = history
+      .filter((run) => selectedComparisonRuns.includes(run.id))
+      .sort(
+        (left, right) =>
+          new Date(right.created_at).getTime() - new Date(left.created_at).getTime(),
+      );
+    return selected.length === 2
+      ? `/analysis-runs/${selected[0].id}/compare/${selected[1].id}`
+      : null;
+  }, [history, selectedComparisonRuns]);
 
   if (loading) {
     return <p className="mt-4 text-sm text-slate-600">Loading analysis history…</p>;
@@ -260,8 +296,31 @@ export function WebsiteAnalysisPanel({
           <p className="mt-2 text-sm text-slate-500">No analysis runs yet.</p>
         ) : (
           <ul className="mt-3 grid gap-2">
-            {history.map((run) => (
+            <li className="text-sm text-slate-600">
+              Select any two completed analyses of this website to compare.
+            </li>
+            {history.map((run, index) => (
               <li className="rounded-lg bg-slate-50 p-3 text-sm" key={run.id}>
+                <label className="mr-3 inline-flex items-center gap-2">
+                  <input
+                    aria-label={`Select analysis from ${new Date(run.created_at).toLocaleString()} for comparison`}
+                    checked={selectedComparisonRuns.includes(run.id)}
+                    disabled={
+                      run.status !== "completed" ||
+                      (!selectedComparisonRuns.includes(run.id) &&
+                        selectedComparisonRuns.length >= 2)
+                    }
+                    onChange={(event) =>
+                      setSelectedComparisonRuns((current) =>
+                        event.target.checked
+                          ? [...current, run.id]
+                          : current.filter((id) => id !== run.id),
+                      )
+                    }
+                    type="checkbox"
+                  />
+                  <span className="sr-only">Compare</span>
+                </label>
                 <span className="font-semibold capitalize">{run.status}</span>
                 <span className="text-slate-500"> · {run.progress_percent}% · {new Date(run.created_at).toLocaleString()}</span>
                 {run.status === "completed" && (
@@ -274,8 +333,25 @@ export function WebsiteAnalysisPanel({
                     View Analysis
                   </a>
                 )}
+                <span className="mt-1 block text-slate-600">
+                  Overall score:{" "}
+                  {run.result_summary?.overall_score == null
+                    ? "Unavailable"
+                    : `${run.result_summary.overall_score}/100`}
+                  {scoreChangeLabel(history, index)}
+                </span>
               </li>
             ))}
+            {comparisonHref && (
+              <li>
+                <a
+                  className="inline-block rounded-lg bg-slate-950 px-4 py-2 font-semibold text-white"
+                  href={comparisonHref}
+                >
+                  Compare selected analyses
+                </a>
+              </li>
+            )}
           </ul>
         )}
       </details>

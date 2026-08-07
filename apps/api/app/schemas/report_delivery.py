@@ -27,7 +27,12 @@ class RealWebsiteAnalysisStartRequest(BaseModel):
 
     website_url: str = Field(min_length=1, max_length=2048)
     idempotency_key: str = Field(min_length=1, max_length=255)
-    maximum_pages: int = Field(default=10, ge=1, le=50)
+    maximum_pages: int | None = Field(
+        default=None,
+        ge=1,
+        le=10000,
+        json_schema_extra={"deprecated": True},
+    )
     browser_engines: list[Literal["chromium", "firefox", "webkit"]] = Field(
         default_factory=lambda: ["chromium", "firefox", "webkit"],
         min_length=1,

@@ -12,6 +12,10 @@ from app.models.action_plan import (  # noqa: E402
     ActionItem,  # noqa: F401
     ActionStatusHistory,  # noqa: F401
 )
+from app.models.analysis_comparison import (  # noqa: E402, F401
+    AnalysisComparison,
+    AnalysisComparisonArtifact,
+)
 from app.models.analysis_diagnostic import AnalysisDiagnostic  # noqa: E402, F401
 from app.models.analysis_finding import AnalysisFinding  # noqa: E402, F401
 from app.models.analysis_interpretation import AnalysisInterpretation  # noqa: E402, F401

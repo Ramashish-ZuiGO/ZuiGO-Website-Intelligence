@@ -14,6 +14,11 @@ from datetime import UTC, datetime
 from html.parser import HTMLParser
 from typing import Any
 
+from app.services.resource_classification import (
+    ResourceClassification,
+    classify_resource,
+)
+
 from worker_app.analysis.url_safety import UrlSafetyError, validate_public_url
 
 TRACKING_PARAMETERS = {
@@ -22,8 +27,40 @@ TRACKING_PARAMETERS = {
     "utm_campaign",
     "utm_term",
     "utm_content",
+    "utm_id",
+    "utm_name",
+    "utm_reader",
+    "utm_referrer",
     "gclid",
+    "gclsrc",
+    "dclid",
+    "wbraid",
+    "gbraid",
     "fbclid",
+    "msclkid",
+    "yclid",
+    "mc_eid",
+    "mc_cid",
+    "igshid",
+    "vero_id",
+    "vero_conv",
+    "_hsenc",
+    "_hsmi",
+    "mkt_tok",
+    "oly_anon_id",
+    "oly_enc_id",
+    "hsa_cam",
+    "hsa_grp",
+    "hsa_ad",
+    "s_kwcid",
+    "ref_src",
+    "spm",
+    "sessionid",
+    "sid",
+    "phpsessid",
+    "jsessionid",
+    "cfid",
+    "cftoken",
 }
 DESTRUCTIVE_PATH_PARTS = {
     "logout",
@@ -53,21 +90,30 @@ class DiscoveryError(ValueError):
         super().__init__(message)
         self.code = code
         self.safe_message = message
+        self.attempts = 1
 
 
 @dataclass(frozen=True)
 class DiscoveryConfig:
-    max_discovered_urls: int = 500
-    max_html_pages: int = 50
-    max_crawl_depth: int = 3
+    max_discovered_urls: int = 50_000
+    max_html_pages: int = 10_000
+    # ``max_crawl_depth`` is an emergency safety bound against pathologically deep
+    # or self-generating URL spaces, NOT the normal stop condition. Ordinary finite
+    # sites terminate by frontier exhaustion long before this is reached.
+    max_crawl_depth: int = 1_000
     max_links_per_page: int = 500
-    max_sitemap_files: int = 20
-    max_sitemap_depth: int = 3
+    # Per-path cap on distinct query-string variants, bounding faceted navigation,
+    # calendars, and session/tracking parameter explosion.
+    max_query_variants_per_path: int = 200
+    max_sitemap_files: int = 50
+    max_sitemap_depth: int = 5
     max_redirects: int = 5
     request_timeout_seconds: int = 15
-    deadline_seconds: int = 180
+    deadline_seconds: int = 1800
     max_response_bytes: int = 2_000_000
     include_verified_subdomains: bool = False
+    max_fetch_attempts: int = 3
+    retry_backoff_seconds: float = 0.25
 
 
 @dataclass
@@ -78,6 +124,10 @@ class FetchResponse:
     body: bytes
     redirects: list[str]
     size_limited: bool = False
+    attempts: int = 1
+
+
+Fetch = Callable[[str, DiscoveryConfig], FetchResponse]
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -155,6 +205,28 @@ def destructive_path_reason(url: str) -> str | None:
     return f"unsafe_state_changing_path:{matched[0]}" if matched else None
 
 
+def _decoded_response_body(
+    body: bytes,
+    headers: dict[str, str],
+    config: DiscoveryConfig,
+) -> tuple[bytes, bool]:
+    limited = len(body) > config.max_response_bytes
+    body = body[: config.max_response_bytes]
+    if "gzip" not in headers.get("content-encoding", "").lower():
+        return body, limited
+    try:
+        with gzip.GzipFile(fileobj=io.BytesIO(body)) as archive:
+            decoded = archive.read(config.max_response_bytes + 1)
+    except (OSError, EOFError) as exception:
+        raise DiscoveryError(
+            "RESPONSE_DECOMPRESSION_FAILED",
+            "A compressed discovery response could not be decoded.",
+        ) from exception
+    decoded_limited = len(decoded) > config.max_response_bytes
+    headers.pop("content-encoding", None)
+    return decoded[: config.max_response_bytes], limited or decoded_limited
+
+
 def safe_fetch(url: str, config: DiscoveryConfig) -> FetchResponse:
     current = validate_public_url(url)
     redirects: list[str] = []
@@ -183,12 +255,43 @@ def safe_fetch(url: str, config: DiscoveryConfig) -> FetchResponse:
                 "DISCOVERY_PAGE_FETCH_FAILED", "A discovery request failed."
             ) from exception
         with response:
-            body = response.read(config.max_response_bytes + 1)
-            limited = len(body) > config.max_response_bytes
-            body = body[: config.max_response_bytes]
+            encoded_body = response.read(config.max_response_bytes + 1)
             headers = {key.lower(): value for key, value in response.headers.items()}
+            body, limited = _decoded_response_body(encoded_body, headers, config)
             return FetchResponse(response.url, response.status, headers, body, redirects, limited)
     raise DiscoveryError("DISCOVERY_PAGE_FETCH_FAILED", "The redirect limit was reached.")
+
+
+def _retryable_fetch_error(exception: BaseException) -> bool:
+    if isinstance(exception, UrlSafetyError):
+        return exception.code == "DNS_RESOLUTION_FAILED"
+    if isinstance(exception, DiscoveryError):
+        return exception.code in {
+            "DISCOVERY_PAGE_FETCH_FAILED",
+            "RESPONSE_DECOMPRESSION_FAILED",
+        }
+    return isinstance(exception, OSError)
+
+
+def fetch_with_bounded_retry(
+    fetch: Fetch,
+    url: str,
+    config: DiscoveryConfig,
+) -> FetchResponse:
+    last_error: BaseException | None = None
+    for attempt in range(1, config.max_fetch_attempts + 1):
+        try:
+            response = fetch(url, config)
+            response.attempts = attempt
+            return response
+        except (DiscoveryError, UrlSafetyError, OSError) as exception:
+            last_error = exception
+            if not _retryable_fetch_error(exception) or attempt >= config.max_fetch_attempts:
+                if hasattr(exception, "attempts"):
+                    exception.attempts = attempt
+                raise
+            time.sleep(config.retry_backoff_seconds * attempt)
+    raise AssertionError("bounded discovery retry exhausted") from last_error
 
 
 class LinkParser(HTMLParser):
@@ -389,9 +492,6 @@ def classify_page(url: str, *, title: str | None = None, h1: str | None = None) 
     }
 
 
-Fetch = Callable[[str, DiscoveryConfig], FetchResponse]
-
-
 def discover_site(
     submitted_url: str,
     config: DiscoveryConfig,
@@ -403,25 +503,52 @@ def discover_site(
     submitted = normalize_url(submitted_url)
     root = urllib.parse.urlunsplit((*urllib.parse.urlsplit(submitted)[:2], "/", "", ""))
     candidates: dict[str, dict[str, Any]] = {}
-    raw_discoveries = 0
+    raw_link_occurrences = 0
+    unique_candidates_before_limit = 0
     limit_reached = False
+    url_cap_hit = False
+    depth_blocked_urls: list[str] = []
+    depth_blocked_total = 0
+    query_variant_counts: dict[str, int] = {}
+    query_variant_suppressed = 0
     errors: list[dict[str, str]] = []
 
-    def check_deadline() -> None:
-        if time.monotonic() - started > config.deadline_seconds:
-            raise DiscoveryError(
-                "DISCOVERY_DEADLINE_EXCEEDED", "The discovery deadline was exceeded."
-            )
+    def bounded_fetch(url: str) -> FetchResponse:
+        return fetch_with_bounded_retry(fetch, url, config)
 
     def add(url: str, source: str, source_page: str | None, depth: int) -> str | None:
-        nonlocal raw_discoveries, limit_reached
-        raw_discoveries += 1
+        nonlocal raw_link_occurrences, unique_candidates_before_limit, limit_reached
+        nonlocal query_variant_suppressed, url_cap_hit
+        raw_link_occurrences += 1
         try:
             normalized = normalize_url(url, source_page or submitted)
         except DiscoveryError:
             return None
-        if normalized not in candidates and len(candidates) >= config.max_discovered_urls:
+        is_new = normalized not in candidates
+        if is_new:
+            unique_candidates_before_limit += 1
+            split = urllib.parse.urlsplit(normalized)
+            if split.query:
+                path_key = f"{split.scheme}://{split.netloc}{split.path}"
+                seen_variants = query_variant_counts.get(path_key, 0)
+                if seen_variants >= config.max_query_variants_per_path:
+                    query_variant_suppressed += 1
+                    if not any(item["code"] == "QUERY_VARIANT_LIMIT_REACHED" for item in errors):
+                        errors.append(
+                            {
+                                "code": "QUERY_VARIANT_LIMIT_REACHED",
+                                "message": (
+                                    "A per-path query-parameter variant limit protected "
+                                    "against an unbounded URL space; excess variants for at "
+                                    "least one path were not enqueued."
+                                ),
+                            }
+                        )
+                    return None
+                query_variant_counts[path_key] = seen_variants + 1
+        if is_new and len(candidates) >= config.max_discovered_urls:
             limit_reached = True
+            url_cap_hit = True
             if not any(item["code"] == "PAGE_LIMIT_REACHED" for item in errors):
                 errors.append(
                     {
@@ -432,6 +559,16 @@ def discover_site(
             return None
         relation = origin_relation(normalized, submitted, config.include_verified_subdomains)
         reason = destructive_path_reason(normalized)
+        resource = classify_resource(
+            normalized,
+            origin_relation=relation,
+            eligibility_status="eligible",
+        )
+        if resource.classification in {
+            ResourceClassification.DOCUMENT_ASSET,
+            ResourceClassification.MEDIA_STATIC_ASSET,
+        }:
+            reason = resource.classification.value
         eligibility = (
             "excluded" if relation in {"external", "same_domain"} or reason else "eligible"
         )
@@ -478,11 +615,22 @@ def discover_site(
     add(submitted, "submitted_url", None, 0)
     robots_url = urllib.parse.urljoin(root, "robots.txt")
     try:
-        robots_response = fetch(robots_url, config)
+        robots_response = bounded_fetch(robots_url)
     except (DiscoveryError, UrlSafetyError, OSError):
         robots_response = None
-        errors.append({"code": "ROBOTS_FETCH_FAILED", "message": "robots.txt was unavailable."})
+        errors.append(
+            {
+                "code": "ROBOTS_FETCH_FAILED",
+                "message": (
+                    "robots.txt was unavailable after bounded retries; crawl permissions "
+                    "remain unknown."
+                ),
+            }
+        )
     policy = parse_robots(robots_url, robots_response)
+    policy["fetch_attempts"] = (
+        robots_response.attempts if robots_response else config.max_fetch_attempts
+    )
     sitemap_queue: deque[tuple[str, int, str]] = deque(
         [(url, 0, "robots_sitemap") for url in policy["sitemaps"]]
         + [(urllib.parse.urljoin(root, "sitemap.xml"), 0, "sitemap")]
@@ -490,7 +638,14 @@ def discover_site(
     seen_sitemaps: set[str] = set()
     sitemap_records: list[dict[str, Any]] = []
     while sitemap_queue and len(seen_sitemaps) < config.max_sitemap_files:
-        check_deadline()
+        if time.monotonic() - started > config.deadline_seconds:
+            errors.append(
+                {
+                    "code": "DISCOVERY_DEADLINE_EXCEEDED",
+                    "message": "The discovery deadline was reached during sitemap processing.",
+                }
+            )
+            break
         sitemap_url, depth, source = sitemap_queue.popleft()
         try:
             normalized_sitemap = normalize_url(sitemap_url, root)
@@ -511,7 +666,7 @@ def discover_site(
                     }
                 )
                 continue
-            response = fetch(normalized_sitemap, config)
+            response = bounded_fetch(normalized_sitemap)
             if response.status == 404:
                 sitemap_records.append(
                     {"url": normalized_sitemap, "type": "unknown", "fetch_status": "missing"}
@@ -549,6 +704,7 @@ def discover_site(
                     "last_modified": response.headers.get("last-modified"),
                     "size_limit_reached": response.size_limited,
                     "url_limit_reached": url_limit_reached,
+                    "fetch_attempts": response.attempts,
                 }
             )
         except (DiscoveryError, UrlSafetyError, OSError) as exception:
@@ -558,10 +714,16 @@ def discover_site(
                     "type": "unknown",
                     "fetch_status": "failed",
                     "parsing_error": getattr(exception, "code", "SITEMAP_FETCH_FAILED"),
+                    "fetch_attempts": int(
+                        getattr(exception, "attempts", config.max_fetch_attempts)
+                    ),
                 }
             )
             errors.append(
-                {"code": "SITEMAP_FETCH_FAILED", "message": "A sitemap could not be processed."}
+                {
+                    "code": "SITEMAP_FETCH_FAILED",
+                    "message": "A sitemap could not be processed after bounded retries.",
+                }
             )
     if sitemap_queue:
         limit_reached = True
@@ -573,9 +735,18 @@ def discover_site(
 
     html_queue: deque[tuple[str, int]] = deque([(submitted, 0)])
     fetched: set[str] = set()
+    depth_blocked_seen: set[str] = set()
     maximum_depth = 0
     while html_queue and len(fetched) < config.max_html_pages:
-        check_deadline()
+        if time.monotonic() - started > config.deadline_seconds:
+            if not any(item["code"] == "DISCOVERY_DEADLINE_EXCEEDED" for item in errors):
+                errors.append(
+                    {
+                        "code": "DISCOVERY_DEADLINE_EXCEEDED",
+                        "message": "The discovery deadline was reached during HTML crawling.",
+                    }
+                )
+            break
         current, depth = html_queue.popleft()
         if current in fetched or depth > config.max_crawl_depth:
             continue
@@ -589,7 +760,7 @@ def discover_site(
             page["exclusion_reason"] = "robots_disallowed"
             continue
         try:
-            response = fetch(current, config)
+            response = bounded_fetch(current)
             final_url = normalize_url(response.url)
             if (
                 origin_relation(final_url, submitted, config.include_verified_subdomains)
@@ -612,6 +783,8 @@ def discover_site(
             parser.feed(response.body.decode("utf-8", errors="replace"))
             page["final_url"] = final_url
             page["page_title"] = parser.title or None
+            page["discovery_evidence"][-1]["fetch_attempts"] = response.attempts
+            page["discovery_evidence"][-1]["fetch_status"] = "available"
             page.update(classify_page(final_url, title=parser.title, h1=parser.h1))
             if parser.canonical:
                 canonical = add(parser.canonical, "canonical", current, depth)
@@ -629,13 +802,39 @@ def discover_site(
             fetched.add(current)
             maximum_depth = max(maximum_depth, depth)
             if depth >= config.max_crawl_depth:
-                if parser.links:
+                new_at_depth = 0
+                for link in parser.links:
+                    try:
+                        norm_link = normalize_url(link, current)
+                    except DiscoveryError:
+                        continue
+                    if (
+                        norm_link not in candidates
+                        and norm_link not in fetched
+                        and norm_link not in depth_blocked_seen
+                    ):
+                        origin = origin_relation(
+                            norm_link, submitted, config.include_verified_subdomains
+                        )
+                        if origin == "external" or destructive_path_reason(norm_link):
+                            continue
+                        depth_blocked_seen.add(norm_link)
+                        new_at_depth += 1
+                        depth_blocked_total += 1
+                        if len(depth_blocked_urls) < 10:
+                            depth_blocked_urls.append(norm_link)
+                if new_at_depth > 0:
                     limit_reached = True
                     if not any(item["code"] == "CRAWL_DEPTH_LIMIT_REACHED" for item in errors):
                         errors.append(
                             {
                                 "code": "CRAWL_DEPTH_LIMIT_REACHED",
-                                "message": "The HTML crawl-depth limit was reached.",
+                                "message": (
+                                    "The crawl-depth safety bound "
+                                    f"({config.max_crawl_depth} hops) was reached with "
+                                    f"{new_at_depth} unique in-scope candidate(s) still "
+                                    "unfollowed."
+                                ),
                             }
                         )
                 continue
@@ -645,16 +844,27 @@ def discover_site(
                 )
                 if discovered and discovered not in fetched:
                     html_queue.append((discovered, depth + 1))
-        except (DiscoveryError, UrlSafetyError, OSError):
+        except (DiscoveryError, UrlSafetyError, OSError) as exception:
             page["eligibility_status"] = "skipped"
             page["skip_reason"] = "discovery_page_fetch_failed"
+            page["discovery_evidence"][-1]["fetch_attempts"] = int(
+                getattr(exception, "attempts", config.max_fetch_attempts)
+            )
+            page["discovery_evidence"][-1]["fetch_status"] = "failed"
             errors.append(
                 {
                     "code": "DISCOVERY_PAGE_FETCH_FAILED",
-                    "message": "An optional discovery page could not be fetched.",
+                    "message": (
+                        "The submitted root page could not be fetched after bounded retries."
+                        if depth == 0
+                        else (
+                            "An internal discovery page could not be fetched after bounded retries."
+                        )
+                    ),
                 }
             )
-    if html_queue:
+    html_page_cap_hit = bool(html_queue) and len(fetched) >= config.max_html_pages
+    if html_page_cap_hit:
         limit_reached = True
         if not any(item["code"] == "PAGE_LIMIT_REACHED" for item in errors):
             errors.append(
@@ -695,6 +905,74 @@ def discover_site(
         del candidates[normalized]
     robots_public = {key: value for key, value in policy.items() if key != "_parser"}
     pages = list(candidates.values())
+    eligible_count = sum(page["eligibility_status"] == "eligible" for page in pages)
+    excluded_count = sum(page["eligibility_status"] == "excluded" for page in pages)
+    skipped_count = sum(page["eligibility_status"] == "skipped" for page in pages)
+    document_count = sum(
+        page["exclusion_reason"] == ResourceClassification.DOCUMENT_ASSET.value for page in pages
+    )
+    media_count = sum(
+        page["exclusion_reason"] == ResourceClassification.MEDIA_STATIC_ASSET.value
+        for page in pages
+    )
+    external_count = sum(page["origin_relation"] == "external" for page in pages)
+    redirect_count = sum(
+        bool(page["final_url"]) and page["final_url"] != page["normalized_url"] for page in pages
+    )
+
+    # A normal finite website terminates by frontier exhaustion. Discovery is only
+    # "partial" when a genuine safety bound left unique, valid, in-scope candidates
+    # unprocessed, or when a page we intended to crawl could not be fetched (so its
+    # outgoing links are unknown). A high historical depth threshold on its own,
+    # with nothing left to visit, never makes discovery partial.
+    remaining_queue_urls = {
+        url
+        for url, _ in html_queue
+        if url not in fetched
+        and (candidates.get(url) or {}).get("eligibility_status") == "eligible"
+    }
+    remaining_sitemap_count = len(sitemap_queue)
+    remaining_unique_candidate_count = (
+        len(remaining_queue_urls) + depth_blocked_total + remaining_sitemap_count
+    )
+    fetch_incomplete = any(item["code"] == "DISCOVERY_PAGE_FETCH_FAILED" for item in errors)
+    deadline_exceeded = any(item["code"] == "DISCOVERY_DEADLINE_EXCEEDED" for item in errors)
+    partial_due_to_safety = remaining_unique_candidate_count > 0
+    limit_reached = partial_due_to_safety
+    status = "partial" if partial_due_to_safety or fetch_incomplete else "completed"
+
+    if deadline_exceeded:
+        safety_limit_type, safety_limit_value = "job_deadline_seconds", config.deadline_seconds
+    elif url_cap_hit:
+        safety_limit_type, safety_limit_value = "max_discovered_urls", config.max_discovered_urls
+    elif html_page_cap_hit:
+        safety_limit_type, safety_limit_value = "max_html_pages", config.max_html_pages
+    elif depth_blocked_total > 0:
+        safety_limit_type, safety_limit_value = "max_crawl_depth", config.max_crawl_depth
+    elif remaining_sitemap_count > 0:
+        safety_limit_type, safety_limit_value = "max_sitemap_files", config.max_sitemap_files
+    else:
+        safety_limit_type, safety_limit_value = None, None
+
+    sample_remaining = (depth_blocked_urls + sorted(remaining_queue_urls))[:10]
+    if partial_due_to_safety:
+        reason = (
+            f"{remaining_unique_candidate_count} unique in-scope candidate(s) remained "
+            f"unprocessed when the {safety_limit_type} safety bound was reached."
+        )
+    elif fetch_incomplete:
+        reason = "One or more intended pages could not be fetched after bounded retries."
+    else:
+        reason = "Frontier exhausted; all unique in-scope candidates were processed."
+    safety_limits = {
+        "safety_limit_type": safety_limit_type if partial_due_to_safety else None,
+        "safety_limit_value": safety_limit_value if partial_due_to_safety else None,
+        "remaining_unique_candidate_count": remaining_unique_candidate_count,
+        "sample_remaining_urls": sample_remaining,
+        "reason": reason,
+        "resume_possible": remaining_unique_candidate_count > 0,
+        "query_variant_suppressed": query_variant_suppressed,
+    }
     return {
         "configuration": asdict(config),
         "pages": pages,
@@ -702,14 +980,25 @@ def discover_site(
         "sitemaps": sitemap_records,
         "errors": errors,
         "counts": {
-            "discovered": raw_discoveries,
+            "raw_link_occurrences": raw_link_occurrences,
+            "unique_candidates_encountered": unique_candidates_before_limit,
+            "discovered": len(pages),
             "unique": len(pages),
-            "eligible": sum(page["eligibility_status"] == "eligible" for page in pages),
-            "excluded": sum(page["eligibility_status"] == "excluded" for page in pages),
-            "skipped": sum(page["eligibility_status"] == "skipped" for page in pages),
+            "eligible": eligible_count,
+            "excluded": excluded_count,
+            "skipped": skipped_count,
+            "documents": document_count,
+            "media": media_count,
+            "external": external_count,
+            "redirects": redirect_count,
             "sitemaps": len(seen_sitemaps),
         },
         "crawl_limit_reached": limit_reached,
+        "depth_blocked_urls": depth_blocked_urls,
+        "depth_blocked_count": depth_blocked_total,
+        "remaining_frontier_count": len(remaining_queue_urls),
+        "remaining_unique_candidate_count": remaining_unique_candidate_count,
+        "safety_limits": safety_limits,
         "maximum_depth_reached": maximum_depth,
-        "status": "partial" if errors or limit_reached else "completed",
+        "status": status,
     }

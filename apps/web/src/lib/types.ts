@@ -95,6 +95,7 @@ export type AnalysisStatus = "queued" | "running" | "completed" | "failed";
 export interface AnalysisRun {
   id: string;
   website_id: string;
+  baseline_analysis_run_id: string | null;
   status: AnalysisStatus;
   progress_percent: number;
   current_step: string | null;
@@ -635,4 +636,72 @@ export interface ScanSummary {
   total_actions_matched: number;
   located_actions: number;
   unlocated_actions: number;
+}
+
+export interface ExtractedContentStats {
+  word_count: number;
+  paragraph_count: number;
+  heading_count: number;
+  table_count: number;
+  faq_count: number;
+  image_count: number;
+  link_count: number;
+  download_count: number;
+}
+
+export interface ExtractedHeading {
+  level: number;
+  text: string;
+}
+
+export interface ExtractedTable {
+  caption: string | null;
+  headers: string[];
+  rows: string[][];
+  row_count: number;
+}
+
+export interface ExtractedFAQ {
+  question: string;
+  answer: string;
+  source: string;
+}
+
+export interface ExtractedImage {
+  src: string;
+  alt: string | null;
+  width: number | null;
+  height: number | null;
+}
+
+export interface ExtractedLink {
+  url: string;
+  text: string;
+  is_internal: boolean;
+}
+
+export interface ExtractedDownload {
+  url: string;
+  text: string | null;
+  file_type: string | null;
+}
+
+export interface ExtractedContent {
+  url: string;
+  extraction_status: string;
+  title: string | null;
+  summary: string | null;
+  main_content: string | null;
+  sections: { heading: string; level: number }[];
+  headings: ExtractedHeading[];
+  paragraphs: string[];
+  tables: ExtractedTable[];
+  faqs: ExtractedFAQ[];
+  images: ExtractedImage[];
+  important_links: ExtractedLink[];
+  downloadable_files: ExtractedDownload[];
+  structured_data: Record<string, unknown>;
+  metadata: Record<string, unknown>;
+  page_type_hint: string;
+  content_stats: ExtractedContentStats;
 }

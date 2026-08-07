@@ -10,7 +10,7 @@ import type {
   SiteCoverageDetail,
 } from "@/lib/types";
 
-import { AccessibleExplanation } from "@/components/metrics/AccessibleExplanation";
+import { ConceptInfoButton } from "@/components/metrics/ConceptInfoButton";
 import { MetricInfoButton } from "@/components/metrics/MetricInfoButton";
 import { ScoreValue } from "@/components/metrics/ScoreValue";
 import { PercentageValue } from "@/components/metrics/PercentageValue";
@@ -19,17 +19,6 @@ import { SiteDiagnosticsReference } from "@/components/diagnostics/SiteDiagnosti
 interface PageAnalysisPanelProps {
   websiteId: string;
 }
-
-const explanations: Record<string, string> = {
-  l1: "Level 1 (Lightweight) collects page metadata via HTTP requests. No browser is launched. This provides basic SEO, accessibility, and security signals for every eligible page within configured limits.",
-  l2: "Level 2 (Deep) runs full Playwright inspection and Lighthouse audit. This gives comprehensive performance, accessibility, best-practices, and SEO scores. Only a bounded subset of pages receives Level 2 analysis.",
-  coverage: "Percentage of eligible pages with a completed Level 1 analysis attempt. This measures analysis completeness, not page quality.",
-  selected: "Pages selected for analysis from the eligible pool. Limits are configured to keep analysis bounded and safe.",
-  failed: "Pages where analysis could not complete. Each failure includes a machine-readable reason code and human-readable explanation.",
-  skipped: "Pages that were intentionally skipped based on configured rules (e.g., unsupported content type, blocked by robots, page limit reached).",
-};
-
-
 
 function AnalysisLevelBadge({ level }: { level: number }) {
   return (
@@ -186,7 +175,7 @@ export function PageAnalysisPanel({ websiteId }: PageAnalysisPanelProps) {
                   <p className="text-xl font-bold">{detail.eligible_page_count}</p>
                 </div>
                 <div className="rounded-lg border bg-white p-3">
-                  <p className="text-xs text-slate-500 flex items-center justify-between">Selected <AccessibleExplanation title="Selected" explanation={explanations.selected} /></p>
+                  <p className="text-xs text-slate-500 flex items-center justify-between">Selected <ConceptInfoButton conceptId="page_selected" title="Selected pages" /></p>
                   <p className="text-xl font-bold">{detail.selected_page_count}</p>
                 </div>
                 <div className="rounded-lg border bg-white p-3">
@@ -197,7 +186,7 @@ export function PageAnalysisPanel({ websiteId }: PageAnalysisPanelProps) {
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="rounded-lg border bg-white p-3">
                   <p className="text-xs font-semibold text-slate-500 flex items-center gap-1">
-                    Level 1 (Lightweight) <AccessibleExplanation title="Level 1 Analysis" explanation={explanations.l1} />
+                    Level 1 (Lightweight) <ConceptInfoButton conceptId="page_level_1" title="Level 1 Analysis" />
                   </p>
                   <dl className="mt-2 grid grid-cols-2 gap-2 text-sm">
                     <div><dt className="text-slate-400">Attempted</dt><dd className="font-semibold">{detail.level_1_attempted}</dd></div>
@@ -208,7 +197,7 @@ export function PageAnalysisPanel({ websiteId }: PageAnalysisPanelProps) {
                 </div>
                 <div className="rounded-lg border bg-white p-3">
                   <p className="text-xs font-semibold text-slate-500 flex items-center gap-1">
-                    Level 2 (Deep) <AccessibleExplanation title="Level 2 Analysis" explanation={explanations.l2} />
+                    Level 2 (Deep) <ConceptInfoButton conceptId="page_level_2" title="Level 2 Analysis" />
                   </p>
                   <dl className="mt-2 grid grid-cols-2 gap-2 text-sm">
                     <div><dt className="text-slate-400">Attempted</dt><dd className="font-semibold">{detail.level_2_attempted}</dd></div>

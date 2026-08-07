@@ -72,17 +72,46 @@ export interface WorkflowProgress {
   submitted_website: string | null;
   page_coverage: {
     discovery_status: string;
+    discovery_completeness: "complete" | "partial" | "failed" | "inconclusive";
+    discovery_failure_code: string | null;
+    discovery_failure_message: string | null;
+    discovery_retry_available: boolean;
     discovered_pages: number;
+    normalized_pages: number;
+    eligible_pages: number;
     scheduled_pages: number;
     not_scheduled_pages: number;
     visited_pages: number;
     successfully_analysed_pages: number;
     failed_pages: number;
+    failed_page_details: Array<{
+      url: string;
+      reason: string;
+      reason_code: string;
+    }>;
+    document_assets: number;
+    media_static_assets: number;
+    resource_inventory: Array<{
+      url: string;
+      final_url: string | null;
+      http_status: number | null;
+      response_content_type: string | null;
+      detected_content_type: string | null;
+      content_type_detection: string;
+      classification: string;
+      classification_basis: string;
+      failure_stage: string;
+      failure_reason: string | null;
+      browser_navigation: string;
+    }>;
     skipped_pages: number;
     incomplete_pages: number;
     coverage_numerator: number;
     coverage_denominator: number;
     coverage_percentage: number | null;
+    analysed_page_coverage_percentage: number | null;
+    full_site_coverage_percentage: number | null;
+    full_site_coverage_confidence: "established" | "not_established";
   };
   browser_engine_progress: {
     status: string;
@@ -91,11 +120,14 @@ export interface WorkflowProgress {
       eligible_pages: number;
       queued_pages: number;
       attempted_pages: number;
+      tested_pages: number;
       passed_pages: number;
       partial_pages: number;
       failed_pages: number;
       inconclusive_pages: number;
       unavailable_pages: number;
+      timed_out_pages?: number;
+      availability_status?: string;
     }>;
     matrix?: Array<{
       page_url: string;
@@ -145,7 +177,9 @@ export interface ReportArtifact {
 
 export interface ReportOccurrence {
   normalized_url: string;
+  final_url: string;
   status_code: number | null;
+  collection_status: string;
   page_title: string | null;
   page_type: string;
   section: string;
@@ -159,6 +193,8 @@ export interface ReportOccurrence {
   analysis_provider_version: string | null;
   artifact_reference: unknown;
   scope: string;
+  browser_engines_affected?: string[];
+  browser_engines_where_it_works?: string[];
 }
 
 export interface DetailedReportFinding {

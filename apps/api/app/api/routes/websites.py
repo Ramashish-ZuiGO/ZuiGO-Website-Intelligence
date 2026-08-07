@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.api.routes.analysis_runs import lighthouse_metrics
 from app.db.session import get_db
 from app.models.analysis_run import AnalysisRun
 from app.models.website import Website
@@ -86,8 +87,7 @@ def get_website_metric_interpretations(
 
     result = db.scalar(select(AnalysisResult).where(AnalysisResult.analysis_run_id == run.id))
     if result:
-        # result.result_data contains lighthouse_metrics
-        lh_metrics = result.result_data.get("lighthouse_metrics", {})
+        lh_metrics = lighthouse_metrics(result.raw_lighthouse_data)
         for k, v in lh_metrics.items():
             # lighthouse metrics have specific keys. E.g. "largest_contentful_paint_ms"
             # let's map them to our registry keys

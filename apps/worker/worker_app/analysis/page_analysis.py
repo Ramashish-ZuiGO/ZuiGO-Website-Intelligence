@@ -205,6 +205,8 @@ def _security_observations(headers: dict[str, str], final_url: str) -> dict[str,
         "x_content_type_options": headers.get("x-content-type-options"),
         "referrer_policy": headers.get("referrer-policy"),
         "permissions_policy": headers.get("permissions-policy"),
+        "cross_origin_opener_policy": headers.get("cross-origin-opener-policy"),
+        "cross_origin_resource_policy": headers.get("cross-origin-resource-policy"),
         "server": headers.get("server"),
         "x_powered_by": headers.get("x-powered-by"),
     }

@@ -34,6 +34,13 @@ function LegacyInfo({ kind }: { kind: keyof typeof explanations }) {
   );
 }
 
+function readableValue(
+  value: string | null | undefined,
+  fallback: string,
+): string {
+  return value?.replaceAll("_", " ") || fallback;
+}
+
 export function WebsiteCoveragePanel({ websiteId }: { websiteId: string }) {
   const [coverage, setCoverage] = useState<CoverageSummary | null>(null);
   const [pages, setPages] = useState<WebsitePageList | null>(null);
@@ -127,7 +134,7 @@ export function WebsiteCoveragePanel({ websiteId }: { websiteId: string }) {
             <div className="mt-3 overflow-x-auto">
               <table className="w-full min-w-[900px] text-left text-xs">
                 <thead><tr className="border-b"><th className="p-2">Page URL</th><th>Title</th><th>Type</th><th>Source</th><th>Depth <LegacyInfo kind="depth" /></th><th>Eligibility</th><th>Robots <LegacyInfo kind="robots" /></th><th>Analysis</th><th>Reason</th><th>Action</th></tr></thead>
-                <tbody>{pages.items.map((item) => <tr className="border-b align-top" key={item.id}><td className="max-w-64 break-all p-2">{item.normalized_url}</td><td>{item.page_title || "—"}</td><td>{item.page_type.replaceAll("_", " ")}</td><td>{item.discovery_source.replaceAll("_", " ")}</td><td>{item.crawl_depth}</td><td>{item.eligibility_status}</td><td>{item.robots_status}</td><td>{item.latest_analysis_status}</td><td>{item.exclusion_reason || item.skip_reason || "—"}</td><td><a className="underline" href={item.normalized_url} rel="noreferrer" target="_blank">View page</a></td></tr>)}</tbody>
+                <tbody>{pages.items.map((item) => <tr className="border-b align-top" key={item.id}><td className="max-w-64 break-all p-2">{item.normalized_url}</td><td>{item.page_title || "—"}</td><td>{readableValue(item.page_type, "Not classified")}</td><td>{readableValue(item.discovery_source, "Source unavailable")}</td><td>{item.crawl_depth}</td><td>{item.eligibility_status}</td><td>{item.robots_status}</td><td>{item.latest_analysis_status}</td><td>{item.exclusion_reason || item.skip_reason || "—"}</td><td><a className="underline" href={item.normalized_url} rel="noreferrer" target="_blank">View page</a></td></tr>)}</tbody>
               </table>
             </div>
           ) : <p className="mt-4 text-sm text-slate-600">No discovered pages match these filters.</p>}

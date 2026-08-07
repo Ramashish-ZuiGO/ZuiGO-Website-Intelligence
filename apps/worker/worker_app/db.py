@@ -162,6 +162,7 @@ analysis_results = Table(
     Column("analysis_completed_at", DateTime(timezone=True), nullable=False),
     Column("raw_lighthouse_data", JSON, nullable=False),
     Column("raw_playwright_data", JSON, nullable=False),
+    Column("extracted_content", JSON, nullable=True),
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("updated_at", DateTime(timezone=True), nullable=False),
 )

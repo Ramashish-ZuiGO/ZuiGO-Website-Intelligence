@@ -10,7 +10,7 @@ import type {
   RepositoryScanExecution,
 } from "@/lib/types";
 
-import { AccessibleExplanation } from "@/components/metrics/AccessibleExplanation";
+import { ConceptInfoButton } from "@/components/metrics/ConceptInfoButton";
 import { ConfidenceBadge } from "@/components/metrics/ConfidenceBadge";
 
 interface RepositoryPanelProps {
@@ -532,7 +532,7 @@ export function RepositoryPanel({ projectId }: RepositoryPanelProps) {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h4 className="font-semibold flex items-center gap-1">
               Repository Scan
-              <AccessibleExplanation title="Repository Scan Coverage" explanation="Percentage of eligible source files scanned successfully. Excludes media files and ignored directories." />
+              <ConceptInfoButton conceptId="repository_scan_coverage" title="Repository Scan Coverage" />
             </h4>
             <button
               aria-label={isScanRunning ? "Scan in progress" : "Start repository scan"}
@@ -633,7 +633,7 @@ export function RepositoryPanel({ projectId }: RepositoryPanelProps) {
         <div className="mt-6">
           <h4 className="font-semibold flex items-center gap-1">
             Repository-Aware Remediation
-            <AccessibleExplanation title="Repository Match Confidence" explanation="The confidence that an action item is correctly mapped to a specific repository file, based on finding evidence overlapping with file AST/Regex matching." />
+            <ConceptInfoButton conceptId="repository_match_confidence_detail" title="Repository Match Confidence" />
           </h4>
           <p className="mt-1 text-xs text-slate-500">
             View match results between action items and repository source files.

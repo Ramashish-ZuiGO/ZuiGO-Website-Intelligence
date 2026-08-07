@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
-import { apiRequest } from "@/lib/api";
+import { ApiError, apiRequest } from "@/lib/api";
 import type { AnalysisReport, DiagnosticGroup } from "@/lib/types";
 import { PerformanceIntelligence } from "@/components/performance/PerformanceIntelligence";
 import { AccessibilityIntelligence, AccessibilityData } from "@/components/accessibility/AccessibilityIntelligence";
+import { ReanalysisComparisonPanel } from "@/components/comparisons/ReanalysisComparisonPanel";
 import { ScoreValue } from "@/components/metrics/ScoreValue";
 import { MetricRatingBadge } from "@/components/metrics/MetricRatingBadge";
 import { MetricInterpretation } from "@/components/metrics/types";
@@ -15,6 +16,63 @@ import { SiteDiagnosticsPanel } from "@/components/diagnostics/SiteDiagnosticsPa
 import { AgentExecutionPanel } from "@/components/agents/AgentExecutionPanel";
 import { ScoringIntelligencePanel } from "@/components/scoring/ScoringIntelligencePanel";
 import { ReportDeliveryPanel } from "@/components/reports/ReportDeliveryPanel";
+import ExtractedContentPanel from "@/components/content/ExtractedContentPanel";
+import type { WorkflowProgress } from "@/components/reports/types";
+import { analysisComparisonApi } from "@/lib/analysis-comparison-api";
+
+const RETRY_DELAYS_MS = [2_000, 4_000, 8_000, 15_000] as const;
+
+function isTransientConnectionError(error: unknown): boolean {
+  return (
+    error instanceof TypeError ||
+    (error instanceof Error &&
+      /failed to fetch|networkerror|load failed/i.test(error.message))
+  );
+}
+
+function startRetriedRequest<T>({
+  request,
+  onSuccess,
+  onConnectionChange,
+  onPermanentFailure,
+}: {
+  request: () => Promise<T>;
+  onSuccess: (value: T) => void;
+  onConnectionChange: (interrupted: boolean) => void;
+  onPermanentFailure?: (error: unknown) => void;
+}): () => void {
+  let cancelled = false;
+  let timer: number | undefined;
+  let failureCount = 0;
+
+  async function run() {
+    try {
+      const value = await request();
+      if (cancelled) return;
+      failureCount = 0;
+      onConnectionChange(false);
+      onSuccess(value);
+    } catch (error) {
+      if (cancelled) return;
+      if (!isTransientConnectionError(error)) {
+        onConnectionChange(false);
+        onPermanentFailure?.(error);
+        return;
+      }
+      onConnectionChange(true);
+      const delay =
+        RETRY_DELAYS_MS[Math.min(failureCount, RETRY_DELAYS_MS.length - 1)];
+      failureCount += 1;
+      timer = window.setTimeout(() => void run(), delay);
+    }
+  }
+
+  timer = window.setTimeout(() => void run(), 0);
+  return () => {
+    cancelled = true;
+    if (timer !== undefined) window.clearTimeout(timer);
+  };
+}
 
 function display(value: unknown): string {
   if (value === null || value === undefined || value === "") return "Not available";
@@ -122,6 +180,225 @@ const diagnosticWhy: Record<string, string> = {
   browser_compatibility: "Explicit test coverage prevents Chromium-only evidence from being overstated.",
 };
 
+function SignalCard({ title, status, detail }: { title: string; status: string; detail?: string }) {
+  const colors: Record<string, string> = {
+    current: "border-emerald-300 bg-emerald-50",
+    present: "border-emerald-300 bg-emerald-50",
+    detected: "border-emerald-300 bg-emerald-50",
+    valid: "border-emerald-300 bg-emerald-50",
+    strong: "border-emerald-300 bg-emerald-50",
+    good: "border-emerald-300 bg-emerald-50",
+    older_than_one_year: "border-amber-300 bg-amber-50",
+    possibly_outdated: "border-amber-300 bg-amber-50",
+    partial: "border-amber-300 bg-amber-50",
+    issues_found: "border-amber-300 bg-amber-50",
+    needs_attention: "border-amber-300 bg-amber-50",
+    date_not_published: "border-slate-300 bg-slate-50",
+    unavailable: "border-slate-300 bg-slate-50",
+    inconclusive: "border-slate-300 bg-slate-50",
+    missing: "border-red-200 bg-red-50",
+    weak: "border-red-200 bg-red-50",
+    high_observable_risk: "border-red-200 bg-red-50",
+    not_detected: "border-slate-300 bg-slate-50",
+  };
+  return (
+    <div className={`rounded-xl border p-4 ${colors[status] ?? "border-slate-200 bg-white"}`}>
+      <p className="text-sm font-semibold text-slate-700">{title}</p>
+      <p className="mt-1 text-lg font-bold capitalize">{label(status)}</p>
+      {detail && <p className="mt-1 text-xs text-slate-600">{detail}</p>}
+    </div>
+  );
+}
+
+type Obs = Record<string, unknown>;
+function s(v: unknown): string { return v == null ? "" : String(v); }
+function sa(v: unknown): string[] { return Array.isArray(v) ? v.map(String) : []; }
+
+function WebsiteSignalsSection({ diagnostics }: { diagnostics: Record<string, DiagnosticGroup> }) {
+  const policy = diagnostics.policy_diagnostics?.verified_observations as Obs | undefined;
+  const policyDetail = (policy?.privacy_policy_detail ?? null) as Obs | null;
+  const copyrightData = (diagnostics.policy_diagnostics?.copyright?.verified_observations ?? null) as Obs | null;
+  const securityMatrix = diagnostics.security_diagnostics?.verified_observations?.security_header_matrix;
+  const matrixItems = Array.isArray(securityMatrix) ? (securityMatrix as Obs[]) : [];
+  const analyticsData = (diagnostics.analytics_diagnostics?.verified_observations ?? null) as Obs | null;
+  const responsiveData = (diagnostics.responsive_diagnostics?.verified_observations ?? null) as Obs | null;
+
+  const privacyStatus = s(policyDetail?.freshness_status || (policy?.privacy_policy ? "detected" : "unavailable"));
+  const privacyDetail = policyDetail?.explicit_update_date
+    ? `Updated ${s(policyDetail.explicit_update_date)}`
+    : policyDetail?.found ? "Date not published" : undefined;
+
+  const copyrightStatus = s(copyrightData?.freshness_status || "unavailable");
+  const copyrightDetail = copyrightData?.raw_text ? s(copyrightData.raw_text).slice(0, 60) : undefined;
+
+  const presentHeaders = matrixItems.filter((h) => h.status === "present" || h.status === "not_applicable").length;
+  const totalHeaders = matrixItems.length;
+  const headerStatus = totalHeaders === 0 ? "unavailable" : presentHeaders === totalHeaders ? "present" : presentHeaders > 0 ? "partial" : "missing";
+  const headerDetail = totalHeaders > 0 ? `${presentHeaders} of ${totalHeaders} headers present` : undefined;
+
+  const analyticsProviders = sa(analyticsData?.providers);
+  const analyticsTech = sa(analyticsData?.technologies);
+  const analyticsIds = sa(analyticsData?.public_identifiers);
+  const analyticsStatus = analyticsData?.detected ? "detected" : "not_detected";
+  const analyticsDetail = analyticsProviders.length ? analyticsProviders.join(", ") : undefined;
+
+  const testedVp = responsiveData?.tested_viewports as number | undefined;
+  const successVp = responsiveData?.successful_viewports as number | undefined;
+  const responsiveStatus = testedVp == null || testedVp === 0 ? "unavailable" : successVp === testedVp ? "present" : (successVp ?? 0) > 0 ? "partial" : "missing";
+  const responsiveDetail = testedVp != null && testedVp > 0 ? `${successVp ?? 0} of ${testedVp} viewports passed` : undefined;
+
+  const htmlStdData = (diagnostics.html_standards_diagnostics?.verified_observations ?? null) as Obs | null;
+  const htmlStdStatus = s(htmlStdData?.validation_status || "unavailable");
+  const htmlStdScore = htmlStdData?.standards_score as number | null | undefined;
+  const htmlStdDetail = htmlStdScore != null ? `Score: ${htmlStdScore}/100` : undefined;
+  const htmlStdIssues = Array.isArray(htmlStdData?.issues) ? (htmlStdData.issues as Obs[]) : [];
+
+  const secDiagObs = (diagnostics.security_diagnostics?.verified_observations ?? null) as Obs | null;
+  const securityRisk = secDiagObs?.page_security_risk as Obs | null | undefined;
+  const secRiskScore = securityRisk?.score as number | null | undefined;
+  const secRiskBand = s(securityRisk?.risk_band || "unavailable");
+  const secRiskStatus = secRiskScore != null ? secRiskBand : "unavailable";
+  const secRiskDetail = secRiskScore != null ? `${secRiskScore}/100 · ${s(securityRisk?.confidence)} confidence` : undefined;
+  const secRiskDeductions = Array.isArray(securityRisk?.deductions) ? (securityRisk.deductions as Obs[]) : [];
+
+  return (
+    <section className="mt-6 scroll-mt-6 rounded-2xl border bg-white p-6" id="website-signals">
+      <h2 className="text-xl font-bold">Website Signals</h2>
+      <p className="mt-1 text-sm text-slate-600">Evidence-based detection of privacy policy, copyright, security headers, analytics, responsiveness, HTML standards, and security posture.</p>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <SignalCard title="Privacy Policy" status={privacyStatus} detail={privacyDetail} />
+        <SignalCard title="Copyright Year" status={copyrightStatus} detail={copyrightDetail} />
+        <SignalCard title="Security Headers" status={headerStatus} detail={headerDetail} />
+        <SignalCard title="Analytics / Tagging" status={analyticsStatus} detail={analyticsDetail} />
+        <SignalCard title="Responsiveness" status={responsiveStatus} detail={responsiveDetail} />
+        <SignalCard title="HTML Standards" status={htmlStdStatus} detail={htmlStdDetail} />
+        <SignalCard title="Security & Risk" status={secRiskStatus} detail={secRiskDetail} />
+      </div>
+      <details className="mt-4">
+        <summary className="cursor-pointer text-sm font-semibold">Technical evidence</summary>
+        <div className="mt-3 grid gap-4 text-sm">
+          {policyDetail && (
+            <div>
+              <h4 className="font-semibold">Privacy Policy</h4>
+              <dl className="mt-1 grid gap-1 sm:grid-cols-2">
+                <div><dt className="text-slate-500">Found</dt><dd>{policyDetail.found ? "Yes" : "No"}</dd></div>
+                {policyDetail.url ? <div className="sm:col-span-2"><dt className="text-slate-500">URL</dt><dd className="break-all">{s(policyDetail.url)}</dd></div> : null}
+                {policyDetail.title ? <div><dt className="text-slate-500">Title</dt><dd>{s(policyDetail.title)}</dd></div> : null}
+                <div><dt className="text-slate-500">Freshness</dt><dd className="capitalize">{label(s(policyDetail.freshness_status))}</dd></div>
+                {policyDetail.explicit_update_date ? <div><dt className="text-slate-500">Update date</dt><dd>{s(policyDetail.explicit_update_date)}</dd></div> : null}
+                {policyDetail.age_days != null ? <div><dt className="text-slate-500">Age</dt><dd>{s(policyDetail.age_days)} days</dd></div> : null}
+                {policyDetail.evidence_text ? <div className="sm:col-span-2"><dt className="text-slate-500">Evidence</dt><dd>{s(policyDetail.evidence_text)}</dd></div> : null}
+              </dl>
+            </div>
+          )}
+          {copyrightData && (
+            <div>
+              <h4 className="font-semibold">Copyright</h4>
+              <dl className="mt-1 grid gap-1 sm:grid-cols-2">
+                <div><dt className="text-slate-500">Detected</dt><dd>{copyrightData.detected ? "Yes" : "No"}</dd></div>
+                {copyrightData.raw_text ? <div><dt className="text-slate-500">Text</dt><dd>{s(copyrightData.raw_text)}</dd></div> : null}
+                {copyrightData.start_year ? <div><dt className="text-slate-500">Year range</dt><dd>{s(copyrightData.start_year)}{copyrightData.end_year !== copyrightData.start_year ? `–${s(copyrightData.end_year)}` : ""}</dd></div> : null}
+                <div><dt className="text-slate-500">Freshness</dt><dd className="capitalize">{label(s(copyrightData.freshness_status))}</dd></div>
+                {copyrightData.evidence_url ? <div className="sm:col-span-2"><dt className="text-slate-500">Evidence URL</dt><dd className="break-all">{s(copyrightData.evidence_url)}</dd></div> : null}
+              </dl>
+            </div>
+          )}
+          {matrixItems.length > 0 && (
+            <div>
+              <h4 className="font-semibold">Security Header Matrix</h4>
+              <div className="mt-2 overflow-x-auto">
+                <table className="w-full min-w-[600px] text-left text-xs">
+                  <thead><tr className="border-b"><th className="p-2">Header</th><th>Status</th><th>Value</th><th>Recommendation</th></tr></thead>
+                  <tbody>
+                    {matrixItems.map((item) => (
+                      <tr className="border-b" key={s(item.header)}>
+                        <td className="p-2 font-mono">{s(item.header)}</td>
+                        <td className="capitalize">{label(s(item.status))}</td>
+                        <td className="max-w-48 break-all">{item.observed_value ? s(item.observed_value).slice(0, 120) : "—"}</td>
+                        <td className="max-w-64">{item.recommendation ? s(item.recommendation) : "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+          {analyticsData && (
+            <div>
+              <h4 className="font-semibold">Analytics / Tagging</h4>
+              <dl className="mt-1 grid gap-1 sm:grid-cols-2">
+                <div><dt className="text-slate-500">Detected</dt><dd>{analyticsData.detected ? "Yes" : "No"}</dd></div>
+                {analyticsProviders.length > 0 && <div><dt className="text-slate-500">Providers</dt><dd>{analyticsProviders.join(", ")}</dd></div>}
+                {analyticsTech.length > 0 && <div><dt className="text-slate-500">Technologies</dt><dd>{analyticsTech.join(", ")}</dd></div>}
+                {analyticsIds.length > 0 && <div className="sm:col-span-2"><dt className="text-slate-500">Public identifiers</dt><dd className="font-mono text-xs">{analyticsIds.join(", ")}</dd></div>}
+                <div><dt className="text-slate-500">Confidence</dt><dd>{s(analyticsData.confidence)}%</dd></div>
+              </dl>
+              <p className="mt-2 text-xs text-slate-500">Detection only. No traffic, visitors, or conversion data is reported.</p>
+            </div>
+          )}
+          {htmlStdData && (
+            <div>
+              <h4 className="font-semibold">HTML Standards Validation</h4>
+              <dl className="mt-1 grid gap-1 sm:grid-cols-2">
+                <div><dt className="text-slate-500">Status</dt><dd className="capitalize">{label(htmlStdStatus)}</dd></div>
+                <div><dt className="text-slate-500">Validator</dt><dd>{s(htmlStdData.validator_name)}</dd></div>
+                {htmlStdScore != null ? <div><dt className="text-slate-500">ZuiGO HTML Standards Score</dt><dd className="font-bold">{htmlStdScore}/100</dd></div> : null}
+                <div><dt className="text-slate-500">Errors</dt><dd>{s(htmlStdData.errors_count)}</dd></div>
+                <div><dt className="text-slate-500">Warnings</dt><dd>{s(htmlStdData.warnings_count)}</dd></div>
+              </dl>
+              {htmlStdIssues.length > 0 ? (
+                <div className="mt-2 overflow-x-auto">
+                  <table className="w-full min-w-[500px] text-left text-xs">
+                    <thead><tr className="border-b"><th className="p-2">Code</th><th>Severity</th><th>Message</th></tr></thead>
+                    <tbody>
+                      {htmlStdIssues.slice(0, 20).map((issue, i) => (
+                        <tr className="border-b" key={i}>
+                          <td className="p-2 font-mono">{s(issue.code)}</td>
+                          <td className="capitalize">{s(issue.severity)}</td>
+                          <td className="max-w-80">{s(issue.message)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : null}
+              <p className="mt-2 text-xs text-slate-500">This is a ZuiGO HTML Standards Score, not an official W3C validation result.</p>
+            </div>
+          )}
+          {securityRisk && secRiskScore != null ? (
+            <div>
+              <h4 className="font-semibold">Security & Risk Score</h4>
+              <dl className="mt-1 grid gap-1 sm:grid-cols-3">
+                <div><dt className="text-slate-500">Score</dt><dd className="text-lg font-bold">{secRiskScore}/100</dd></div>
+                <div><dt className="text-slate-500">Risk Band</dt><dd className="capitalize">{label(secRiskBand)}</dd></div>
+                <div><dt className="text-slate-500">Confidence</dt><dd className="capitalize">{s(securityRisk?.confidence)}</dd></div>
+                <div><dt className="text-slate-500">Evidence Coverage</dt><dd>{s(securityRisk?.evidence_coverage)}%</dd></div>
+              </dl>
+              {secRiskDeductions.length > 0 ? (
+                <div className="mt-2 overflow-x-auto">
+                  <table className="w-full min-w-[400px] text-left text-xs">
+                    <thead><tr className="border-b"><th className="p-2">Finding</th><th>Reason</th><th>Points</th></tr></thead>
+                    <tbody>
+                      {secRiskDeductions.map((d, i) => (
+                        <tr className="border-b" key={i}>
+                          <td className="p-2 font-mono">{s(d.code)}</td>
+                          <td className="max-w-64">{s(d.reason)}</td>
+                          <td className="text-right">-{s(d.points)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : null}
+              <p className="mt-2 text-xs text-slate-500">This score reflects observable security posture only. It is not a penetration-test result and does not prove the absence of vulnerabilities.</p>
+            </div>
+          ) : null}
+        </div>
+      </details>
+    </section>
+  );
+}
+
 function DiagnosticCard({ name, diagnostic }: { name: string; diagnostic: DiagnosticGroup }) {
   const provisional =
     diagnostic.status === "partial" ||
@@ -187,60 +464,189 @@ export default function AnalysisReportPage() {
   const projectId = searchParams.get("projectId") ?? undefined;
   const websiteId = searchParams.get("websiteId") ?? undefined;
   const workflowExecutionId = searchParams.get("workflowExecutionId") ?? undefined;
+  const baselineRunId = searchParams.get("baselineRunId") ?? undefined;
   const [report, setReport] = useState<AnalysisReport | null>(null);
   const [performanceData, setPerformanceData] = useState<Record<string, unknown>[]>([]);
   const [accessibilityData, setAccessibilityData] = useState<AccessibilityData | null>(null);
   const [interpretations, setInterpretations] = useState<MetricInterpretation[]>([]);
+  const [interpretationsInterrupted, setInterpretationsInterrupted] =
+    useState(false);
+  const [interpretationsUnavailable, setInterpretationsUnavailable] =
+    useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [interruptedResources, setInterruptedResources] = useState<string[]>([]);
+  const [workflowProgress, setWorkflowProgress] = useState<WorkflowProgress | null>(
+    null,
+  );
+  const [currentReportAvailable, setCurrentReportAvailable] = useState(false);
+  const [baselineAvailable, setBaselineAvailable] = useState(false);
+  const [comparisonDataAvailable, setComparisonDataAvailable] = useState(false);
+
+  const setResourceInterrupted = useCallback(
+    (resource: string, interrupted: boolean) => {
+      setInterruptedResources((current) =>
+        interrupted
+          ? current.includes(resource)
+            ? current
+            : [...current, resource]
+          : current.filter((item) => item !== resource),
+      );
+    },
+    [],
+  );
+  const handleProgressChange = useCallback((value: WorkflowProgress) => {
+    setWorkflowProgress(value);
+  }, []);
+  const handleReportAvailabilityChange = useCallback((available: boolean) => {
+    setCurrentReportAvailable(available);
+  }, []);
+
+  useEffect(
+    () =>
+      startRetriedRequest({
+        request: () =>
+          apiRequest<AnalysisReport>(
+            `/api/v1/analysis-runs/${analysisRunId}/report`,
+          ),
+        onSuccess: (loaded) => {
+          setReport(loaded);
+          setError(null);
+          setLoading(false);
+        },
+        onConnectionChange: (interrupted) =>
+          setResourceInterrupted("analysis-report", interrupted),
+        onPermanentFailure: (requestError) => {
+          setLoading(false);
+          if (
+            workflowExecutionId &&
+            requestError instanceof ApiError &&
+            requestError.status === 404
+          ) {
+            return;
+          }
+          setError(
+            requestError instanceof Error
+              ? requestError.message
+              : "Unable to load report.",
+          );
+        },
+      }),
+    [analysisRunId, setResourceInterrupted, workflowExecutionId],
+  );
+
+  useEffect(
+    () =>
+      startRetriedRequest({
+        request: () =>
+          apiRequest<{ data?: Record<string, unknown>[] }>(
+            `/api/v1/analysis-runs/${analysisRunId}/performance`,
+          ),
+        onSuccess: (response) =>
+          setPerformanceData(response.data ?? []),
+        onConnectionChange: (interrupted) =>
+          setResourceInterrupted("performance", interrupted),
+      }),
+    [analysisRunId, setResourceInterrupted],
+  );
 
   useEffect(() => {
-    let cancelled = false;
-    void apiRequest<AnalysisReport>(`/api/v1/analysis-runs/${analysisRunId}/report`)
-      .then(async (loaded) => {
-        if (!cancelled) {
-          setReport(loaded);
-          try {
-            const interps = await apiRequest<MetricInterpretation[]>(`/api/v1/websites/${loaded.website.id}/metric-interpretations`);
-            if (!cancelled) setInterpretations(interps);
-          } catch (e) {
-            console.error("Failed to load interpretations", e);
-          }
+    if (!report) return;
+    const stopInterpretations = startRetriedRequest({
+      request: () =>
+        apiRequest<MetricInterpretation[]>(
+          `/api/v1/websites/${report.website.id}/metric-interpretations`,
+        ),
+      onSuccess: (loaded) => {
+        setInterpretations(loaded);
+        setInterpretationsInterrupted(false);
+        setInterpretationsUnavailable(false);
+      },
+      onConnectionChange: setInterpretationsInterrupted,
+      onPermanentFailure: () => {
+        setInterpretationsInterrupted(false);
+        setInterpretationsUnavailable(true);
+      },
+    });
+    const stopAccessibility = startRetriedRequest({
+      request: () =>
+        apiRequest<AccessibilityData>(
+          `/api/v1/websites/${report.website.id}/accessibility`,
+        ),
+      onSuccess: setAccessibilityData,
+      onConnectionChange: (interrupted) =>
+        setResourceInterrupted("accessibility", interrupted),
+    });
+    return () => {
+      stopInterpretations();
+      stopAccessibility();
+    };
+  }, [report, setResourceInterrupted]);
 
-          try {
-            const accData = await apiRequest<AccessibilityData>(`/api/v1/websites/${loaded.website.id}/accessibility`);
-            if (!cancelled) setAccessibilityData(accData);
-          } catch (e) {
-            console.error("Failed to load accessibility data", e);
-          }
-        }
-      })
-      .catch((requestError: unknown) => {
-        if (!cancelled) setError(requestError instanceof Error ? requestError.message : "Unable to load report.");
-      })
-      .finally(() => { if (!cancelled) setLoading(false); });
+  useEffect(() => {
+    if (!baselineRunId) return;
+    return startRetriedRequest({
+      request: () => analysisComparisonApi.settings(baselineRunId),
+      onSuccess: (settings) =>
+        setBaselineAvailable(
+          settings.baseline_analysis_run_id === baselineRunId,
+        ),
+      onConnectionChange: (interrupted) =>
+        setResourceInterrupted("comparison-baseline", interrupted),
+      onPermanentFailure: () => setBaselineAvailable(false),
+    });
+  }, [baselineRunId, setResourceInterrupted]);
 
-    if (analysisRunId) {
-      void apiRequest<{ data?: Record<string, unknown>[] }>(`/api/v1/analysis-runs/${analysisRunId}/performance`)
-        .then((res) => { if (!cancelled) setPerformanceData((res.data || []) as Record<string, unknown>[]); })
-        .catch(console.error);
+  const comparisonTerminal = Boolean(
+    workflowProgress &&
+      ["completed", "partial"].includes(workflowProgress.status),
+  );
+  const essentialConnectionInterrupted =
+    interruptedResources.includes("analysis-report");
 
-
-      // Try fetching accessibility from run (if supported, else fallback to website latest, but run is safer)
-      void apiRequest<{ data?: unknown[] }>(`/api/v1/analysis-runs/${analysisRunId}/accessibility`)
-        .then((res) => {
-            // In a real app we might fetch the specific audit and its findings here.
-            // The run endpoint returns raw audits for now. We might need the website endpoint to get the rich payload with findings.
-            if (!cancelled && res.data && res.data.length > 0) {
-               // We have an audit, let's fetch the full data using the website endpoint for now since that's what we built
-               return;
-            }
-        })
-        .catch(console.error);
+  useEffect(() => {
+    if (
+      !baselineRunId ||
+      !baselineAvailable ||
+      !comparisonTerminal ||
+      !currentReportAvailable
+    ) {
+      return;
     }
-
-    return () => { cancelled = true; };
-  }, [analysisRunId]);
+    return startRetriedRequest({
+      request: async () => {
+        try {
+          return await analysisComparisonApi.detail(
+            analysisRunId,
+            baselineRunId,
+          );
+        } catch (requestError) {
+          if (!(requestError instanceof ApiError) || requestError.status !== 404) {
+            throw requestError;
+          }
+          return analysisComparisonApi.generate(
+            analysisRunId,
+            baselineRunId,
+            `comparison-${analysisRunId}-${baselineRunId}`,
+          );
+        }
+      },
+      onSuccess: (comparison) =>
+        setComparisonDataAvailable(
+          ["completed", "partial"].includes(comparison.status),
+        ),
+      onConnectionChange: (interrupted) =>
+        setResourceInterrupted("comparison-data", interrupted),
+      onPermanentFailure: () => setComparisonDataAvailable(false),
+    });
+  }, [
+    analysisRunId,
+    baselineAvailable,
+    baselineRunId,
+    comparisonTerminal,
+    currentReportAvailable,
+    setResourceInterrupted,
+  ]);
 
   if (!report && websiteId && workflowExecutionId) {
     return (
@@ -253,6 +659,11 @@ export default function AnalysisReportPage() {
           Real evidence is being collected from the submitted website. No prepared
           demo evidence is used in this analysis.
         </p>
+        {essentialConnectionInterrupted && (
+          <p className="mt-4 text-sm text-amber-800" role="status">
+            Connection interrupted — retrying
+          </p>
+        )}
         {loading && <p className="mt-4" role="status">Loading analysis progress…</p>}
         {error && (
           <p className="mt-4 text-amber-800" role="status">
@@ -262,6 +673,8 @@ export default function AnalysisReportPage() {
         )}
         <ReportDeliveryPanel
           analysisRunId={analysisRunId}
+          onProgressChange={handleProgressChange}
+          onReportAvailabilityChange={handleReportAvailabilityChange}
           projectId={projectId}
           showStartAction={false}
           websiteId={websiteId}
@@ -288,6 +701,13 @@ export default function AnalysisReportPage() {
     ? report.lighthouse_metrics.lighthouse_audit_breakdown as Array<Record<string, unknown>>
     : [];
   const technology = report.playwright_measurements.technology_indicators;
+  const comparisonReady = Boolean(
+    baselineRunId &&
+      baselineAvailable &&
+      comparisonTerminal &&
+      currentReportAvailable &&
+      comparisonDataAvailable,
+  );
 
   return (
     <main className="mx-auto min-h-screen max-w-6xl px-6 py-12">
@@ -295,25 +715,82 @@ export default function AnalysisReportPage() {
       <header className="mt-6 rounded-2xl bg-slate-950 p-7 text-white">
         <h1 className="text-3xl font-bold">{report.website.name || "Website analysis"}</h1>
         <dl className="mt-5 grid gap-3 text-sm sm:grid-cols-2">
-          <div><dt className="text-slate-400">Analysis Run ID</dt><dd className="flex items-center gap-2 break-all">{report.analysis_run_id}<CopyId value={report.analysis_run_id} /></dd></div>
-          <div><dt className="text-slate-400">Report ID</dt><dd className="flex items-center gap-2 break-all">{report.report_id}<CopyId value={report.report_id} /></dd></div>
           <div><dt className="text-slate-400">Requested URL</dt><dd className="break-all">{report.result.requested_url}</dd></div>
           <div><dt className="text-slate-400">Final URL</dt><dd className="break-all">{report.result.final_url}</dd></div>
           <div><dt className="text-slate-400">Analysis date</dt><dd>{new Date(report.result.analysis_completed_at).toLocaleString()}</dd></div>
           <div><dt className="text-slate-400">Status</dt><dd className="capitalize">{report.analysis_status}</dd></div>
         </dl>
+        <details className="mt-5 rounded-lg border border-slate-700 p-3">
+          <summary className="cursor-pointer text-sm font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white">
+            Technical identifiers
+          </summary>
+          <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
+            <div><dt className="text-slate-400">Analysis run</dt><dd className="flex items-center gap-2 break-all">{report.analysis_run_id}<CopyId value={report.analysis_run_id} /></dd></div>
+            <div><dt className="text-slate-400">Legacy report</dt><dd className="flex items-center gap-2 break-all">{report.report_id}<CopyId value={report.report_id} /></dd></div>
+          </dl>
+        </details>
       </header>
 
-      <nav aria-label="Report sections" className="mt-4 rounded-xl border bg-white p-3">
-        <ul className="flex flex-wrap gap-x-5 gap-y-2 text-sm font-semibold">
-          <li><a className="underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700" href="#score-overview">Score overview</a></li>
-          <li><a className="underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700" href="#verified-diagnostics">Verified diagnostics</a></li>
-          <li><a className="underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700" href={`#site-diagnostics-${report.website.id}`}>Site-wide diagnostics</a></li>
-          <li><a className="underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700" href={`#agent-execution-${report.website.id}`}>Agent execution</a></li>
-          <li><a className="underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700" href={`#scoring-intelligence-${report.website.id}`}>Score explanation</a></li>
-          <li><a className="underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700" href={`#report-delivery-${report.website.id}`}>Final reports and exports</a></li>
-        </ul>
-      </nav>
+      {essentialConnectionInterrupted && (
+        <p className="mt-4 text-sm text-amber-800" role="status">
+          Connection interrupted — retrying
+        </p>
+      )}
+
+      {baselineRunId && (
+        <section className="mt-6 rounded-2xl border border-emerald-300 bg-emerald-50 p-6">
+          <h2 className="text-xl font-bold">
+            {comparisonReady
+              ? "Reanalysis evidence is ready"
+              : comparisonTerminal
+                ? "Preparing comparison evidence"
+                : "Reanalysis in progress"}
+          </h2>
+          <p className="mt-2 text-sm text-slate-700">
+            {comparisonReady
+              ? "The current run is terminal, its report evidence is available, and the preserved baseline is ready."
+              : comparisonTerminal
+                ? "The run has finished, but comparison evidence is not available yet."
+                : "Comparison becomes available after the new run finishes and its evidence is retained."}
+          </p>
+          {comparisonReady && (
+            <Link
+              className="mt-4 inline-block rounded-lg bg-emerald-800 px-4 py-2 font-semibold text-white"
+              href={`/analysis-runs/${analysisRunId}/compare/${baselineRunId}`}
+            >
+              Compare with baseline
+            </Link>
+          )}
+        </section>
+      )}
+
+      <ReanalysisComparisonPanel
+        analysisRunId={analysisRunId}
+        projectId={projectId}
+      />
+
+      <section className="mt-8" id={`report-delivery-${report.website.id}`}>
+        <h2 className="mb-4 text-2xl font-bold">Final reports and exports</h2>
+        <ReportDeliveryPanel
+          analysisRunId={analysisRunId}
+          onProgressChange={handleProgressChange}
+          onReportAvailabilityChange={handleReportAvailabilityChange}
+          projectId={projectId}
+          showStartAction={false}
+          websiteId={report.website.id}
+          workflowExecutionId={workflowExecutionId}
+        />
+      </section>
+
+      <details className="mt-8 rounded-2xl border bg-slate-50 p-5">
+        <summary className="cursor-pointer text-lg font-bold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700">
+          Additional technical evidence
+        </summary>
+        <div className="mt-5">
+
+      <section className="rounded-2xl border bg-white p-6">
+        <ExtractedContentPanel analysisRunId={analysisRunId} />
+      </section>
 
       {report.interpretation && (
         <section className="mt-6 grid gap-6">
@@ -331,6 +808,16 @@ export default function AnalysisReportPage() {
       )}
 
       <section className="mt-6 grid scroll-mt-6 gap-4 md:grid-cols-3" id="score-overview">
+        {(interpretationsInterrupted || interpretationsUnavailable) && (
+          <p
+            className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 md:col-span-3"
+            role="status"
+          >
+            {interpretationsInterrupted
+              ? "Metric interpretation help is temporarily unavailable — retrying. Scores and report evidence remain available."
+              : "Metric interpretation help is unavailable for this report. Scores and report evidence remain available."}
+          </p>
+        )}
         <div className="rounded-2xl border bg-white p-6">
           <div className="flex items-start justify-between">
             <p className="text-sm text-slate-500">Overall score</p>
@@ -369,6 +856,8 @@ export default function AnalysisReportPage() {
       <section className="mt-6">
         <AccessibilityIntelligence accessibilityData={accessibilityData} />
       </section>
+
+      <WebsiteSignalsSection diagnostics={report.diagnostics} />
 
       <section className="mt-6 grid scroll-mt-6 gap-5" id="verified-diagnostics">
         <h2 className="text-2xl font-bold">Verified diagnostics</h2>
@@ -415,25 +904,26 @@ export default function AnalysisReportPage() {
         />
       </div>
 
-      <AgentExecutionPanel
-        analysisRunId={analysisRunId}
-        websiteId={report.website.id}
-      />
-      <ScoringIntelligencePanel
-        analysisRunId={analysisRunId}
-        websiteId={report.website.id}
-      />
-      <ReportDeliveryPanel
-        analysisRunId={analysisRunId}
-        projectId={projectId}
-        showStartAction={false}
-        websiteId={report.website.id}
-        workflowExecutionId={workflowExecutionId}
-      />
+      <section className="mt-6" id={`agent-execution-${report.website.id}`}>
+        <h2 className="mb-4 text-2xl font-bold">Agent execution</h2>
+        <AgentExecutionPanel
+          analysisRunId={analysisRunId}
+          websiteId={report.website.id}
+        />
+      </section>
+      <section className="mt-6" id={`scoring-intelligence-${report.website.id}`}>
+        <h2 className="mb-4 text-2xl font-bold">Score explanation</h2>
+        <ScoringIntelligencePanel
+          analysisRunId={analysisRunId}
+          websiteId={report.website.id}
+        />
+      </section>
 
       <div className="mt-8">
         <PerformanceIntelligence data={performanceData as unknown as { id: string; metric_id: string; evidence_type: string; raw_value: number }[]} />
       </div>
+        </div>
+      </details>
     </main>
   );
 }

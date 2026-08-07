@@ -387,3 +387,32 @@ def get_analysis_report(analysis_run_id: uuid.UUID, db: DatabaseSession) -> Anal
         interpretation=analysis_run.interpretation,
         diagnostics={item.group_name: item.payload for item in analysis_run.diagnostics},
     )
+
+
+@router.get("/analysis-runs/{analysis_run_id}/extracted-content")
+def get_extracted_content(analysis_run_id: uuid.UUID, db: DatabaseSession) -> dict[str, Any]:
+    analysis_run = db.scalar(
+        select(AnalysisRun)
+        .options(selectinload(AnalysisRun.result))
+        .where(AnalysisRun.id == analysis_run_id)
+    )
+    if analysis_run is None:
+        raise ApplicationError(
+            code="ANALYSIS_RUN_NOT_FOUND",
+            message="Analysis run not found.",
+            status_code=status.HTTP_404_NOT_FOUND,
+        )
+    if analysis_run.result is None:
+        raise ApplicationError(
+            code="ANALYSIS_RESULTS_NOT_AVAILABLE",
+            message="Analysis results are not available.",
+            status_code=status.HTTP_409_CONFLICT,
+        )
+    content = analysis_run.result.extracted_content
+    if not content:
+        raise ApplicationError(
+            code="EXTRACTED_CONTENT_NOT_AVAILABLE",
+            message="Extracted content is not available for this analysis run.",
+            status_code=status.HTTP_404_NOT_FOUND,
+        )
+    return content

@@ -22,6 +22,7 @@ from app.models.agent_platform import (
     AgentRun,
     AgentStep,
 )
+from app.models.analysis_comparison import AnalysisComparison, AnalysisComparisonArtifact
 from app.models.analysis_diagnostic import AnalysisDiagnostic
 from app.models.analysis_finding import AnalysisFinding, FindingSeverity, FindingSource
 from app.models.analysis_interpretation import AnalysisInterpretation
@@ -90,6 +91,8 @@ __all__ = [
     "AgentRun",
     "AgentStep",
     "AnalysisDiagnostic",
+    "AnalysisComparison",
+    "AnalysisComparisonArtifact",
     "AnalysisFinding",
     "AnalysisInterpretation",
     "AnalysisResult",

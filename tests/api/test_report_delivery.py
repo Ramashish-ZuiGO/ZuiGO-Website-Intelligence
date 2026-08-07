@@ -16,14 +16,17 @@ from app.models import (
     AnalysisResult,
     AnalysisRun,
     AnalysisScore,
+    DiscoveryRun,
     FindingSeverity,
     FindingSource,
+    PageAnalysisRun,
     Project,
     ReportExecution,
     SiteDiagnosticExecution,
     SiteDiagnosticFinding,
     SiteDiagnosticOccurrence,
     Website,
+    WebsitePage,
 )
 from app.services.priority import PRIORITY_FORMULA_VERSION
 from app.services.report_delivery import (
@@ -438,6 +441,99 @@ def test_report_idempotency_history_sections_fallback_and_immutability(
         assert db.query(ReportExecution).count() == 2
 
 
+def test_partial_discovery_never_claims_full_site_coverage(
+    report_api: tuple[
+        TestClient,
+        sessionmaker[Session],
+        uuid.UUID,
+        uuid.UUID,
+        uuid.UUID,
+        list[tuple[str, str, int]],
+    ],
+) -> None:
+    _client, factory, _project_id, website_id, run_id, _dispatched = report_api
+    with factory() as db:
+        workflow = db.scalar(select(AgentExecution).where(AgentExecution.analysis_run_id == run_id))
+        assert workflow is not None
+        now = datetime.now(UTC)
+        discovery = DiscoveryRun(
+            website_id=website_id,
+            status="partial",
+            progress_percent=100,
+            current_stage="completed",
+            urls_discovered=1,
+            urls_unique=1,
+            urls_eligible=1,
+            failure_code="SITEMAP_FETCH_FAILED",
+            failure_message="A sitemap could not be processed after bounded retries.",
+            completed_at=now,
+        )
+        db.add(discovery)
+        db.flush()
+        page = WebsitePage(
+            website_id=website_id,
+            normalized_url="https://report.test/",
+            original_url="https://report.test/",
+            final_url="https://report.test/",
+            page_type="homepage",
+            discovery_source="submitted_url",
+            discovery_evidence=[{"source": "submitted_url"}],
+            crawl_depth=0,
+            origin_relation="same_origin",
+            robots_status="allowed",
+            eligibility_status="eligible",
+            last_discovery_run_id=discovery.id,
+            first_discovered_at=now,
+            last_discovered_at=now,
+        )
+        page_execution_id = uuid.uuid4()
+        page_run = PageAnalysisRun(
+            website_page=page,
+            discovery_run_id=discovery.id,
+            page_analysis_execution_id=page_execution_id,
+            analysis_level=1,
+            status="completed",
+            analysis_started_at=now,
+            analysis_completed_at=now,
+            requested_url=page.normalized_url,
+            final_url=page.normalized_url,
+            http_status_code=200,
+        )
+        workflow.structured_input = {
+            **workflow.structured_input,
+            "discovery_run_id": str(discovery.id),
+            "page_analysis_execution_id": str(page_execution_id),
+        }
+        db.add_all([page, page_run])
+        db.commit()
+
+        generated, created = generate_report(
+            db,
+            run_id,
+            idempotency_key="partial-discovery-report",
+        )
+
+        assert created is True
+        assert generated.status == "partial"
+        assert generated.snapshot is not None
+        coverage = generated.snapshot.snapshot_payload["page_coverage"]
+        assert coverage["discovery_completeness"] == "partial"
+        assert coverage["coverage_numerator"] == 1
+        assert coverage["coverage_denominator"] == 1
+        assert coverage["analysed_page_coverage_percentage"] == 100.0
+        assert coverage["full_site_coverage_percentage"] is None
+        assert coverage["full_site_coverage_confidence"] == "not_established"
+        executive = next(
+            item
+            for item in generated.snapshot.snapshot_payload["sections"]
+            if item["section_key"] == "executive_summary"
+        )
+        assert any(
+            "full-site coverage is not established" in item
+            for item in executive["content"]["important_limitations"]
+        )
+
+
 def test_html_pdf_json_artifacts_checksums_safety_and_repeatability(
     report_api: tuple[
         TestClient,
@@ -517,6 +613,8 @@ def test_detailed_finding_contract_occurrences_attribution_and_links(
         "scope",
     } <= set(finding)
     assert finding["exact_occurrences"][0]["normalized_url"] == "https://report.test/"
+    assert finding["exact_occurrences"][0]["final_url"] == "https://report.test/"
+    assert finding["exact_occurrences"][0]["collection_status"] != "Unavailable"
     assert finding["exact_occurrences"][0]["selector"] == "head > link[rel=stylesheet]"
     assert finding["exact_occurrences"][0]["analysis_provider"] == "lighthouse"
     assert finding["business_impact"].startswith("No quantified business impact")
@@ -541,6 +639,13 @@ def test_detailed_finding_contract_occurrences_attribution_and_links(
         "remediation_agent",
         "report_agent",
     }
+    repository_agent = next(
+        item
+        for item in sections["multi_agent_execution"]["agents"]
+        if item["agent_id"] == "repository_intelligence_agent"
+    )
+    assert repository_agent["status"] == "not_applicable"
+    assert repository_agent["status_explanation"] == ("Not applicable — no repository connected")
     score_links = {
         finding_id
         for category in sections["scores"]["categories"]
@@ -577,6 +682,8 @@ def test_report_apis_filters_download_headers_and_errors(
             "workflow_execution_id": str(workflow_id),
         },
     )
+    assert created.status_code == 201, created.text
+    assert 0 <= created.json()["confidence_percent"] < 100
     repeated = client.post(
         f"/api/v1/analysis-runs/{run_id}/reports/generate",
         json={

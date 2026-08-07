@@ -61,7 +61,9 @@ def test_primary_journey_progress_history_and_export_states() -> None:
         "safe_error_summaries",
     ):
         assert text in component
-    assert "setInterval" in component
+    assert "window.setTimeout" in component
+    assert "Math.min(15_000" in component
+    assert "window.clearTimeout" in component
     assert "PAGE_SIZE" in component
 
 
@@ -71,16 +73,17 @@ def test_report_accessibility_safe_rendering_and_non_colour_status() -> None:
         'role="progressbar"',
         'aria-live="polite"',
         'role="alert"',
-        'aria-label="Final report sections"',
+        'aria-label="Report sections"',
         "<nav",
         "<article",
         "<section",
         "<h2",
         "<h3",
         "focus-visible:outline",
-        "SafeStructuredValue",
+        "formatHumanTimestamp",
         "statusLabel",
         "Evidence references",
+        "Technical evidence references",
     ):
         assert contract in component
     assert "dangerouslySetInnerHTML" not in component
@@ -99,6 +102,7 @@ def test_report_finding_filters_navigation_and_agent_attribution() -> None:
         'label="Scope"',
         'label="Evidence state"',
         "Exact affected locations",
+        "Affected browser",
         "Technical explanation",
         "Business impact",
         "Recommended remediation",
@@ -108,8 +112,8 @@ def test_report_finding_filters_navigation_and_agent_attribution() -> None:
         "Section agent attribution",
         "Agents and evidence production",
         "Unavailable tools/providers",
-        "href={`#finding-${findingId}`}",
-        "collectFindingIds",
+        "finding-${finding.finding_id}",
+        "friendlyAgentName",
     ):
         assert contract in component
     assert ".slice(0, 50)" not in component

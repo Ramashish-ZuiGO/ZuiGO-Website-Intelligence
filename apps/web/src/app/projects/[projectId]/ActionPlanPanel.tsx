@@ -13,7 +13,7 @@ import type {
   RepositoryConnection,
 } from "@/lib/types";
 
-import { AccessibleExplanation } from "@/components/metrics/AccessibleExplanation";
+import { ConceptInfoButton } from "@/components/metrics/ConceptInfoButton";
 import { MetricInfoButton } from "@/components/metrics/MetricInfoButton";
 import { ScoreValue } from "@/components/metrics/ScoreValue";
 import { SiteDiagnosticsReference } from "@/components/diagnostics/SiteDiagnosticsPanel";
@@ -55,12 +55,20 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-function SummaryCard({ label, value, explanation }: { label: string; value: string | number; explanation?: string }) {
+function SummaryCard({
+  label,
+  value,
+  conceptId,
+}: {
+  label: string;
+  value: string | number;
+  conceptId: string;
+}) {
   return (
     <div className="rounded-xl border bg-white p-4">
       <p className="text-xs text-slate-500 flex items-center justify-between">
         {label}
-        {explanation && <AccessibleExplanation title={label} explanation={explanation} />}
+        <ConceptInfoButton conceptId={conceptId} title={label} />
       </p>
       <p className="mt-1 text-2xl font-bold">{value}</p>
     </div>
@@ -299,27 +307,27 @@ export function ActionPlanPanel({ websiteId, projectId }: ActionPlanPanelProps) 
             <SummaryCard
               label="Open actions"
               value={summary.total_open}
-              explanation="Actions that have not yet been addressed."
+              conceptId="action_open"
             />
             <SummaryCard
               label="Critical"
               value={summary.critical_actions}
-              explanation="Actions with critical severity requiring immediate attention."
+              conceptId="action_critical"
             />
             <SummaryCard
               label="High priority"
               value={summary.high_priority_actions}
-              explanation={`Actions with priority score >= 70. Average priority: ${summary.average_priority ?? "—"}/100`}
+              conceptId="action_high_priority"
             />
             <SummaryCard
               label="Pages to fix"
               value={summary.pages_requiring_correction}
-              explanation="Unique pages with open or in-progress actions."
+              conceptId="action_affected_pages"
             />
             <SummaryCard
               label="Resolved"
               value={summary.total_resolved}
-              explanation="Actions that have been completed and verified."
+              conceptId="action_completed"
             />
           </div>
 
@@ -377,7 +385,7 @@ export function ActionPlanPanel({ websiteId, projectId }: ActionPlanPanelProps) 
               <table className="w-full min-w-[700px] text-left text-xs">
                 <thead>
                   <tr className="border-b">
-                    <th className="p-2 flex items-center gap-1">Issue <AccessibleExplanation title="Action Grouping" explanation="Action items are grouped by their issue title, category, and exact correction so they can be addressed together across multiple pages." /></th>
+                    <th className="p-2 flex items-center gap-1">Issue <ConceptInfoButton conceptId="action_grouping" title="Action Grouping" /></th>
                     <th>Category</th>
                     <th>Severity</th>
                     <th className="flex items-center gap-1">Priority <MetricInfoButton metricId="priority_score" /></th>

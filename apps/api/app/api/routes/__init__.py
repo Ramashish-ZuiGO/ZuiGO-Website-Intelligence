@@ -1,6 +1,7 @@
 from app.api.routes.accessibility import router as accessibility_router
 from app.api.routes.action_plan import router as action_plan_router
 from app.api.routes.agent_platform import router as agent_platform_router
+from app.api.routes.analysis_comparison import router as analysis_comparison_router
 from app.api.routes.analysis_runs import router as analysis_runs_router
 from app.api.routes.discovery import router as discovery_router
 from app.api.routes.health import router as health_router
@@ -20,6 +21,7 @@ __all__ = [
     "action_plan_router",
     "agent_platform_router",
     "analysis_runs_router",
+    "analysis_comparison_router",
     "discovery_router",
     "health_router",
     "page_analysis_router",

@@ -25,6 +25,7 @@ class AnalysisRunRead(BaseModel):
 
     id: uuid.UUID
     website_id: uuid.UUID
+    baseline_analysis_run_id: uuid.UUID | None
     status: AnalysisStatus
     progress_percent: int
     current_step: str | None

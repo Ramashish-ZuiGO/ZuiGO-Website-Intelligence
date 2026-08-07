@@ -32,6 +32,7 @@ class AnalysisResult(Base):
     analysis_completed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     raw_lighthouse_data: Mapped[dict[str, Any]] = mapped_column(json_type, nullable=False)
     raw_playwright_data: Mapped[dict[str, Any]] = mapped_column(json_type, nullable=False)
+    extracted_content: Mapped[dict[str, Any] | None] = mapped_column(json_type, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

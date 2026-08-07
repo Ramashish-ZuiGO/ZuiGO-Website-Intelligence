@@ -106,6 +106,33 @@ def _page(
     }
 
 
+def _presentation_inventory_from_snapshot(
+    raw_inventory: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not raw_inventory:
+        return []
+    result = []
+    for item in raw_inventory:
+        if item.get("eligibility") != "eligible":
+            continue
+        engines = item.get("browser_engines_tested", [])
+        labels = [e.title() for e in engines] if engines else []
+        result.append(
+            {
+                "url": item.get("url", ""),
+                "title": item.get("page_title") or item.get("url", ""),
+                "page_type": item.get("page_type") or "Page",
+                "http_status": item.get("http_status"),
+                "analysis_status": item.get("analysis_status", "unknown"),
+                "browsers_tested": labels,
+                "issue_count": item.get("issue_count", 0),
+                "highest_severity": item.get("highest_severity", "None"),
+                "evidence_coverage_percentage": item.get("evidence_coverage"),
+            }
+        )
+    return result
+
+
 def _page_inventory() -> list[dict[str, Any]]:
     return [
         _page("/", "Demo Home", "Home", "analysed", issue_count=2, severity="Critical"),
@@ -377,8 +404,49 @@ def _all_findings(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
     return findings
 
 
+def _coverage_from_inventory(
+    inventory: list[dict[str, Any]],
+    generated_at: str,
+) -> dict[str, Any]:
+    total = len(inventory)
+    analysed = sum(1 for p in inventory if p["analysis_status"] == "analysed")
+    failed = sum(1 for p in inventory if p["analysis_status"] == "failed")
+    skipped = sum(1 for p in inventory if p["analysis_status"] == "skipped")
+    excluded = sum(1 for p in inventory if p["analysis_status"] == "excluded")
+    redirected = sum(1 for p in inventory if p["analysis_status"] == "redirected")
+    dup = sum(1 for p in inventory if p["analysis_status"] == "duplicate_normalized")
+    scheduled = analysed + failed + skipped
+    visited = analysed + failed
+    incomplete = sum(
+        1
+        for p in inventory
+        if p.get("evidence_coverage_percentage") is not None
+        and p["evidence_coverage_percentage"] < 100
+    )
+    denominator = scheduled or total
+    return {
+        "total_urls_discovered": total,
+        "total_pages_scheduled": scheduled,
+        "total_pages_visited": visited,
+        "successfully_analysed_pages": analysed,
+        "failed_pages": failed,
+        "skipped_pages": skipped,
+        "excluded_pages": excluded,
+        "redirected_pages": redirected,
+        "duplicate_normalized_pages": dup,
+        "pages_with_incomplete_evidence": incomplete,
+        "coverage_numerator": analysed,
+        "coverage_denominator": denominator,
+        "coverage_percentage": (round(analysed / denominator * 100, 2) if denominator else None),
+        "started_at": None,
+        "completed_at": generated_at,
+        "duration_seconds": 180,
+    }
+
+
 def enrich_presentation_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
-    inventory = _page_inventory()
+    real_inventory = snapshot.get("page_inventory", [])
+    inventory = _presentation_inventory_from_snapshot(real_inventory) or _page_inventory()
     compatibility = _compatibility(inventory)
     findings = _all_findings(snapshot)
     occurrence_section = next(
@@ -430,31 +498,37 @@ def enrich_presentation_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
             },
         )
         action.setdefault("affected_browsers", related["browser_engine_affected"])
-    coverage = {
-        "total_urls_discovered": 12,
-        "total_pages_scheduled": 10,
-        "total_pages_visited": 9,
-        "successfully_analysed_pages": 7,
-        "failed_pages": 1,
-        "skipped_pages": 1,
-        "excluded_pages": 1,
-        "redirected_pages": 1,
-        "duplicate_normalized_pages": 1,
-        "pages_with_incomplete_evidence": 1,
-        "coverage_numerator": 7,
-        "coverage_denominator": 10,
-        "coverage_percentage": 70.0,
-        "started_at": "2026-07-28T08:57:00+00:00",
-        "completed_at": snapshot["generated_at"],
-        "duration_seconds": 180,
-        "definitions": {
-            "discovered": "A URL was found and retained in the inventory.",
-            "visited": "A navigation attempt produced response evidence.",
-            "analysed": "A page-analysis run completed with retained evidence.",
-            "failed": "Analysis was attempted but did not complete successfully.",
-            "excluded": "A URL was intentionally outside the eligible analysis set.",
-            "unavailable": "Required evidence could not be collected and is not treated as passed.",
-        },
+    real_coverage = snapshot.get("page_coverage") or {}
+    if real_coverage.get("total_urls_discovered"):
+        coverage = {
+            "total_urls_discovered": real_coverage["total_urls_discovered"],
+            "total_pages_scheduled": real_coverage.get("total_pages_scheduled", 0),
+            "total_pages_visited": real_coverage.get("total_pages_visited", 0),
+            "successfully_analysed_pages": real_coverage.get("successfully_analysed_pages", 0),
+            "failed_pages": real_coverage.get("failed_pages", 0),
+            "skipped_pages": real_coverage.get("skipped_pages", 0),
+            "excluded_pages": real_coverage.get("excluded_pages", 0),
+            "redirected_pages": real_coverage.get("redirected_pages", 0),
+            "duplicate_normalized_pages": real_coverage.get("duplicate_normalized_pages", 0),
+            "pages_with_incomplete_evidence": real_coverage.get(
+                "pages_with_incomplete_evidence", 0
+            ),
+            "coverage_numerator": real_coverage.get("coverage_numerator", 0),
+            "coverage_denominator": real_coverage.get("coverage_denominator", 0),
+            "coverage_percentage": real_coverage.get("coverage_percentage"),
+            "started_at": real_coverage.get("started_at"),
+            "completed_at": real_coverage.get("completed_at", snapshot["generated_at"]),
+            "duration_seconds": real_coverage.get("duration_seconds"),
+        }
+    else:
+        coverage = _coverage_from_inventory(inventory, snapshot["generated_at"])
+    coverage["definitions"] = {
+        "discovered": "A URL was found and retained in the inventory.",
+        "visited": "A navigation attempt produced response evidence.",
+        "analysed": "A page-analysis run completed with retained evidence.",
+        "failed": "Analysis was attempted but did not complete successfully.",
+        "excluded": "A URL was intentionally outside the eligible analysis set.",
+        "unavailable": ("Required evidence could not be collected and is not treated as passed."),
     }
     presentation_findings = []
     for finding in findings[:PRESENTATION_FINDING_LIMIT]:
@@ -494,12 +568,21 @@ def enrich_presentation_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
                 "all_affected_pages": occurrences,
             }
         )
+    scores_section = next(
+        (s for s in snapshot["sections"] if s["section_key"] == "scores"),
+        None,
+    )
+    raw_categories = scores_section["content"].get("categories", []) if scores_section else []
     category_scores = [
-        {"label": "Performance", "score": 68},
-        {"label": "Accessibility", "score": 74},
-        {"label": "Best Practices", "score": 78},
-        {"label": "SEO and Content", "score": 91},
-        {"label": "Technical Quality", "score": 73},
+        {
+            "label": cat["category_id"].replace("_", " ").title(),
+            "score": (
+                cat["score"]
+                if cat.get("evidence_available", True) and cat.get("score") is not None
+                else "N/A"
+            ),
+        }
+        for cat in raw_categories
     ]
     agents = [
         {
@@ -523,20 +606,21 @@ def enrich_presentation_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
         "top_findings": presentation_findings,
         "top_actions": actions,
         "agents": agents,
-        "overall_score": 76,
-        "score_confidence_percent": 88,
+        "overall_score": snapshot.get("overall_score"),
+        "score_confidence_percent": snapshot.get("confidence_percent"),
         "report_evidence_coverage": snapshot["evidence_coverage"],
         "conclusion": (
-            "The prepared site is functional but needs immediate checkout, transport-security, "
-            "accessibility, and metadata improvements. Address the first five actions, then "
-            "retest the same pages and browser engines."
+            "Address the top priority actions, then retest the same pages and "
+            "browser engines to verify improvements."
         ),
-        "limitations": [
-            "All demonstration evidence is synthetic and local.",
-            "Browser results describe Playwright engines, not every branded browser version.",
-            "CrUX field evidence is unavailable and is not treated as a passed check.",
-            "Automated accessibility checks do not establish complete compliance.",
-        ],
+        "limitations": snapshot.get(
+            "limitations",
+            [
+                "Browser results describe Playwright engines, not every branded browser version.",
+                "CrUX field evidence is unavailable and is not treated as a passed check.",
+                "Automated accessibility checks do not establish complete compliance.",
+            ],
+        ),
     }
     snapshot["technical_appendix"] = {
         "page_inventory": inventory,
@@ -591,8 +675,19 @@ def _safe_presentation_lines(snapshot: dict[str, Any], title: str) -> list[str]:
             f"Excluded: {coverage['excluded_pages']} | Redirected: {coverage['redirected_pages']}",
             f"Duplicate-normalised: {coverage['duplicate_normalized_pages']}",
             f"Incomplete evidence: {coverage['pages_with_incomplete_evidence']}",
-            "Page-analysis coverage: 7/10 (70.0%)",
-            "Analysis duration: 3 minutes",
+            (
+                f"Page-analysis coverage: "
+                f"{coverage['coverage_numerator']}/{coverage['coverage_denominator']}"
+                f" ({coverage['coverage_percentage']:.1f}%)"
+                if coverage["coverage_percentage"] is not None
+                else (
+                    f"Page-analysis coverage: "
+                    f"{coverage['coverage_numerator']}/{coverage['coverage_denominator']}"
+                )
+            ),
+            f"Analysis duration: {(coverage['duration_seconds'] or 0) // 60} minutes"
+            if coverage.get("duration_seconds")
+            else "Analysis duration: not recorded",
         ]
     if title == "Browser Compatibility":
         lines = [
@@ -612,9 +707,22 @@ def _safe_presentation_lines(snapshot: dict[str, Any], title: str) -> list[str]:
         )
         return lines
     if title == "Overall and Category Scores":
+        overall = data.get("overall_score")
+        conf = data.get("score_confidence_percent")
+        overall_str = f"{overall}/100" if overall is not None else "Unavailable"
+        conf_str = f"{conf}%" if conf is not None else "Unavailable"
         return [
-            "Overall score: 76/100. Confidence: 88%. Confidence is not part of the score.",
-            *[f"{item['label']}: {item['score']}/100" for item in data["category_scores"]],
+            (
+                f"Overall score: {overall_str}. "
+                f"Confidence: {conf_str}. "
+                "Confidence is not part of the score."
+            ),
+            *[
+                f"{item['label']}: {item['score']}/100"
+                if isinstance(item["score"], (int, float))
+                else f"{item['label']}: {item['score']}"
+                for item in data["category_scores"]
+            ],
             "Overall Score Formula v1.0.0 is deterministic and unchanged.",
         ]
     if title == "Top 10 Priority Findings":
@@ -623,31 +731,43 @@ def _safe_presentation_lines(snapshot: dict[str, Any], title: str) -> list[str]:
             f"{item['affected_page_count']} page(s). {item['why_it_matters']}"
             for position, item in enumerate(data["top_findings"], 1)
         ]
-    if title == "Performance Summary":
-        return [
-            "Laboratory and browser evidence are reported separately from unavailable field data.",
-            "The WebKit checkout failure is a compatibility issue, "
-            "not ordinary performance variance.",
-            "CrUX field evidence is unavailable; no field-performance conclusion is claimed.",
+    if title in {
+        "Performance Summary",
+        "Accessibility Summary",
+        "SEO and Content Summary",
+        "Technical and Security Summary",
+    }:
+        category_map = {
+            "Performance Summary": "performance",
+            "Accessibility Summary": "accessibility",
+            "SEO and Content Summary": "content_seo",
+            "Technical and Security Summary": "security",
+        }
+        cat = category_map[title]
+        cat_findings = [
+            f
+            for f in data.get("top_findings", [])
+            if cat in str(f.get("title", "")).lower()
+            or cat in str(f.get("detecting_agent", "")).lower()
         ]
-    if title == "Accessibility Summary":
-        return [
-            "A meaningful hero image lacks alternative text on the home page.",
-            "Automated checks support prioritisation but do not prove complete compliance.",
-            "Manual keyboard, screen-reader, zoom, and content review remain required.",
-        ]
-    if title == "SEO and Content Summary":
-        return [
-            "Three product pages repeat the same title.",
-            "Use distinct, descriptive titles generated from each product's retained content.",
-            "Retest the full product template group after remediation.",
-        ]
-    if title == "Technical and Security Summary":
-        return [
-            "The secure home page requests an insecure resource.",
-            "Remove the HTTP dependency and verify that no mixed-content request remains.",
-            "The WebKit checkout layout requires a resilient grid fallback.",
-        ]
+        lines = []
+        score_item = next(
+            (s for s in data.get("category_scores", []) if cat in s["label"].lower()),
+            None,
+        )
+        if score_item:
+            s = score_item["score"]
+            score_str = f"{s}/100" if isinstance(s, (int, float)) else str(s)
+            lines.append(f"{score_item['label']}: {score_str}.")
+        for f in cat_findings[:3]:
+            lines.append(
+                f"[{f['severity'].upper()}] {f['title']} — {f['affected_page_count']} page(s)."
+            )
+        if not lines:
+            lines.append("No retained findings in this category.")
+        if title == "Accessibility Summary":
+            lines.append("Automated checks do not establish complete compliance.")
+        return lines
     if title == "Page-Level Problem Summary":
         return [
             f"{item['title']}: {item['affected_page_count']} page(s), "
@@ -662,11 +782,27 @@ def _safe_presentation_lines(snapshot: dict[str, Any], title: str) -> list[str]:
             for item in data["top_actions"]
         ]
     if title == "Evidence Coverage and Limitations":
-        return [
-            "Report evidence coverage: 15/16 (93.75%).",
-            "Page-analysis coverage: 7/10 (70.0%).",
-            *data["limitations"],
-        ]
+        ev = data.get("report_evidence_coverage", {})
+        ev_num = ev.get("numerator", 0)
+        ev_den = ev.get("denominator", 0)
+        ev_pct = ev.get("percentage")
+        ev_str = (
+            f"Report evidence coverage: {ev_num}/{ev_den} ({ev_pct:.1f}%)."
+            if ev_pct is not None
+            else f"Report evidence coverage: {ev_num}/{ev_den}."
+        )
+        cov = data.get("coverage", {})
+        cov_str = (
+            f"Page-analysis coverage: "
+            f"{cov.get('coverage_numerator', 0)}/{cov.get('coverage_denominator', 0)}"
+            f" ({cov['coverage_percentage']:.1f}%)."
+            if cov.get("coverage_percentage") is not None
+            else (
+                f"Page-analysis coverage: "
+                f"{cov.get('coverage_numerator', 0)}/{cov.get('coverage_denominator', 0)}."
+            )
+        )
+        return [ev_str, cov_str, *data["limitations"]]
     if title == "Compact Multi-Agent Summary":
         return [
             f"{item['name']}: {item['responsibility']} - "
@@ -714,13 +850,25 @@ def render_presentation_pdf(snapshot: dict[str, Any]) -> bytes:
             pdf.setFont("Helvetica-Bold", 30)
             pdf.drawString(56, height - 160, "Website Analysis")
             pdf.drawString(56, height - 198, "Presentation Report")
+            _overall = snapshot.get("presentation", {}).get("overall_score")
+            _conf = snapshot.get("presentation", {}).get("score_confidence_percent")
             pdf.setFont("Helvetica-Bold", 44)
-            pdf.drawString(56, height - 290, "76/100")
+            pdf.drawString(
+                56,
+                height - 290,
+                f"{_overall}/100" if _overall is not None else "Score Unavailable",
+            )
             pdf.setFont("Helvetica", 12)
-            pdf.drawString(56, height - 322, "Score confidence 88% - shown separately")
+            pdf.drawString(
+                56,
+                height - 322,
+                f"Score confidence {_conf}% — shown separately"
+                if _conf is not None
+                else "Score confidence unavailable",
+            )
             pdf.drawString(56, height - 356, snapshot["website_name"])
             pdf.drawString(56, height - 376, snapshot["website_url"])
-            pdf.drawString(56, 72, "Prepared deterministic local demonstration")
+            pdf.drawString(56, 72, "Evidence-grounded website analysis report")
         else:
             pdf.setFillColor(HexColor("#123A63"))
             pdf.rect(0, height - 76, width, 76, stroke=0, fill=1)
@@ -737,7 +885,11 @@ def render_presentation_pdf(snapshot: dict[str, Any]) -> bytes:
         pdf.setFillColor(HexColor("#526071") if page_number > 1 else HexColor("#FFFFFF"))
         pdf.setFont("Helvetica", 8)
         pdf.drawString(44, 30, "Evidence-grounded report - unavailable evidence is explicit")
-        pdf.drawRightString(width - 44, 30, f"Page {page_number} of 15")
+        pdf.drawRightString(
+            width - 44,
+            30,
+            f"Page {page_number} of {len(PRESENTATION_SECTION_TITLES)}",
+        )
         pdf.showPage()
     pdf.setTitle("ZuiGO Website Analysis Presentation Report")
     pdf.setAuthor("ZuiGO Website Intelligence")

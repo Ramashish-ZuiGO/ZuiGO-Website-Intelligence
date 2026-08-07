@@ -5,7 +5,7 @@ from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, Query, Response, status
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db.session import get_db
@@ -46,16 +46,22 @@ from app.services.analysis_queue import (
     enqueue_analysis_journey,
     enqueue_real_analysis_journey,
 )
+from app.services.page_selection import select_scheduled_pages
 from app.services.public_url_safety import (
     PublicURLSafetyError,
     validate_and_normalize_public_url,
 )
 from app.services.report_delivery import (
     ReportDeliveryError,
+    _discovery_message,
     generate_report,
     load_artifact,
     load_report,
     render_additional_report_artifact,
+)
+from app.services.resource_classification import (
+    ResourceClassification,
+    classify_resource,
 )
 from app.services.tool_execution import sanitize_persisted_value
 from app.services.workflow_execution import (
@@ -561,6 +567,64 @@ def workflow_progress(
     retryable = execution.status in {"failed", "partial", "unavailable", "cancelled"}
     discovery_id = execution.structured_input.get("discovery_run_id")
     discovery = db.get(DiscoveryRun, uuid.UUID(str(discovery_id))) if discovery_id else None
+    discovery_status = (
+        discovery.status.value
+        if discovery and hasattr(discovery.status, "value")
+        else str(discovery.status)
+        if discovery
+        else None
+    )
+    _TERMINAL_COMPLETENESS = {
+        "completed": "complete",
+        "partial": "partial",
+        "failed": "failed",
+        "inconclusive": "inconclusive",
+    }
+    _ACTIVE_STATUSES = {"queued", "pending", "running", "initializing"}
+    if discovery_status is None:
+        discovery_completeness = None
+    elif discovery_status in _ACTIVE_STATUSES:
+        discovery_completeness = None
+    else:
+        discovery_completeness = _TERMINAL_COMPLETENESS.get(discovery_status, "inconclusive")
+    recoverable_discovery_codes = {
+        "DISCOVERY_DEADLINE_EXCEEDED",
+        "DISCOVERY_PAGE_FETCH_FAILED",
+        "DNS_RESOLUTION_FAILED",
+        "RESPONSE_DECOMPRESSION_FAILED",
+        "ROBOTS_FETCH_FAILED",
+        "SITEMAP_FETCH_FAILED",
+    }
+    discovery_recoverable = bool(
+        discovery
+        and discovery_completeness in {"partial", "failed"}
+        and discovery.failure_code in recoverable_discovery_codes
+    )
+    if discovery and discovery.failure_code:
+        safe_errors.append(
+            {
+                "code": discovery.failure_code,
+                "message": discovery.failure_message
+                or "Website discovery retained partial evidence.",
+            }
+        )
+    page_execution_id = execution.structured_input.get("page_analysis_execution_id")
+    level_one_runs = (
+        list(
+            db.scalars(
+                select(PageAnalysisRun)
+                .where(
+                    PageAnalysisRun.page_analysis_execution_id == uuid.UUID(str(page_execution_id)),
+                    PageAnalysisRun.discovery_run_id == discovery.id,
+                    PageAnalysisRun.analysis_level == 1,
+                )
+                .order_by(PageAnalysisRun.created_at, PageAnalysisRun.id)
+            )
+        )
+        if discovery and page_execution_id
+        else []
+    )
+    historical_page_ids = {item.website_page_id for item in level_one_runs}
     pages = (
         list(
             db.scalars(
@@ -568,61 +632,136 @@ def workflow_progress(
                 .where(
                     WebsitePage.website_id
                     == uuid.UUID(str(execution.structured_input["website_id"])),
-                    WebsitePage.last_discovery_run_id == discovery.id,
+                    or_(
+                        WebsitePage.last_discovery_run_id == discovery.id,
+                        WebsitePage.id.in_(historical_page_ids),
+                    ),
                 )
-                .order_by(WebsitePage.normalized_url, WebsitePage.id)
+                .order_by(
+                    WebsitePage.crawl_depth,
+                    WebsitePage.normalized_url,
+                    WebsitePage.id,
+                )
             )
         )
         if discovery
         else []
     )
-    eligible_pages = [item for item in pages if item.eligibility_status == "eligible"]
-    scheduled_pages = eligible_pages[
-        : int(execution.structured_input.get("maximum_pages") or len(eligible_pages))
-    ]
-    page_execution_id = execution.structured_input.get("page_analysis_execution_id")
-    scheduled_ids = [item.id for item in scheduled_pages]
-    level_one_runs = (
-        list(
-            db.scalars(
-                select(PageAnalysisRun)
-                .where(
-                    PageAnalysisRun.website_page_id.in_(scheduled_ids),
-                    PageAnalysisRun.page_analysis_execution_id == uuid.UUID(str(page_execution_id)),
-                    PageAnalysisRun.analysis_level == 1,
-                )
-                .order_by(PageAnalysisRun.created_at, PageAnalysisRun.id)
-            )
+    run_by_page_id = {item.website_page_id: item for item in level_one_runs}
+
+    def resource_for(page: WebsitePage):
+        page_run = run_by_page_id.get(page.id)
+        return classify_resource(
+            page.normalized_url,
+            final_url=page_run.final_url if page_run else page.final_url,
+            content_type=page_run.content_type if page_run else None,
+            failure_code=page_run.failure_reason_code if page_run else None,
+            eligibility_status=page.eligibility_status,
+            exclusion_reason=page.exclusion_reason,
+            skip_reason=page.skip_reason,
+            origin_relation=page.origin_relation,
         )
-        if scheduled_ids and page_execution_id
-        else []
-    )
-    page_denominator = len(scheduled_pages)
-    visited_count = sum(item.analysis_started_at is not None for item in level_one_runs)
+
+    classifications = {item.id: resource_for(item) for item in pages}
+    eligible_pages = [
+        item
+        for item in pages
+        if classifications[item.id].classification == ResourceClassification.ELIGIBLE_HTML_PAGE
+    ]
+    selected_ids = {
+        uuid.UUID(str(item))
+        for item in execution.structured_output.get("page_analysis_summary", {}).get(
+            "selected_page_ids", []
+        )
+    } or {item.website_page_id for item in level_one_runs}
+    if selected_ids:
+        scheduled_pages = [item for item in eligible_pages if item.id in selected_ids]
+    else:
+        raw_limit = execution.structured_input.get("maximum_pages")
+        page_limit = int(raw_limit) if raw_limit is not None else None
+        scheduled_pages = select_scheduled_pages(
+            eligible_pages,
+            page_limit,
+        )
+    scheduled_ids = [item.id for item in scheduled_pages]
+    scheduled_id_set = set(scheduled_ids)
+    scheduled_level_one_runs = [
+        item for item in level_one_runs if item.website_page_id in scheduled_id_set
+    ]
+    scheduled_count = len(scheduled_pages)
+    eligible_count = len(eligible_pages)
+    visited_count = sum(item.analysis_started_at is not None for item in scheduled_level_one_runs)
     successful_count = sum(
         item.status == "completed"
         and item.final_url is not None
         and item.http_status_code is not None
-        for item in level_one_runs
+        for item in scheduled_level_one_runs
     )
-    failed_count = sum(item.status == "failed" for item in level_one_runs)
+    failed_count = sum(item.status == "failed" for item in scheduled_level_one_runs)
     incomplete_count = sum(
         item.status in {"pending", "running", "partial"}
         or (
             item.status == "completed" and (item.final_url is None or item.http_status_code is None)
         )
-        for item in level_one_runs
+        for item in scheduled_level_one_runs
     )
+    pages_by_id = {item.id: item for item in scheduled_pages}
+    all_pages_by_id = {item.id: item for item in pages}
+    failed_page_details = [
+        {
+            "url": (
+                item.requested_url or pages_by_id[item.website_page_id].normalized_url
+                if item.website_page_id in pages_by_id
+                else "URL unavailable"
+            ),
+            "reason": item.failure_reason_text or "The page analysis failed without a safe reason.",
+            "reason_code": item.failure_reason_code or "PAGE_ANALYSIS_FAILED",
+        }
+        for item in scheduled_level_one_runs
+        if item.status == "failed"
+    ]
+    resource_inventory = [
+        {
+            "url": item.requested_url
+            or (
+                all_pages_by_id[item.website_page_id].normalized_url
+                if item.website_page_id in all_pages_by_id
+                else "URL unavailable"
+            ),
+            "final_url": item.final_url,
+            "http_status": item.http_status_code,
+            "response_content_type": item.content_type,
+            "detected_content_type": None,
+            "content_type_detection": "No independent content sniff was persisted.",
+            "classification": classifications[item.website_page_id].classification.value,
+            "classification_basis": classifications[item.website_page_id].evidence_basis,
+            "failure_stage": "Page analysis response validation",
+            "failure_reason": item.failure_reason_text,
+            "browser_navigation": (
+                "A browser could open an asset viewer, but this is not an HTML-page "
+                "compatibility test; asset navigation was not attempted."
+            ),
+        }
+        for item in level_one_runs
+        if item.website_page_id in classifications
+        and classifications[item.website_page_id].classification
+        in {
+            ResourceClassification.DOCUMENT_ASSET,
+            ResourceClassification.MEDIA_STATIC_ASSET,
+            ResourceClassification.UNSUPPORTED_RESOURCE,
+        }
+    ]
     completed_stage_ids = set(execution.structured_output.get("completed_stage_ids", []))
     page_stage_terminal = (
         "page_analysis" in completed_stage_ids or execution.status in TERMINAL_EXECUTION_STATUSES
     )
-    skipped_count = max(0, page_denominator - visited_count) if page_stage_terminal else 0
-    not_scheduled_count = max(0, len(eligible_pages) - page_denominator)
+    skipped_count = max(0, scheduled_count - visited_count) if page_stage_terminal else 0
+    not_scheduled_count = max(0, eligible_count - scheduled_count)
     coverage_percentage = (
-        round(successful_count / page_denominator * 100, 1) if page_denominator else None
+        round(successful_count / eligible_count * 100, 1) if eligible_count else None
     )
 
+    stale = real_execution_is_stale(execution)
     current_journey_stage = str(execution.structured_output.get("journey_stage") or "setup")
     journey_status = str(execution.structured_output.get("journey_status") or execution.status)
     raw_browser = dict(execution.structured_output.get("browser_compatibility", {}))
@@ -635,20 +774,22 @@ def workflow_progress(
         and raw_browser_status in {"not_started", "queued"}
     ):
         raw_browser_status = "running"
+    browser_stage_stale = bool(
+        stale and current_journey_stage in {"browser_compatibility", "browser_engine_analysis"}
+    )
+    if browser_stage_stale:
+        raw_browser_status = "timed_out"
     observations = list(raw_browser.get("observations", []))
+    unavailable_engine_set = {
+        str(obs.get("engine")) for obs in observations if obs.get("state") == "unavailable"
+    }
     matrix = list(raw_browser.get("matrix", []))
     raw_engine_rows = {
         str(item.get("engine")): item
         for item in raw_browser.get("engines", [])
         if isinstance(item, dict) and item.get("engine")
     }
-    browser_eligible = min(
-        page_denominator,
-        successful_count + incomplete_count,
-    )
-    retained_browser_eligible = int(raw_browser.get("eligible_page_count") or 0)
-    if retained_browser_eligible > 0:
-        browser_eligible = min(browser_eligible, retained_browser_eligible)
+    browser_eligible = scheduled_count
     browser_engines = []
     for engine in execution.structured_input.get("browser_engines", []):
         row = dict(raw_engine_rows.get(engine, {}))
@@ -657,35 +798,54 @@ def workflow_progress(
             for item in observations
             if item.get("engine") == engine and item.get("page_url")
         }
+        tested_urls = {
+            str(item.get("page_url"))
+            for item in observations
+            if item.get("engine") == engine
+            and item.get("page_url")
+            and item.get("state") not in {"not_tested", "unavailable"}
+        }
         attempted_pages = int(
             row.get("attempted_pages") or row.get("tested_pages") or len(attempted_urls)
         )
-        eligible_count = min(
-            page_denominator,
-            int(row.get("eligible_pages") or browser_eligible),
-        )
+        engine_eligible_count = browser_eligible
         states = [
             str(item.get("engines", {}).get(engine, "not_tested"))
             for item in matrix
             if isinstance(item, dict)
         ]
+        unavailable_pages = int(row.get("unavailable_pages", states.count("unavailable")))
+        failed_pages = int(row.get("failed_pages", states.count("incompatible")))
+        timed_out_pages = (
+            max(
+                0,
+                engine_eligible_count - len(tested_urls) - unavailable_pages - failed_pages,
+            )
+            if browser_stage_stale
+            else 0
+        )
         browser_engines.append(
             {
                 "engine": engine,
-                "eligible_pages": eligible_count,
-                "queued_pages": min(
-                    eligible_count,
-                    max(
-                        0,
-                        int(
-                            row.get(
-                                "queued_pages",
-                                eligible_count - attempted_pages,
-                            )
+                "eligible_pages": engine_eligible_count,
+                "queued_pages": (
+                    0
+                    if browser_stage_stale
+                    else min(
+                        engine_eligible_count,
+                        max(
+                            0,
+                            int(
+                                row.get(
+                                    "queued_pages",
+                                    engine_eligible_count - attempted_pages,
+                                )
+                            ),
                         ),
-                    ),
+                    )
                 ),
-                "attempted_pages": min(eligible_count, attempted_pages),
+                "attempted_pages": min(engine_eligible_count, attempted_pages),
+                "tested_pages": min(engine_eligible_count, len(tested_urls)),
                 "passed_pages": int(row.get("passed_pages", states.count("compatible"))),
                 "partial_pages": int(
                     row.get(
@@ -693,14 +853,20 @@ def workflow_progress(
                         states.count("partially_compatible"),
                     )
                 ),
-                "failed_pages": int(row.get("failed_pages", states.count("incompatible"))),
+                "failed_pages": failed_pages,
                 "inconclusive_pages": int(
                     row.get(
                         "inconclusive_pages",
                         states.count("inconclusive") + states.count("not_tested"),
                     )
                 ),
-                "unavailable_pages": int(row.get("unavailable_pages", states.count("unavailable"))),
+                "unavailable_pages": unavailable_pages,
+                "timed_out_pages": timed_out_pages,
+                "availability_status": (
+                    "unavailable"
+                    if engine in unavailable_engine_set and len(tested_urls) == 0
+                    else "available"
+                ),
             }
         )
     browser_progress = {
@@ -756,7 +922,6 @@ def workflow_progress(
         ("remediation", "Remediation", 7),
         ("report_generation", "Report generation", 8),
     )
-    stale = real_execution_is_stale(execution)
     failed_stage = (
         execution.structured_output.get("failed_stage_id")
         or execution.failure_details.get("failed_stage")
@@ -776,7 +941,14 @@ def workflow_progress(
             "setup",
         )
     if stale:
-        failed_stage = str(execution.structured_output.get("journey_stage") or "setup")
+        failed_stage = {
+            "website_discovery": "website_discovery",
+            "page_analysis": "page_analysis",
+            "primary_page_analysis": "diagnostics_scoring",
+            "browser_engine_analysis": "browser_compatibility",
+            "browser_compatibility": "browser_compatibility",
+            "multi_agent_analysis": "evidence_validation",
+        }.get(current_journey_stage, "setup")
 
     def agent_status(agent_id: str) -> str:
         return latest[agent_id].status if agent_id in latest else "queued"
@@ -798,7 +970,7 @@ def workflow_progress(
             "failed"
             if failed_stage == "page_analysis"
             else "completed"
-            if page_stage_terminal and page_denominator > 0 and successful_count == page_denominator
+            if page_stage_terminal and scheduled_count > 0 and successful_count == scheduled_count
             else "partial"
             if page_stage_terminal and visited_count > 0
             else "running"
@@ -931,9 +1103,21 @@ def workflow_progress(
         if stale
         else str(execution.failure_details.get("message") or "") or None
     )
-    retryable = (
-        display_status in {"failed", "partial", "unavailable", "cancelled"}
-        and execution.attempt < 3
+    retryable = bool(
+        execution.attempt < 3
+        and (
+            discovery_recoverable
+            or stale
+            or (
+                display_status in {"failed", "cancelled"}
+                and execution.failure_details.get("transient") is True
+            )
+            or (
+                display_status == "partial"
+                and failed_stage
+                and execution.failure_details.get("transient") is True
+            )
+        )
     )
     report_exists = bool(
         db.scalar(
@@ -969,24 +1153,51 @@ def workflow_progress(
         submitted_website=execution.structured_input.get("submitted_url")
         or execution.structured_input.get("website_url"),
         page_coverage={
-            "discovery_status": (
-                discovery.status.value
-                if discovery and hasattr(discovery.status, "value")
-                else str(discovery.status)
-                if discovery
-                else "not_started"
-            ),
-            "discovered_pages": len(eligible_pages),
-            "scheduled_pages": page_denominator,
+            "discovery_status": discovery_status,
+            "discovery_completeness": discovery_completeness,
+            "discovery_failure_code": discovery.failure_code if discovery else None,
+            "discovery_failure_message": discovery.failure_message if discovery else None,
+            "discovery_retry_available": discovery_recoverable and execution.attempt < 3,
+            "discovered_pages": discovery.urls_discovered if discovery else 0,
+            "normalized_pages": discovery.urls_unique if discovery else len(pages),
+            "eligible_pages": eligible_count,
+            "scheduled_pages": scheduled_count,
             "not_scheduled_pages": not_scheduled_count,
             "visited_pages": visited_count,
             "successfully_analysed_pages": successful_count,
             "failed_pages": failed_count,
+            "failed_page_details": failed_page_details,
+            "document_assets": sum(
+                item["classification"] == ResourceClassification.DOCUMENT_ASSET.value
+                for item in resource_inventory
+            ),
+            "media_static_assets": sum(
+                item["classification"] == ResourceClassification.MEDIA_STATIC_ASSET.value
+                for item in resource_inventory
+            ),
+            "resource_inventory": resource_inventory,
             "skipped_pages": skipped_count,
             "incomplete_pages": incomplete_count,
             "coverage_numerator": successful_count,
-            "coverage_denominator": page_denominator,
+            "coverage_denominator": eligible_count,
             "coverage_percentage": coverage_percentage,
+            "analysed_page_coverage_percentage": coverage_percentage,
+            "full_site_coverage_percentage": (
+                coverage_percentage if discovery_completeness == "complete" else None
+            ),
+            "full_site_coverage_confidence": (
+                "established"
+                if discovery_completeness == "complete"
+                else "pending"
+                if discovery_completeness is None
+                else "not_established"
+            ),
+            "discovery_stage_status": (discovery_status if discovery_status else "not_started"),
+            "discovery_completeness_message": _discovery_message(
+                discovery_status if discovery_status else "not_started",
+                discovery_completeness,
+                discovery,
+            ),
         },
         browser_engine_progress=browser_progress,
         agent_states=agent_states,

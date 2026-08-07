@@ -3,6 +3,11 @@ import time
 import uuid
 from typing import Any
 
+from app.services.page_selection import select_scheduled_pages
+from app.services.resource_classification import (
+    ResourceClassification,
+    classify_resource,
+)
 from sqlalchemy import and_, insert, select, update
 
 from worker_app.celery_app import celery_app
@@ -102,7 +107,8 @@ def run_page_analysis(discovery_run_id: str, page_analysis_execution_id: str) ->
         website_id = run["website_id"]
         config = run["configuration"]
 
-        max_l1 = int(config.get("maximum_pages") or config.get("max_html_pages", 50))
+        _raw_max = config.get("maximum_pages") or config.get("max_html_pages")
+        max_l1 = int(_raw_max) if _raw_max is not None else None
         max_l2 = max(0, int(config.get("max_lighthouse_pages", 10)))
         per_page_timeout = config.get("request_timeout_seconds", 15)
         total_deadline = job_started + config.get("deadline_seconds", 300)
@@ -118,9 +124,9 @@ def run_page_analysis(discovery_run_id: str, page_analysis_execution_id: str) ->
                     )
                 )
                 .order_by(website_pages.c.crawl_depth.asc(), website_pages.c.normalized_url.asc())
-                .limit(max_l1)
             ).mappings()
         )
+        eligible_pages = select_scheduled_pages(eligible_pages, max_l1)
 
         for page in eligible_pages:
             if time.monotonic() >= total_deadline:
@@ -199,6 +205,30 @@ def run_page_analysis(discovery_run_id: str, page_analysis_execution_id: str) ->
                 }
                 update_page_analysis_run(session, l1_run_uuid, **update_values)
                 update_website_page_status(session, page["id"], 1, status, l1_run_uuid)
+                resource = classify_resource(
+                    str(result["requested_url"]),
+                    final_url=result.get("final_url"),
+                    content_type=result.get("content_type"),
+                    failure_code=result.get("failure_reason_code"),
+                    eligibility_status=str(page.get("eligibility_status") or ""),
+                    exclusion_reason=page.get("exclusion_reason"),
+                    skip_reason=page.get("skip_reason"),
+                    origin_relation=page.get("origin_relation"),
+                )
+                if resource.classification in {
+                    ResourceClassification.DOCUMENT_ASSET,
+                    ResourceClassification.MEDIA_STATIC_ASSET,
+                    ResourceClassification.UNSUPPORTED_RESOURCE,
+                }:
+                    session.execute(
+                        update(website_pages)
+                        .where(website_pages.c.id == page["id"])
+                        .values(
+                            eligibility_status="excluded",
+                            exclusion_reason=resource.classification.value,
+                            final_url=result.get("final_url"),
+                        )
+                    )
                 session.commit()
 
             except Exception as exception:
@@ -332,6 +362,20 @@ def run_page_analysis(discovery_run_id: str, page_analysis_execution_id: str) ->
 
                 from worker_app.tasks.analysis import persist_results
 
+                page_extracted_content = None
+                try:
+                    from worker_app.analysis.content_extraction import (
+                        extract_content,
+                    )
+
+                    raw_html = str(playwright_data.get("_html", ""))
+                    if raw_html:
+                        page_extracted_content = extract_content(raw_html, url)
+                except Exception:
+                    pass
+                playwright_data.pop("script_evidence", None)
+                playwright_data.pop("_html", None)
+
                 persist_results(
                     session,
                     analysis_run_uuid,
@@ -343,6 +387,7 @@ def run_page_analysis(discovery_run_id: str, page_analysis_execution_id: str) ->
                     {},
                     now,
                     now,
+                    extracted_content=page_extracted_content,
                 )
 
                 update_page_analysis_run(
@@ -444,4 +489,5 @@ def run_page_analysis(discovery_run_id: str, page_analysis_execution_id: str) ->
             "l2_attempted": len(persisted_l2),
             "l2_successful": sum(item["status"] == "completed" for item in persisted_l2),
             "l2_failed": sum(item["status"] == "failed" for item in persisted_l2),
+            "selected_page_ids": [str(item) for item in selected_page_ids],
         }

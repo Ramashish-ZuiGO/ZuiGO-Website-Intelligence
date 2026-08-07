@@ -53,21 +53,27 @@ class WorkerSettings(BaseSettings):
     policy_page_timeout_seconds: int = Field(default=15, ge=1, le=60)
     diagnostic_max_resources: int = Field(default=20, ge=1, le=100)
     diagnostic_evidence_limit: int = Field(default=20, ge=1, le=100)
-    discovery_max_urls: int = Field(default=500, ge=1, le=5000)
-    discovery_max_html_pages: int = Field(default=50, ge=1, le=500)
-    discovery_max_depth: int = Field(default=3, ge=0, le=10)
+    discovery_max_urls: int = Field(default=50_000, ge=1, le=100_000)
+    discovery_max_html_pages: int = Field(default=10_000, ge=1, le=50_000)
+    # Emergency safety bound against pathologically deep / self-generating URL
+    # spaces only. Normal finite sites finish by frontier exhaustion well before
+    # this, so it must never be the routine stop condition.
+    discovery_max_depth: int = Field(default=1_000, ge=0, le=10_000)
+    discovery_max_query_variants_per_path: int = Field(default=200, ge=1, le=10_000)
     discovery_max_links_per_page: int = Field(default=500, ge=1, le=5000)
-    discovery_max_sitemap_files: int = Field(default=20, ge=1, le=100)
-    discovery_max_sitemap_depth: int = Field(default=3, ge=0, le=10)
+    discovery_max_sitemap_files: int = Field(default=50, ge=1, le=200)
+    discovery_max_sitemap_depth: int = Field(default=5, ge=0, le=10)
     discovery_max_redirects: int = Field(default=5, ge=0, le=10)
     discovery_request_timeout_seconds: int = Field(default=15, ge=1, le=60)
-    discovery_deadline_seconds: int = Field(default=180, ge=10, le=600)
+    discovery_deadline_seconds: int = Field(default=1800, ge=10, le=3600)
     discovery_max_response_bytes: int = Field(default=2_000_000, ge=10_000, le=10_000_000)
     discovery_include_verified_subdomains: bool = False
-    page_analysis_max_level_1: int = Field(default=50, ge=1, le=500)
+    discovery_max_fetch_attempts: int = Field(default=3, ge=1, le=5)
+    discovery_retry_backoff_seconds: float = Field(default=0.25, ge=0, le=5)
+    page_analysis_max_level_1: int = Field(default=10_000, ge=1, le=50_000)
     page_analysis_max_level_2: int = Field(default=10, ge=0, le=50)
     page_analysis_per_page_timeout_seconds: int = Field(default=15, ge=5, le=60)
-    page_analysis_total_timeout_seconds: int = Field(default=300, ge=60, le=900)
+    page_analysis_total_timeout_seconds: int = Field(default=900, ge=60, le=3600)
     responsive_viewports: str = (
         "mobile_portrait:390x844,mobile_landscape:844x390,tablet:768x1024,"
         "laptop:1366x768,desktop:1920x1080"

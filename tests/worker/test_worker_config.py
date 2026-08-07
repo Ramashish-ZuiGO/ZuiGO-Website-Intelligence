@@ -19,10 +19,11 @@ def test_worker_redis_configuration() -> None:
     assert settings.ai_timeout_seconds == 120
     assert settings.navigation_timeout_ms == 45_000
     assert settings.lighthouse_timeout_seconds == 120
-    assert settings.discovery_max_urls == 500
-    assert settings.discovery_max_html_pages == 50
-    assert settings.discovery_max_depth == 3
-    assert settings.discovery_deadline_seconds == 180
+    assert settings.discovery_max_urls == 50_000
+    assert settings.discovery_max_html_pages == 10_000
+    assert settings.discovery_max_depth == 1_000
+    assert settings.discovery_max_query_variants_per_path == 200
+    assert settings.discovery_deadline_seconds == 1800
     assert settings.analysis_max_attempts == 2
     configured_redis_url = str(get_settings().redis_url)
     assert celery_app.conf.broker_url == configured_redis_url

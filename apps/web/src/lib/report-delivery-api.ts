@@ -21,7 +21,6 @@ export const reportDeliveryApi = {
   startRealAnalysis: (input: {
     website_url: string;
     idempotency_key: string;
-    maximum_pages: number;
     browser_engines: Array<"chromium" | "firefox" | "webkit">;
     include_mobile: boolean;
   }) =>

@@ -193,18 +193,18 @@ def test_page_coverage_inventory_and_browser_compatibility_are_exact(
     assert coverage == {
         **coverage,
         "total_urls_discovered": 12,
-        "total_pages_scheduled": 10,
-        "total_pages_visited": 9,
+        "total_pages_scheduled": 9,
+        "total_pages_visited": 8,
         "successfully_analysed_pages": 7,
         "failed_pages": 1,
         "skipped_pages": 1,
         "excluded_pages": 1,
         "redirected_pages": 1,
         "duplicate_normalized_pages": 1,
-        "pages_with_incomplete_evidence": 1,
+        "pages_with_incomplete_evidence": 2,
         "coverage_numerator": 7,
-        "coverage_denominator": 10,
-        "coverage_percentage": 70.0,
+        "coverage_denominator": 9,
+        "coverage_percentage": 77.78,
     }
     assert len(payload["page_inventory"]) == 12
     assert {item["analysis_status"] for item in payload["page_inventory"]} >= {

@@ -4,6 +4,7 @@ from app.api.routes import (
     accessibility_router,
     action_plan_router,
     agent_platform_router,
+    analysis_comparison_router,
     analysis_runs_router,
     discovery_router,
     health_router,
@@ -25,6 +26,7 @@ api_router.include_router(health_router)
 
 v1_router = APIRouter(prefix="/api/v1")
 v1_router.include_router(agent_platform_router)
+v1_router.include_router(analysis_comparison_router)
 v1_router.include_router(action_plan_router)
 v1_router.include_router(analysis_runs_router)
 v1_router.include_router(discovery_router)

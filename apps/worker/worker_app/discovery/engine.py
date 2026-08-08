@@ -2,9 +2,7 @@ import gzip
 import io
 import re
 import time
-import urllib.error
 import urllib.parse
-import urllib.request
 import urllib.robotparser
 import xml.etree.ElementTree as ET
 from collections import deque
@@ -19,7 +17,11 @@ from app.services.resource_classification import (
     classify_resource,
 )
 
-from worker_app.analysis.url_safety import UrlSafetyError, validate_public_url
+from worker_app.analysis.url_safety import (
+    SafeConnectionFactory,
+    UrlSafetyError,
+    validate_public_url,
+)
 
 TRACKING_PARAMETERS = {
     "utm_source",
@@ -130,11 +132,7 @@ class FetchResponse:
 Fetch = Callable[[str, DiscoveryConfig], FetchResponse]
 
 
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(
-        self, req: Any, fp: Any, code: int, msg: str, headers: Any, newurl: str
-    ) -> None:
-        return None
+_safe_connection_factory = SafeConnectionFactory()
 
 
 def normalize_url(url: str, base_url: str | None = None) -> str:
@@ -230,35 +228,48 @@ def _decoded_response_body(
 def safe_fetch(url: str, config: DiscoveryConfig) -> FetchResponse:
     current = validate_public_url(url)
     redirects: list[str] = []
-    opener = urllib.request.build_opener(_NoRedirect)
     for _ in range(config.max_redirects + 1):
-        request = urllib.request.Request(
-            current,
-            headers={"User-Agent": "ZuiGO-Discovery/1.0", "Accept-Encoding": "gzip"},
-        )
         try:
-            response = opener.open(request, timeout=config.request_timeout_seconds)
-        except urllib.error.HTTPError as exception:
-            if exception.code in {301, 302, 303, 307, 308} and exception.headers.get("Location"):
-                if len(redirects) >= config.max_redirects:
-                    raise DiscoveryError(
-                        "DISCOVERY_PAGE_FETCH_FAILED", "The redirect limit was reached."
-                    ) from exception
-                current = validate_public_url(
-                    urllib.parse.urljoin(current, exception.headers["Location"])
-                )
-                redirects.append(current)
-                continue
-            if exception.code == 404:
-                return FetchResponse(current, 404, {}, b"", redirects)
+            conn, validated = _safe_connection_factory.open(
+                current,
+                timeout=config.request_timeout_seconds,
+                method="GET",
+                headers={
+                    "User-Agent": "ZuiGO-Discovery/1.0",
+                    "Accept-Encoding": "gzip",
+                },
+            )
+        except UrlSafetyError:
+            raise
+        except OSError as exception:
             raise DiscoveryError(
                 "DISCOVERY_PAGE_FETCH_FAILED", "A discovery request failed."
             ) from exception
-        with response:
+        try:
+            response = conn.getresponse()
+            status_code = response.status
+            if status_code in {301, 302, 303, 307, 308}:
+                location = response.getheader("Location")
+                if location:
+                    if len(redirects) >= config.max_redirects:
+                        raise DiscoveryError(
+                            "DISCOVERY_PAGE_FETCH_FAILED",
+                            "The redirect limit was reached.",
+                        )
+                    current = validate_public_url(urllib.parse.urljoin(current, location))
+                    redirects.append(current)
+                    continue
+            if status_code == 404:
+                return FetchResponse(current, 404, {}, b"", redirects)
+            if status_code >= 400:
+                raise DiscoveryError("DISCOVERY_PAGE_FETCH_FAILED", "A discovery request failed.")
+            raw_headers = {key.lower(): value for key, value in response.getheaders()}
             encoded_body = response.read(config.max_response_bytes + 1)
-            headers = {key.lower(): value for key, value in response.headers.items()}
-            body, limited = _decoded_response_body(encoded_body, headers, config)
-            return FetchResponse(response.url, response.status, headers, body, redirects, limited)
+            body, limited = _decoded_response_body(encoded_body, raw_headers, config)
+            final_url = current
+            return FetchResponse(final_url, status_code, raw_headers, body, redirects, limited)
+        finally:
+            conn.close()
     raise DiscoveryError("DISCOVERY_PAGE_FETCH_FAILED", "The redirect limit was reached.")
 
 
@@ -982,7 +993,7 @@ def discover_site(
         "counts": {
             "raw_link_occurrences": raw_link_occurrences,
             "unique_candidates_encountered": unique_candidates_before_limit,
-            "discovered": len(pages),
+            "discovered": unique_candidates_before_limit,
             "unique": len(pages),
             "eligible": eligible_count,
             "excluded": excluded_count,

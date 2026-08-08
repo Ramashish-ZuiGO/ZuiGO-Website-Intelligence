@@ -455,55 +455,73 @@ def run_analysis(analysis_run_id: str) -> dict[str, str]:
             stage(session, run_id, 45, "collecting_page_evidence")
             stage(session, run_id, 55, "running_lighthouse")
             lighthouse_started = time.monotonic()
-            lighthouse_result, lighthouse_attempt = run_with_retries(
-                lambda: run_lighthouse(
-                    str(playwright_data["final_url"]),
-                    chromium_executable_path(),
-                    settings.lighthouse_timeout_seconds,
-                ),
-                max_attempts=settings.analysis_max_attempts,
-                backoff_seconds=settings.analysis_retry_backoff_seconds,
-                context=context,
-                deadline=job_deadline,
-                attempt_budget_seconds=settings.lighthouse_timeout_seconds + 7,
-            )
-            lighthouse_data = lighthouse_result
-            lighthouse_data.setdefault("_zuigo_execution", {})["attempt_count"] = lighthouse_attempt
-            logger.info(
-                "analysis_stage_complete analysis_run_id=%s project_id=%s website_id=%s "
-                "stage=running_lighthouse attempt=%s requested_url=%s final_url=%s "
-                "elapsed_ms=%s timeout_ms=%s lighthouse_exit_code=%s",
-                run_id,
-                context["project_id"],
-                context["website_id"],
-                lighthouse_attempt,
-                safe_log_url(requested_url),
-                safe_log_url(str(playwright_data["final_url"])),
-                round((time.monotonic() - lighthouse_started) * 1000),
-                settings.lighthouse_timeout_seconds * 1000,
-                lighthouse_data["_zuigo_execution"].get("exit_code"),
-            )
-            validate_public_url(
-                str(lighthouse_data.get("finalDisplayedUrl") or playwright_data["final_url"])
-            )
+            lighthouse_available = True
+            try:
+                lighthouse_result, lighthouse_attempt = run_with_retries(
+                    lambda: run_lighthouse(
+                        str(playwright_data["final_url"]),
+                        chromium_executable_path(),
+                        settings.lighthouse_timeout_seconds,
+                    ),
+                    max_attempts=settings.analysis_max_attempts,
+                    backoff_seconds=settings.analysis_retry_backoff_seconds,
+                    context=context,
+                    deadline=job_deadline,
+                    attempt_budget_seconds=settings.lighthouse_timeout_seconds + 7,
+                )
+                lighthouse_data = lighthouse_result
+                meta = lighthouse_data.setdefault("_zuigo_execution", {})
+                meta["attempt_count"] = lighthouse_attempt
+                logger.info(
+                    "analysis_stage_complete analysis_run_id=%s project_id=%s website_id=%s "
+                    "stage=running_lighthouse attempt=%s requested_url=%s final_url=%s "
+                    "elapsed_ms=%s timeout_ms=%s lighthouse_exit_code=%s",
+                    run_id,
+                    context["project_id"],
+                    context["website_id"],
+                    lighthouse_attempt,
+                    safe_log_url(requested_url),
+                    safe_log_url(str(playwright_data["final_url"])),
+                    round((time.monotonic() - lighthouse_started) * 1000),
+                    settings.lighthouse_timeout_seconds * 1000,
+                    lighthouse_data["_zuigo_execution"].get("exit_code"),
+                )
+                validate_public_url(
+                    str(lighthouse_data.get("finalDisplayedUrl") or playwright_data["final_url"])
+                )
+            except SoftTimeLimitExceeded:
+                raise
+            except Exception as lighthouse_exc:
+                lighthouse_available = False
+                lighthouse_data = {}
+                logger.warning(
+                    "lighthouse_unavailable analysis_run_id=%s project_id=%s website_id=%s "
+                    "exception_type=%s elapsed_ms=%s",
+                    run_id,
+                    context["project_id"],
+                    context["website_id"],
+                    type(lighthouse_exc).__name__,
+                    round((time.monotonic() - lighthouse_started) * 1000),
+                )
             ensure_deadline()
             stage(session, run_id, 75, "calculating_score")
-            metrics = parse_lighthouse(lighthouse_data)
-            try:
-                with SessionLocal() as db_session:
-                    collect_lighthouse_evidence(
-                        db_session,
-                        run_id,
-                        context["website_id"],
-                        str(playwright_data["final_url"]),
-                        metrics,
-                        analysis_run_id=run_id,
-                    )
-                    process_lighthouse_accessibility(
-                        db_session, run_id, context["website_id"], lighthouse_data
-                    )
-            except Exception as e:
-                logger.error(f"Failed to collect lighthouse evidence: {e}")
+            metrics = parse_lighthouse(lighthouse_data) if lighthouse_available else {}
+            if lighthouse_available:
+                try:
+                    with SessionLocal() as db_session:
+                        collect_lighthouse_evidence(
+                            db_session,
+                            run_id,
+                            context["website_id"],
+                            str(playwright_data["final_url"]),
+                            metrics,
+                            analysis_run_id=run_id,
+                        )
+                        process_lighthouse_accessibility(
+                            db_session, run_id, context["website_id"], lighthouse_data
+                        )
+                except Exception as e:
+                    logger.error(f"Failed to collect lighthouse evidence: {e}")
 
             findings = generate_findings(playwright_data, metrics)
             extracted_content: dict[str, object] = {}
@@ -545,7 +563,7 @@ def run_analysis(analysis_run_id: str) -> dict[str, str]:
                 metrics,
                 playwright_data,
                 findings,
-                audit_completed=True,
+                audit_completed=lighthouse_available,
             )
             logger.info(
                 "analysis_score analysis_run_id=%s formula_version=%s",

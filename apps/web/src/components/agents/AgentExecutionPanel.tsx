@@ -68,7 +68,8 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "The request could not be completed.";
 }
 
-function StatusBadge({ status }: { status: ExecutionStatus | "not_started" }) {
+function StatusBadge({ status }: { status: ExecutionStatus | "not_started" | string }) {
+  const safeStatus = status || "not_started";
   const style: Record<string, string> = {
     pending: "border-blue-300 bg-blue-50 text-blue-900",
     running: "border-amber-300 bg-amber-50 text-amber-900",
@@ -91,11 +92,11 @@ function StatusBadge({ status }: { status: ExecutionStatus | "not_started" }) {
   };
   return (
     <span
-      aria-label={`Status: ${status.replaceAll("_", " ")}`}
-      className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold ${style[status]}`}
+      aria-label={`Status: ${safeStatus.replaceAll("_", " ")}`}
+      className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold ${style[safeStatus] ?? style.not_started}`}
     >
-      <span aria-hidden="true">{symbol[status]}</span>
-      {status.replaceAll("_", " ")}
+      <span aria-hidden="true">{symbol[safeStatus] ?? "–"}</span>
+      {safeStatus.replaceAll("_", " ")}
     </span>
   );
 }

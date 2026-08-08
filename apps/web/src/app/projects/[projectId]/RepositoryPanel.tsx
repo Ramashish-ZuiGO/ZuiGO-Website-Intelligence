@@ -31,7 +31,7 @@ function StatusBadge({ status }: { status: string }) {
   };
   return (
     <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-bold ${colors[status] ?? "bg-slate-100 text-slate-600"}`}>
-      {status.replace("_", " ")}
+      {(status ?? "unknown").replace("_", " ")}
     </span>
   );
 }

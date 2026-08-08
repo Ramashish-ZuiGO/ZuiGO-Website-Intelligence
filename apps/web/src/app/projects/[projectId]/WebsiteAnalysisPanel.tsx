@@ -190,7 +190,8 @@ export function WebsiteAnalysisPanel({
 
   const statusLabel = useMemo(() => {
     if (!latestRun) return "Not started";
-    return latestRun.status.charAt(0).toUpperCase() + latestRun.status.slice(1);
+    const s = latestRun.status ?? "unknown";
+    return s.charAt(0).toUpperCase() + s.slice(1);
   }, [latestRun]);
   const comparisonHref = useMemo(() => {
     if (selectedComparisonRuns.length !== 2) return null;

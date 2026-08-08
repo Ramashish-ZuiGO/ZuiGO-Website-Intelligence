@@ -17,6 +17,7 @@ import { AgentExecutionPanel } from "@/components/agents/AgentExecutionPanel";
 import { ScoringIntelligencePanel } from "@/components/scoring/ScoringIntelligencePanel";
 import { ReportDeliveryPanel } from "@/components/reports/ReportDeliveryPanel";
 import ExtractedContentPanel from "@/components/content/ExtractedContentPanel";
+import { SectionErrorBoundary } from "@/components/SectionErrorBoundary";
 import type { WorkflowProgress } from "@/components/reports/types";
 import { analysisComparisonApi } from "@/lib/analysis-comparison-api";
 
@@ -81,7 +82,8 @@ function display(value: unknown): string {
   return String(value);
 }
 
-function label(value: string): string {
+function label(value: string | null | undefined): string {
+  if (!value) return "Unknown";
   return value.replaceAll("_", " ").replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
@@ -764,10 +766,12 @@ export default function AnalysisReportPage() {
         </section>
       )}
 
+      <SectionErrorBoundary sectionName="Reanalysis Comparison">
       <ReanalysisComparisonPanel
         analysisRunId={analysisRunId}
         projectId={projectId}
       />
+      </SectionErrorBoundary>
 
       <section className="mt-8" id={`report-delivery-${report.website.id}`}>
         <h2 className="mb-4 text-2xl font-bold">Final reports and exports</h2>
@@ -788,9 +792,11 @@ export default function AnalysisReportPage() {
         </summary>
         <div className="mt-5">
 
+      <SectionErrorBoundary sectionName="Extracted Content">
       <section className="rounded-2xl border bg-white p-6">
         <ExtractedContentPanel analysisRunId={analysisRunId} />
       </section>
+      </SectionErrorBoundary>
 
       {report.interpretation && (
         <section className="mt-6 grid gap-6">
@@ -853,11 +859,15 @@ export default function AnalysisReportPage() {
         {report.score.deductions.length ? <HumanValue value={report.score.deductions} /> : <p className="mt-2 text-sm text-slate-600">No eligible deductions.</p>}
       </section>
 
+      <SectionErrorBoundary sectionName="Accessibility Intelligence">
       <section className="mt-6">
         <AccessibilityIntelligence accessibilityData={accessibilityData} />
       </section>
+      </SectionErrorBoundary>
 
+      <SectionErrorBoundary sectionName="Website Signals">
       <WebsiteSignalsSection diagnostics={report.diagnostics} />
+      </SectionErrorBoundary>
 
       <section className="mt-6 grid scroll-mt-6 gap-5" id="verified-diagnostics">
         <h2 className="text-2xl font-bold">Verified diagnostics</h2>
@@ -896,6 +906,7 @@ export default function AnalysisReportPage() {
 
       <section className="mt-6 rounded-2xl border bg-white p-6"><h2 className="text-xl font-bold">Findings</h2>{report.findings.length === 0 ? <p className="mt-3 text-slate-600">No verified findings.</p> : <ul className="mt-4 grid gap-4">{report.findings.map((finding) => <li className="rounded-xl border p-4" key={finding.id}><p className="text-xs font-bold uppercase">{finding.severity} · {finding.category} · {finding.source}</p><h3 className="mt-2 font-bold">{finding.title}</h3><p className="mt-1 text-sm text-slate-600">{finding.description}</p><dl className="mt-3 grid gap-2 text-sm"><div><dt className="text-slate-500">Finding code</dt><dd>{finding.finding_code}</dd></div><div><dt className="text-slate-500">Affected URL</dt><dd className="break-all">{finding.affected_url}</dd></div><div><dt className="text-slate-500">Evidence</dt><dd><HumanValue value={finding.evidence} /></dd></div><div><dt className="text-slate-500">Confidence</dt><dd>{finding.confidence_percent}%</dd></div></dl></li>)}</ul>}</section>
 
+      <SectionErrorBoundary sectionName="Site Diagnostics">
       <div className="mt-8">
         <SiteDiagnosticsPanel
           analysisRunId={analysisRunId}
@@ -903,7 +914,9 @@ export default function AnalysisReportPage() {
           websiteId={report.website.id}
         />
       </div>
+      </SectionErrorBoundary>
 
+      <SectionErrorBoundary sectionName="Agent Execution">
       <section className="mt-6" id={`agent-execution-${report.website.id}`}>
         <h2 className="mb-4 text-2xl font-bold">Agent execution</h2>
         <AgentExecutionPanel
@@ -911,6 +924,8 @@ export default function AnalysisReportPage() {
           websiteId={report.website.id}
         />
       </section>
+      </SectionErrorBoundary>
+      <SectionErrorBoundary sectionName="Score Explanation">
       <section className="mt-6" id={`scoring-intelligence-${report.website.id}`}>
         <h2 className="mb-4 text-2xl font-bold">Score explanation</h2>
         <ScoringIntelligencePanel
@@ -918,10 +933,13 @@ export default function AnalysisReportPage() {
           websiteId={report.website.id}
         />
       </section>
+      </SectionErrorBoundary>
 
+      <SectionErrorBoundary sectionName="Performance Intelligence">
       <div className="mt-8">
         <PerformanceIntelligence data={performanceData as unknown as { id: string; metric_id: string; evidence_type: string; raw_value: number }[]} />
       </div>
+      </SectionErrorBoundary>
         </div>
       </details>
     </main>

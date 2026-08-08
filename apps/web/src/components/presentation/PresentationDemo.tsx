@@ -99,11 +99,13 @@ function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 }
 
-function humanize(value: string): string {
+function humanize(value: string | null | undefined): string {
+  if (!value) return "unknown";
   return value.replaceAll("_", " ");
 }
 
-function statusClass(status: string): string {
+function statusClass(status: string | null | undefined): string {
+  if (!status) return "border-slate-300 bg-slate-50 text-slate-600";
   if (["completed", "available", "compatible"].includes(status)) {
     return "border-emerald-300 bg-emerald-50 text-emerald-950";
   }

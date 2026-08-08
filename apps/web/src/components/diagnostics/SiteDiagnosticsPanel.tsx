@@ -60,7 +60,8 @@ const sectionCategories = [
   },
 ] as const;
 
-function label(value: string): string {
+function label(value: string | null | undefined): string {
+  if (!value) return "Unknown";
   return value.replaceAll("_", " ").replace(/\b\w/g, (character) => character.toUpperCase());
 }
 

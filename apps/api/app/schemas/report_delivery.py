@@ -212,6 +212,7 @@ class ReportExecutionRead(BaseModel):
 class ReportStatusRead(BaseModel):
     report_id: UUID
     status: str
+    report_quality: str | None = None
     completed_section_count: int
     total_section_count: int
     unavailable_sections: list[str]

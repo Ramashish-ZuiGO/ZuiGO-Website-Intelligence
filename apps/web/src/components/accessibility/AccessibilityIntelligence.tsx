@@ -146,7 +146,7 @@ export function AccessibilityIntelligence({ accessibilityData }: { accessibility
                 {checklist.items.map((item: ChecklistItem, idx: number) => (
                   <li key={idx} className="text-sm flex items-start gap-2">
                     <span className={`px-2 py-0.5 rounded text-xs font-medium ${item.status === 'pass' ? 'bg-emerald-100 text-emerald-800' : item.status === 'fail' ? 'bg-red-100 text-red-800' : 'bg-slate-100 text-slate-800'}`}>
-                      {item.status.toUpperCase()}
+                      {(item.status ?? "unknown").toUpperCase()}
                     </span>
                     <div>
                       <p className="font-medium text-slate-900">{item.requirement}</p>

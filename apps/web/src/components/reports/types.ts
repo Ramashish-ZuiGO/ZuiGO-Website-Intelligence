@@ -72,7 +72,7 @@ export interface WorkflowProgress {
   submitted_website: string | null;
   page_coverage: {
     discovery_status: string;
-    discovery_completeness: "complete" | "partial" | "failed" | "inconclusive";
+    discovery_completeness: "complete" | "partial" | "failed" | "inconclusive" | null;
     discovery_failure_code: string | null;
     discovery_failure_message: string | null;
     discovery_retry_available: boolean;
@@ -112,6 +112,8 @@ export interface WorkflowProgress {
     analysed_page_coverage_percentage: number | null;
     full_site_coverage_percentage: number | null;
     full_site_coverage_confidence: "established" | "not_established";
+    discovery_stage_status?: string | null;
+    discovery_completeness_message?: string | null;
   };
   browser_engine_progress: {
     status: string;

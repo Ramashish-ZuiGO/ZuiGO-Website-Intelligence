@@ -586,7 +586,7 @@ def workflow_progress(
     elif discovery_status in _ACTIVE_STATUSES:
         discovery_completeness = None
     else:
-        discovery_completeness = _TERMINAL_COMPLETENESS.get(discovery_status, "inconclusive")
+        discovery_completeness = _TERMINAL_COMPLETENESS.get(discovery_status)
     recoverable_discovery_codes = {
         "DISCOVERY_DEADLINE_EXCEEDED",
         "DISCOVERY_PAGE_FETCH_FAILED",
@@ -864,7 +864,10 @@ def workflow_progress(
                 "timed_out_pages": timed_out_pages,
                 "availability_status": (
                     "unavailable"
-                    if engine in unavailable_engine_set and len(tested_urls) == 0
+                    if (
+                        raw_browser_status in {"unavailable", "timed_out"}
+                        or (engine in unavailable_engine_set and len(tested_urls) == 0)
+                    )
                     else "available"
                 ),
             }
@@ -1356,9 +1359,13 @@ def report_status(report_id: uuid.UUID, db: DatabaseSession) -> ReportStatusRead
     except ReportDeliveryError as exception:
         raise _report_error(exception) from exception
     completed = sum(item.status not in {"unavailable", "excluded"} for item in report.sections)
+    quality = None
+    if report.snapshot:
+        quality = report.snapshot.snapshot_payload.get("report_quality")
     return ReportStatusRead(
         report_id=report.report_id,
         status=report.status,
+        report_quality=quality,
         completed_section_count=completed,
         total_section_count=len(report.sections),
         unavailable_sections=report.unavailable_sections,

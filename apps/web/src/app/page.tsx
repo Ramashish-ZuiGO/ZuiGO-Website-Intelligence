@@ -32,7 +32,8 @@ const ENGINE_OPTIONS: Array<{
   },
 ];
 
-function humanStatus(value: string): string {
+function humanStatus(value: string | null | undefined): string {
+  if (!value) return "unknown";
   return value.replaceAll("_", " ");
 }
 
@@ -105,11 +106,17 @@ export default function Home() {
         `/analysis-runs/${encodeURIComponent(started.analysis_run_id)}?${query.toString()}`,
       );
     } catch (requestError) {
-      setError(
-        requestError instanceof ApiError
-          ? requestError.message
-          : "The analysis could not be started. Try again without changing the URL.",
-      );
+      if (requestError instanceof ApiError) {
+        setError(requestError.message);
+      } else if (requestError instanceof TypeError) {
+        setError(
+          "Could not reach the analysis server. Check that the backend is running and try again.",
+        );
+      } else {
+        setError(
+          "The analysis could not be started due to an unexpected error. Please try again.",
+        );
+      }
     } finally {
       setSubmitting(false);
     }

@@ -64,13 +64,29 @@ function isTransientConnectionError(error: unknown): boolean {
   );
 }
 
-function statusLabel(status: string): string {
+function statusLabel(status: string | null | undefined): string {
+  if (!status) return "Unknown";
   return status
     .replaceAll("_", " ")
     .replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
-function displayStatus(status: string): string {
+type StatusContext = "active_stage" | "historical" | "optional_tool";
+
+function displayStatus(
+  status: string | null | undefined,
+  context?: StatusContext,
+): string {
+  if (!status) {
+    switch (context) {
+      case "historical":
+        return "Not recorded";
+      case "optional_tool":
+        return "Unavailable";
+      default:
+        return "Pending";
+    }
+  }
   const labels: Record<string, string> = {
     pending: "Queued",
     queued: "Queued",
@@ -84,7 +100,8 @@ function displayStatus(status: string): string {
     not_started: "Not started",
     failed_to_start: "Failed to start",
     timed_out: "Timed out",
-    execution_status_not_recorded: "Execution status was not recorded for this run",
+    execution_status_not_recorded:
+      "Execution status was not recorded for this run",
   };
   return labels[status] ?? statusLabel(status);
 }
@@ -185,13 +202,18 @@ function findingsFromReport(report: DeliveredReport): DetailedReportFinding[] {
 }
 
 function TruncatedUrl({ url, maxLen = 60 }: { url: string; maxLen?: number }) {
-  if (url.length <= maxLen) return <span className="break-all">{url}</span>;
-  const display = url.slice(0, maxLen - 1) + "…";
-  return (
-    <span className="break-all" title={url}>
+  const isLink = url.startsWith("http://") || url.startsWith("https://");
+  const display = url.length > maxLen ? url.slice(0, maxLen - 1) + "…" : url;
+  const inner = isLink ? (
+    <a href={url} target="_blank" rel="noopener noreferrer" className="break-all text-blue-600 hover:underline" title={url}>
+      {display}
+    </a>
+  ) : (
+    <span className="break-all" title={url.length > maxLen ? url : undefined}>
       {display}
     </span>
   );
+  return inner;
 }
 
 function FindingDetail({ finding }: { finding: DetailedReportFinding }) {
@@ -519,10 +541,13 @@ function ReportViewer({ report }: { report: DeliveredReport }) {
       : null;
   const rawDiscoveryCompleteness = pageCoverage.discovery_completeness;
   const discoveryStageStatus = String(pageCoverage.discovery_stage_status ?? "");
+  const reportTerminal = TERMINAL_STATUSES.includes(report.status ?? "");
   const discoveryPending = rawDiscoveryCompleteness === null || rawDiscoveryCompleteness === undefined;
   const discoveryRunning = discoveryStageStatus === "running";
   const discoveryCompleteness = discoveryPending
-    ? discoveryRunning ? "running" : "pending"
+    ? reportTerminal
+      ? "not_recorded"
+      : discoveryRunning ? "running" : "pending"
     : String(rawDiscoveryCompleteness);
   const discoveryComplete = discoveryCompleteness === "complete";
   const discoveryCompletenessMessage = String(
@@ -540,7 +565,24 @@ function ReportViewer({ report }: { report: DeliveredReport }) {
     report.status === "partial" ||
     (report.status === "completed" && report.unavailable_sections.length > 0)
       ? "Completed with limitations"
-      : displayStatus(report.status);
+      : displayStatus(report.status, "historical");
+  const reportQuality = (() => {
+    const n = report.evidence_coverage_numerator;
+    const d = report.evidence_coverage_denominator;
+    const hasScore = typeof scores.overall_score === "number";
+    const confidence = report.confidence_percent;
+    if (d === 0 || n === 0 || discoveryCompleteness === "failed") return "FAILED";
+    const ratio = n / d;
+    if (ratio >= 0.9 && hasScore && confidence !== null && confidence >= 50) return "COMPLETE";
+    if (ratio >= 0.4 || hasScore) return "PARTIAL";
+    return "INCONCLUSIVE";
+  })();
+  const qualityColor: Record<string, string> = {
+    COMPLETE: "bg-green-100 text-green-800 border-green-300",
+    PARTIAL: "bg-yellow-100 text-yellow-800 border-yellow-300",
+    INCONCLUSIVE: "bg-orange-100 text-orange-800 border-orange-300",
+    FAILED: "bg-red-100 text-red-800 border-red-300",
+  };
 
   return (
     <article
@@ -554,8 +596,11 @@ function ReportViewer({ report }: { report: DeliveredReport }) {
         <h3 className="mt-4 text-3xl font-black" id={`delivered-report-${report.report_id}`}>
           Evidence-grounded website analysis
         </h3>
-        <p className="mt-2 text-sm text-slate-200">
-          Immutable evidence snapshot · {reportStatus}
+        <p className="mt-2 flex items-center gap-2 text-sm text-slate-200">
+          <span>Immutable evidence snapshot · {reportStatus}</span>
+          <span className={`inline-block rounded-full border px-2 py-0.5 text-xs font-bold uppercase ${qualityColor[reportQuality] ?? "bg-slate-100 text-slate-700 border-slate-300"}`}>
+            {reportQuality}
+          </span>
         </p>
         <p className="mt-2 break-all text-sm text-slate-200">
           {String(executive.website_analysed ?? "Website not recorded")} ·{" "}
@@ -584,9 +629,14 @@ function ReportViewer({ report }: { report: DeliveredReport }) {
                 Full-site coverage is not established.
               </p>
             )}
-            {discoveryPending && (
+            {discoveryPending && !reportTerminal && (
               <p className="mt-1 text-sm text-slate-300">
                 Full-site coverage will be evaluated after discovery completes.
+              </p>
+            )}
+            {discoveryPending && reportTerminal && (
+              <p className="mt-1 text-sm text-slate-300">
+                Discovery completeness was not recorded for this analysis.
               </p>
             )}
           </div>
@@ -594,16 +644,20 @@ function ReportViewer({ report }: { report: DeliveredReport }) {
             <p className="text-xs font-bold uppercase">Discovery completeness</p>
             <p className="mt-1 text-2xl font-black">
               {discoveryPending
-                ? discoveryRunning ? "In Progress" : "Pending"
+                ? reportTerminal
+                  ? "Not Recorded"
+                  : discoveryRunning ? "In Progress" : "Pending"
                 : statusLabel(discoveryCompleteness)}
             </p>
             <p className="text-sm">
               {discoveryCompletenessMessage || (
                 discoveryComplete
                   ? "The bounded discovery completed."
-                  : discoveryPending
-                    ? "Website discovery is in progress."
-                    : "The retained page set may not represent the full website."
+                  : discoveryPending && reportTerminal
+                    ? "Discovery completeness was not recorded for this analysis."
+                    : discoveryPending
+                      ? "Website discovery is in progress."
+                      : "The retained page set may not represent the full website."
               )}
             </p>
           </div>
@@ -891,7 +945,7 @@ function ReportViewer({ report }: { report: DeliveredReport }) {
           )}
           <dl className="mt-4 grid gap-3 sm:grid-cols-3 lg:grid-cols-5">
             {[
-              ["Raw URLs discovered", pageCoverage.total_urls_discovered],
+              ["URLs discovered", pageCoverage.total_urls_discovered],
               ["Normalized pages", pageCoverage.normalized_pages],
               ["Eligible", pageCoverage.eligible_pages],
               ["Scheduled", pageCoverage.total_pages_scheduled],
@@ -1469,6 +1523,7 @@ function ReportViewer({ report }: { report: DeliveredReport }) {
                   Status:{" "}
                   {displayStatus(
                     String(agent.status ?? "execution status not recorded"),
+                    "historical",
                   )}
                   {typeof agent.status_explanation === "string" && (
                     <span className="mt-1 block text-sm">
@@ -1494,7 +1549,7 @@ function ReportViewer({ report }: { report: DeliveredReport }) {
           <ul className="mt-3 grid gap-2 sm:grid-cols-2">
             {report.sections.map((section) => (
               <li className="rounded-lg bg-slate-50 p-3" key={section.section_id}>
-                <strong>{section.title}</strong> — {displayStatus(section.status)}
+                <strong>{section.title}</strong> — {displayStatus(section.status, "historical")}
                 <br />
                 <span className="text-sm">
                   {section.evidence_references.length} retained evidence references
@@ -1523,6 +1578,7 @@ function ReportViewer({ report }: { report: DeliveredReport }) {
                                 agent.execution_status ??
                                   "execution status not recorded",
                               ),
+                              "historical",
                             )}
                           </li>
                         ))}
@@ -1868,7 +1924,8 @@ export function ReportDeliveryPanel({
                 : displayStatus(progress.status)}{" "}
               · {progressDescription}
             </p>
-            {progress.page_coverage.discovery_completeness !== "complete" && (
+            {progress.page_coverage.discovery_completeness != null &&
+              progress.page_coverage.discovery_completeness !== "complete" && (
               <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
                 <p className="font-semibold">
                   Website discovery was{" "}
@@ -2008,9 +2065,9 @@ export function ReportDeliveryPanel({
                 <ul className="mt-3 grid gap-2 text-sm">
                   {progress.page_coverage.resource_inventory.map((item) => (
                     <li className="min-w-0 rounded bg-white p-3" key={item.url}>
-                      <p className="break-all font-semibold">{item.url}</p>
-                      <p className="mt-1 break-all">
-                        Final URL: {item.final_url ?? "Not collected"}
+                      <p className="font-semibold"><TruncatedUrl url={item.url} maxLen={80} /></p>
+                      <p className="mt-1">
+                        Final URL: <TruncatedUrl url={item.final_url ?? "Not collected"} maxLen={70} />
                       </p>
                       <p>
                         {item.http_status === null
@@ -2037,7 +2094,7 @@ export function ReportDeliveryPanel({
                 />
               </h3>
               <p className="mt-1 text-sm capitalize">
-                {displayStatus(progress.browser_engine_progress.status)}
+                {displayStatus(progress.browser_engine_progress.status, "optional_tool")}
               </p>
               <ul className="mt-2 grid gap-2 sm:grid-cols-3">
                 {progress.browser_engine_progress.engines.map((engine) => {

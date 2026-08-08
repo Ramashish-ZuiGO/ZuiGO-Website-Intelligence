@@ -38,6 +38,7 @@ from app.models import (
 from app.services.agent_platform_registry import AgentRegistry
 from app.services.browser_compatibility import ENGINE_LABELS
 from app.services.canonical_report_metrics import (
+    _assign_limitation_id,
     deduplicate_limitations,
     reconcile_affected_pages,
 )
@@ -417,6 +418,31 @@ def _loaded_run(db: Session, run_id: uuid.UUID) -> AnalysisRun:
     return run
 
 
+def _compute_report_quality(
+    *,
+    numerator: int,
+    denominator: int,
+    overall_score: float | None,
+    confidence: int | None,
+    discovery_completeness: str | None,
+) -> str:
+    if denominator == 0 or numerator == 0:
+        return "FAILED"
+    if discovery_completeness == "failed":
+        return "FAILED"
+    section_ratio = numerator / denominator
+    if (
+        section_ratio >= 0.9
+        and overall_score is not None
+        and confidence is not None
+        and confidence >= 50
+    ):
+        return "COMPLETE"
+    if section_ratio >= 0.4 or overall_score is not None:
+        return "PARTIAL"
+    return "INCONCLUSIVE"
+
+
 def _discovery_message(
     stage_status: str | None,
     completeness: str | None,
@@ -474,7 +500,7 @@ def _real_evidence_summary(
         discovery_completeness = None
         discovery_stage_status = raw_discovery_status
     else:
-        discovery_completeness = _TERMINAL_COMPLETENESS.get(raw_discovery_status, "inconclusive")
+        discovery_completeness = _TERMINAL_COMPLETENESS.get(raw_discovery_status)
         discovery_stage_status = raw_discovery_status
     discovery_complete = discovery_completeness == "complete"
     _raw_limit = workflow.structured_input.get("maximum_pages")
@@ -741,7 +767,10 @@ def _real_evidence_summary(
     for engine in workflow.structured_input.get("browser_engines", []):
         row = engine_rows.get(engine, {})
         tested_pages = len(tested_urls_by_engine.get(engine, set()))
-        all_unavailable = engine in unavailable_engines and tested_pages == 0
+        browser_stage_unavailable = browser.get("status") == "unavailable"
+        all_unavailable = browser_stage_unavailable or (
+            engine in unavailable_engines and tested_pages == 0
+        )
         browser_engines.append(
             {
                 **row,
@@ -1919,7 +1948,12 @@ def _build_sections(
         item for item in all_detailed_findings if item["severity"] in {"critical", "high"}
     ][:5]
     ranked_actions = []
-    for rank, item in enumerate(actions, 1):
+    seen_action_titles: set[str] = set()
+    for _rank, item in enumerate(actions, 1):
+        action_title_key = str(item.issue_title or "").strip().casefold()
+        if action_title_key in seen_action_titles:
+            continue
+        seen_action_titles.add(action_title_key)
         related_finding_ids = [
             finding["finding_id"]
             for finding in all_detailed_findings
@@ -1933,7 +1967,7 @@ def _build_sections(
         ranked_actions.append(
             {
                 "action_id": str(item.id),
-                "priority_rank": rank,
+                "priority_rank": len(ranked_actions) + 1,
                 "title": item.issue_title,
                 "severity": item.severity,
                 "priority_score": item.priority_score,
@@ -1948,7 +1982,7 @@ def _build_sections(
                     "final_url": item.final_url,
                 },
                 "dependencies": item.evidence_summary.get("dependencies", []),
-                "recommended_sequence": rank,
+                "recommended_sequence": len(ranked_actions) + 1,
                 "expected_measurable_outcome": item.expected_result,
                 "verification_method": item.verification_steps,
                 "evidence_references": [_evidence("action_item", item.id)],
@@ -2496,8 +2530,7 @@ def _build_sections(
                     for item in deduplicate_limitations(
                         [
                             {
-                                "message": "Unavailable evidence is not interpreted"
-                                " as a successful result.",
+                                "message": "Unavailable evidence is not represented as passed.",
                                 "source": "coverage",
                             },
                             {
@@ -2605,6 +2638,17 @@ def _html_value(value: Any) -> str:
     return html.escape(str(value))
 
 
+def _html_url(value: Any, *, max_display: int = 60) -> str:
+    if value is None:
+        return "Unavailable"
+    raw = str(value)
+    safe_href = html.escape(raw, quote=True)
+    display = raw
+    if len(display) > max_display:
+        display = display[: max_display - 1] + "…"
+    return f'<a href="{safe_href}" title="{safe_href}">{html.escape(display)}</a>'
+
+
 def _html_label(value: str) -> str:
     return html.escape(value.replace("_", " ").strip().title())
 
@@ -2624,8 +2668,8 @@ def _html_occurrence_status(item: dict[str, Any]) -> Any:
 def _html_occurrence_table(items: list[dict[str, Any]]) -> str:
     rows = "".join(
         "<tr>"
-        f"<td>{_html_value(item.get('normalized_url'))}</td>"
-        f"<td>{_html_value(item.get('final_url') or item.get('normalized_url'))}</td>"
+        f"<td>{_html_url(item.get('normalized_url'))}</td>"
+        f"<td>{_html_url(item.get('final_url') or item.get('normalized_url'))}</td>"
         f"<td>{_html_value(_html_occurrence_status(item))}</td>"
         f"<td>{_html_value(item.get('page_type'))}</td>"
         f"<td>{_html_value(_first_present(item, 'selector', 'resource_url', 'location'))}</td>"
@@ -2657,6 +2701,8 @@ def _html_structured(value: Any, *, key: str = "", depth: int = 0) -> str:
             return _html_value(definition.name if definition else value.replace("_", " ").title())
         if key in {"category", "category_id"} and isinstance(value, str):
             return _html_label(value)
+        if isinstance(value, str) and (key.endswith("_url") or key == "url"):
+            return _html_url(value)
         return _html_value(value)
     if isinstance(value, list):
         if not value:
@@ -2806,6 +2852,9 @@ def _html_artifact(snapshot: dict[str, Any]) -> bytes:
         '</style></head><body><header class="cover"><p class="brand">ZuiGO Website Intelligence'
         "</p><h1>"
         f"{html.escape(snapshot['title'])}</h1>{score_card}"
+        f'<p><span class="badge">'
+        f"{html.escape(snapshot.get('report_quality', 'PARTIAL'))}"
+        "</span></p>"
         '<div class="meta">'
         f"<p><strong>Website</strong><br>{html.escape(snapshot.get('website_name', 'Website'))}"
         f"<br>{html.escape(snapshot.get('website_url', 'Unavailable'))}</p>"
@@ -3519,6 +3568,15 @@ def generate_report(
             ),
         }
     )
+    coverage_limitation_ids = {
+        _assign_limitation_id(msg)
+        for msg in section_by_key["coverage_confidence"]["content"].get("limitations", [])
+    }
+    executive["important_limitations"] = [
+        msg
+        for msg in executive.get("important_limitations", [])
+        if _assign_limitation_id(msg) not in coverage_limitation_ids
+    ]
     evidence_references = sorted(
         {
             canonical_json(reference): reference
@@ -3579,12 +3637,17 @@ def generate_report(
         score.confidence_percent if score else run.score.confidence_percent if run.score else None
     )
     page_confidence = page_coverage.get("coverage_percentage")
-    discovery_confidence = {
-        "complete": 100,
-        "partial": 50,
-        "failed": 0,
-        "inconclusive": 0,
-    }.get(str(page_coverage.get("discovery_completeness")), 0)
+    _discovery_completeness = page_coverage.get("discovery_completeness")
+    discovery_confidence = (
+        {
+            "complete": 100,
+            "partial": 50,
+            "failed": 0,
+            "inconclusive": 0,
+        }.get(str(_discovery_completeness))
+        if _discovery_completeness is not None
+        else None
+    )
     available_engines = [
         item
         for item in browser_compatibility.get("engines", [])
@@ -3692,9 +3755,17 @@ def generate_report(
         for position, section in enumerate(sections, 1)
     ]
     db.add_all(persisted_sections)
+    report_quality = _compute_report_quality(
+        numerator=numerator,
+        denominator=denominator,
+        overall_score=score.overall_score if score else None,
+        confidence=report_confidence,
+        discovery_completeness=page_coverage.get("discovery_completeness"),
+    )
     snapshot_payload = {
         "schema_version": REPORT_VERSION,
         "report_id": str(report_id),
+        "report_quality": report_quality,
         "title": f"{run.website.name or 'Website'} analysis report",
         "generated_at": generated_at.isoformat(),
         "report_version": REPORT_VERSION,

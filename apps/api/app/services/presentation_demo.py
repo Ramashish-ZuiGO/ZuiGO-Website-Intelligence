@@ -30,6 +30,7 @@ from app.services.report_delivery import (
     TEMPLATE_ID,
     TEMPLATE_VERSION,
     fingerprint,
+    render_additional_report_artifact,
 )
 from app.services.report_demo import DEMO_GENERATED_AT, build_demonstration_snapshot
 
@@ -581,6 +582,8 @@ def _presentation_payload(
     snapshot = report.snapshot.snapshot_payload
     presentation = snapshot["presentation"]
     standard_artifacts = {artifact.format: artifact for artifact in report.artifacts}
+    pdf_content = render_additional_report_artifact("pdf", snapshot)[0]
+    pdf_checksum = hashlib.sha256(pdf_content).hexdigest()
     artifact_specs = (
         (
             "presentation_html",
@@ -594,8 +597,8 @@ def _presentation_payload(
             "presentation_pdf",
             "Export Presentation PDF",
             standard_artifacts["pdf"].filename,
-            standard_artifacts["pdf"].size_bytes,
-            standard_artifacts["pdf"].checksum_sha256,
+            len(pdf_content),
+            pdf_checksum,
             f"/api/v1/reports/{report.report_id}/download/pdf",
         ),
         (

@@ -136,7 +136,7 @@ def test_agent_interface_is_integrated_with_required_surfaces() -> None:
     action_plan = read(ACTION_PLAN_PATH)
 
     assert "<AgentExecutionPanel" in report
-    assert "Agent execution" in report
+    assert "Agent Execution" in report
     assert "<AgentExecutionPanel" in website_panel
     assert "projectId={projectId}" in website_panel
     assert "Review agent execution evidence" in action_plan

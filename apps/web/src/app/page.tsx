@@ -3,10 +3,12 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useRef, useState } from "react";
+import { Globe, Search, Loader2, Monitor, AlertTriangle, ExternalLink } from "lucide-react";
 
 import type { RecentRealAnalysis } from "@/components/reports/types";
 import { ApiError } from "@/lib/api";
 import { reportDeliveryApi } from "@/lib/report-delivery-api";
+import { StatusBadge } from "@/components/ui/StatusBadge";
 
 type BrowserEngine = "chromium" | "firefox" | "webkit";
 
@@ -17,18 +19,18 @@ const ENGINE_OPTIONS: Array<{
 }> = [
   {
     value: "chromium",
-    label: "Chromium engine",
-    description: "Chrome-family rendering evidence",
+    label: "Chromium",
+    description: "Chrome engine",
   },
   {
     value: "firefox",
-    label: "Firefox engine",
-    description: "Gecko rendering evidence",
+    label: "Firefox",
+    description: "Gecko engine",
   },
   {
     value: "webkit",
-    label: "WebKit engine",
-    description: "Safari-family rendering evidence",
+    label: "WebKit",
+    description: "Safari engine",
   },
 ];
 
@@ -123,163 +125,200 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-50 text-slate-950">
-      <section className="bg-slate-950 px-6 py-16 text-white">
-        <div className="mx-auto max-w-6xl">
-          <p className="text-sm font-black uppercase tracking-[0.2em] text-orange-300">
-            ZuiGO Website Intelligence
+    <main>
+      {/* HERO SECTION */}
+      <section className="bg-z-dark text-z-ink-inverse pt-12 pb-16 border-b border-z-dark-muted">
+        <div className="z-container max-w-4xl mx-auto text-center">
+          <h1 className="text-4xl sm:text-5xl font-display font-semibold tracking-tight" style={{ color: "#FFFFFF" }}>
+            Understand what is holding your website back.
+          </h1>
+          <p className="mt-4 text-lg text-z-ink-muted max-w-2xl mx-auto leading-relaxed">
+            Enter a public website. ZuiGO discovers its pages, tests retained
+            evidence across browser engines, runs eight specialist agents, and
+            produces an evidence-grounded report.
           </p>
-          <div className="mt-5 grid gap-10 lg:grid-cols-[1fr_28rem] lg:items-start">
-            <div>
-              <h1 className="max-w-3xl text-4xl font-black leading-tight sm:text-6xl">
-                Understand what is holding your website back.
-              </h1>
-              <p className="mt-5 max-w-2xl text-lg leading-8 text-slate-200">
-                Enter a public website. ZuiGO discovers its pages, tests retained
-                evidence across browser engines, runs eight specialist agents, and
-                produces an evidence-grounded report.
-              </p>
-              <ul className="mt-7 grid gap-2 text-sm text-slate-200 sm:grid-cols-2">
-                <li>✓ Exact affected pages and evidence</li>
-                <li>✓ Chromium, Firefox, and WebKit engines</li>
-                <li>✓ Explainable scores and action plan</li>
-                <li>✓ Accessible HTML, PDF, JSON, and appendix exports</li>
-              </ul>
+
+          <form
+            className="mt-8 max-w-2xl mx-auto text-left"
+            onSubmit={(event) => void submit(event)}
+          >
+            <div className="flex flex-col sm:flex-row gap-3">
+              <div className="relative flex-1">
+                <Globe className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-z-ink-muted" aria-hidden="true" />
+                <input
+                  autoComplete="url"
+                  className="w-full bg-z-dark-surface border border-z-dark-muted rounded-md py-3.5 pl-12 pr-4 text-white placeholder-z-ink-muted focus:outline-none focus:ring-2 focus:ring-z-focus-ring focus:border-transparent transition-all"
+                  id="website-url"
+                  inputMode="url"
+                  onChange={(event) => {
+                    setWebsiteUrl(event.target.value);
+                    idempotencyKey.current = "";
+                  }}
+                  placeholder="https://example.com"
+                  required
+                  type="url"
+                  value={websiteUrl}
+                  disabled={submitting}
+                  aria-label="Public website URL"
+                />
+              </div>
+              <button
+                className="z-btn z-btn-primary z-btn-lg sm:w-auto w-full h-12"
+                disabled={submitting}
+                type="submit"
+              >
+                {submitting ? <Loader2 className="h-5 w-5 animate-spin" /> : <Search className="h-5 w-5" />}
+                {submitting ? "Starting..." : "Analyze Website"}
+              </button>
             </div>
 
-            <form
-              className="rounded-2xl bg-white p-6 text-slate-950 shadow-2xl"
-              onSubmit={(event) => void submit(event)}
-            >
-              <h2 className="text-xl font-black">Start website analysis</h2>
-              <label className="mt-5 block text-sm font-bold" htmlFor="website-url">
-                Public website URL
-              </label>
-              <input
-                autoComplete="url"
-                className="mt-2 w-full rounded-lg border border-slate-400 px-4 py-3 focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-orange-600"
-                id="website-url"
-                inputMode="url"
-                onChange={(event) => {
-                  setWebsiteUrl(event.target.value);
-                  idempotencyKey.current = "";
-                }}
-                placeholder="example.com"
-                required
-                type="text"
-                value={websiteUrl}
-              />
-              <details className="mt-5 rounded-lg border border-slate-300 p-4">
-                <summary className="cursor-pointer font-bold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600">
-                  Advanced settings
-                </summary>
-                <fieldset className="mt-4">
-                  <legend className="font-bold">Browser-engine tests</legend>
-                  <div className="mt-2 grid gap-2">
+            <details className="mt-4 group rounded-md border border-z-dark-muted bg-z-dark-surface/50 p-4 text-sm [&_summary::-webkit-details-marker]:hidden">
+              <summary className="cursor-pointer font-medium text-z-ink-muted hover:text-white flex items-center gap-2 outline-none focus-visible:ring-2 focus-visible:ring-z-focus-ring rounded-sm w-max">
+                <Monitor className="h-4 w-4" />
+                Advanced settings
+              </summary>
+              <div className="mt-4 pt-4 border-t border-z-dark-muted">
+                <fieldset>
+                  <legend className="font-medium text-white mb-1">Browser engine checks</legend>
+                  <p className="text-xs text-z-ink-muted mb-3">
+                    Optional rendering-engine checks. Engine results do not represent full branded-browser UAT certification.
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     {ENGINE_OPTIONS.map((option) => (
                       <label
-                        className="flex cursor-pointer gap-3 rounded-lg border p-3"
+                        className={`flex flex-col gap-1 p-3 rounded-md border cursor-pointer transition-colors ${
+                          engines.includes(option.value)
+                            ? "border-z-accent bg-z-accent/10"
+                            : "border-z-dark-muted text-z-ink-muted hover:border-z-ink-muted/80 hover:text-white"
+                        }`}
                         key={option.value}
                       >
-                        <input
-                          checked={engines.includes(option.value)}
-                          className="mt-1 accent-orange-600"
-                          onChange={() => toggleEngine(option.value)}
-                          type="checkbox"
-                        />
-                        <span>
-                          <strong>{option.label}</strong>
-                          <span className="block text-xs text-slate-600">
-                            {option.description}
+                        <div className="flex items-center gap-2">
+                          <input
+                            checked={engines.includes(option.value)}
+                            className="accent-z-accent h-4 w-4"
+                            onChange={() => toggleEngine(option.value)}
+                            type="checkbox"
+                            disabled={submitting}
+                          />
+                          <span className={`font-medium ${engines.includes(option.value) ? "text-white" : ""}`}>
+                            {option.label}
                           </span>
-                        </span>
+                        </div>
                       </label>
                     ))}
                   </div>
                 </fieldset>
-                <label className="mt-4 flex gap-3 text-sm">
+                <label className="mt-4 flex items-center gap-2 text-z-ink-muted hover:text-white cursor-pointer w-max">
                   <input
                     checked={includeMobile}
-                    className="accent-orange-600"
+                    className="accent-z-accent h-4 w-4"
                     onChange={(event) => setIncludeMobile(event.target.checked)}
                     type="checkbox"
+                    disabled={submitting}
                   />
                   Include mobile viewport testing at 390 × 844
                 </label>
-              </details>
+              </div>
+            </details>
 
-              {error && (
-                <p className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-800" role="alert">
-                  {error}
-                </p>
-              )}
-              <button
-                className="mt-5 w-full rounded-lg bg-orange-500 px-5 py-3 font-black text-slate-950 disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-4 focus-visible:outline-offset-4 focus-visible:outline-slate-950"
-                disabled={submitting}
-                type="submit"
-              >
-                {submitting ? "Starting real analysis…" : "Start Website Analysis"}
-              </button>
-              <p className="mt-3 text-xs text-slate-600">
-                Public HTTP/HTTPS sites only. Private networks, localhost, metadata
-                endpoints, unsafe redirects, and credential-bearing URLs are blocked.
-              </p>
-            </form>
-          </div>
+            {error && (
+              <div className="mt-4 p-4 rounded-md bg-z-danger-subtle border border-z-danger/20 text-z-danger text-sm flex items-start gap-3" role="alert">
+                <AlertTriangle className="h-5 w-5 shrink-0" />
+                <p>{error}</p>
+              </div>
+            )}
+
+            <p className="mt-4 text-xs text-z-ink-muted text-center sm:text-left">
+              Public HTTP/HTTPS sites only. Private networks, localhost, and credential-bearing URLs are blocked.
+            </p>
+            <div className="mt-8 text-center sm:text-left">
+              <Link href="/presentation" className="text-sm font-medium text-z-ink-muted hover:text-white transition-colors flex items-center gap-2 justify-center sm:justify-start">
+                <Monitor className="h-4 w-4" />
+                Open Prepared Demo
+              </Link>
+            </div>
+          </form>
         </div>
       </section>
 
-      <section className="mx-auto grid max-w-6xl gap-8 px-6 py-12 lg:grid-cols-[1fr_20rem]">
-        <div>
-          <h2 className="text-2xl font-black">Recent real analyses</h2>
-          <p className="mt-2 text-slate-600">
-            Historical runs remain independent and preserve their original evidence.
-          </p>
+      {/* RECENT ANALYSES SECTION */}
+      <section className="z-container py-16">
+        <div className="max-w-5xl mx-auto">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+            <div>
+              <h2 className="text-xl font-display font-semibold text-z-ink">Recent analyses</h2>
+              <p className="mt-1 text-sm text-z-ink-secondary">
+                Review previous website analyses and reports.
+              </p>
+            </div>
+          </div>
+
           {loadingRecent ? (
-            <p className="mt-5" role="status">Loading recent analyses…</p>
+            <div className="z-card text-center py-16 text-z-ink-muted">
+              <Loader2 className="h-8 w-8 animate-spin mx-auto mb-3" />
+              <p>Loading recent analyses…</p>
+            </div>
           ) : recent.length === 0 ? (
-            <p className="mt-5 rounded-xl border bg-white p-5 text-slate-600">
-              No real analysis has been submitted yet.
-            </p>
+            <div className="z-card text-center py-16">
+              <Globe className="h-10 w-10 text-z-border-strong mx-auto mb-3" />
+              <p className="text-z-ink-secondary">No analysis has been submitted yet.</p>
+            </div>
           ) : (
-            <ul className="mt-5 grid gap-3">
-              {recent.map((item) => {
-                const query = new URLSearchParams({
-                  projectId: item.project_id,
-                  websiteId: item.website_id,
-                  workflowExecutionId: item.workflow_execution_id,
-                });
-                return (
-                  <li className="rounded-xl border bg-white p-4" key={item.workflow_execution_id}>
-                    <Link
-                      className="font-bold underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600"
-                      href={`/analysis-runs/${item.analysis_run_id}?${query.toString()}`}
-                    >
-                      {item.normalized_url}
-                    </Link>
-                    <p className="mt-1 text-sm capitalize text-slate-600">
-                      {humanStatus(item.status)} · {new Date(item.created_at).toLocaleString()}
-                    </p>
-                  </li>
-                );
-              })}
-            </ul>
+            <div className="z-card p-0 overflow-x-auto">
+              <table className="w-full text-left whitespace-nowrap">
+                <thead className="bg-z-surface-muted border-b border-z-border text-xs font-semibold text-z-ink-secondary uppercase tracking-wider">
+                  <tr>
+                    <th className="px-6 py-4">Website</th>
+                    <th className="px-6 py-4">Status</th>
+                    <th className="px-6 py-4">Date Started</th>
+                    <th className="px-6 py-4 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-z-border">
+                  {recent.map((item) => {
+                    const query = new URLSearchParams({
+                      projectId: item.project_id,
+                      websiteId: item.website_id,
+                      workflowExecutionId: item.workflow_execution_id,
+                    });
+
+                    return (
+                      <tr key={item.workflow_execution_id} className="hover:bg-z-surface-muted transition-colors group">
+                        <td className="px-6 py-4">
+                          <span className="font-medium text-z-ink z-mono">{item.normalized_url}</span>
+                        </td>
+                        <td className="px-6 py-4">
+                          <StatusBadge
+                            status={
+                              item.status === "completed" ? "passed" :
+                              item.status === "failed" ? "failed" :
+                              item.status === "pending" || item.status === "queued" ? "queued" :
+                              "running"
+                            }
+                            label={humanStatus(item.status)}
+                          />
+                        </td>
+                        <td className="px-6 py-4 text-sm text-z-ink-secondary">
+                          {new Date(item.created_at).toLocaleString()}
+                        </td>
+                        <td className="px-6 py-4 text-right">
+                          <Link
+                            className="inline-flex items-center gap-1.5 text-sm font-medium text-z-accent hover:text-z-accent-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-z-focus-ring rounded-sm"
+                            href={`/analysis-runs/${item.analysis_run_id}?${query.toString()}`}
+                          >
+                            View Report
+                            <ExternalLink className="h-4 w-4" />
+                          </Link>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
-        <aside className="rounded-2xl border border-blue-200 bg-blue-50 p-5">
-          <h2 className="font-black">Need a predictable walkthrough?</h2>
-          <p className="mt-2 text-sm text-slate-700">
-            The prepared demonstration is separate from real analyses and opens only
-            when you choose it.
-          </p>
-          <Link
-            aria-label="Open presentation mode: prepared demo"
-            className="mt-4 inline-flex rounded-lg border border-blue-900 px-4 py-2 text-sm font-bold text-blue-950 focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-orange-600"
-            href="/presentation"
-          >
-            Open Prepared Demo
-          </Link>
-        </aside>
       </section>
     </main>
   );

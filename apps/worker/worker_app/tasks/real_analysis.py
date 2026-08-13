@@ -10,6 +10,7 @@ from app.models import (
     AgentExecution,
     AnalysisRun,
     DiscoveryRun,
+    DiscoveryRunPage,
     PageAnalysisRun,
     WebsitePage,
 )
@@ -23,7 +24,7 @@ from app.services.resource_classification import (
     classify_resource,
 )
 from celery import chain
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from worker_app.celery_app import celery_app
 from worker_app.tasks.agent_platform import run_workflow_execution
@@ -340,36 +341,57 @@ def collect_real_browser_compatibility(
                 "selected_page_ids", []
             )
         } or set(runs_by_page_id)
-        pages = (
-            list(
+        website_uuid = uuid.UUID(str(execution.structured_input["website_id"]))
+        # ``selected_ids`` is derived from this run's own page-analysis records
+        # (PageAnalysisRun scoped by discovery_run_id + page_analysis_execution_id)
+        # and is therefore run-safe. Select those pages by id WITHOUT filtering on
+        # the shared ``last_discovery_run_id`` pointer, which a concurrent
+        # same-website run overwrites. When no run-scoped selection exists, fall
+        # back to this run's discovery membership (still run-scoped).
+        if selected_ids:
+            pages = list(
                 db.scalars(
                     select(WebsitePage)
                     .where(
-                        WebsitePage.website_id
-                        == uuid.UUID(str(execution.structured_input["website_id"])),
-                        WebsitePage.last_discovery_run_id == parsed_discovery_id,
+                        WebsitePage.website_id == website_uuid,
                         WebsitePage.id.in_(selected_ids),
                     )
                     .order_by(WebsitePage.crawl_depth, WebsitePage.normalized_url)
                 )
             )
-            if selected_ids
-            else select_scheduled_pages(
-                list(
-                    db.scalars(
-                        select(WebsitePage)
-                        .where(
-                            WebsitePage.website_id
-                            == uuid.UUID(str(execution.structured_input["website_id"])),
-                            WebsitePage.last_discovery_run_id == parsed_discovery_id,
-                            WebsitePage.eligibility_status == "eligible",
-                        )
-                        .order_by(WebsitePage.crawl_depth, WebsitePage.normalized_url)
+        else:
+            member_count = (
+                db.scalar(
+                    select(func.count())
+                    .select_from(DiscoveryRunPage)
+                    .where(DiscoveryRunPage.discovery_run_id == parsed_discovery_id)
+                )
+                or 0
+            )
+            if member_count > 0:
+                eligible_stmt = (
+                    select(WebsitePage)
+                    .join(DiscoveryRunPage, DiscoveryRunPage.website_page_id == WebsitePage.id)
+                    .where(
+                        DiscoveryRunPage.discovery_run_id == parsed_discovery_id,
+                        DiscoveryRunPage.eligibility_status == "eligible",
                     )
-                ),
+                    .order_by(WebsitePage.crawl_depth, WebsitePage.normalized_url)
+                )
+            else:
+                eligible_stmt = (
+                    select(WebsitePage)
+                    .where(
+                        WebsitePage.website_id == website_uuid,
+                        WebsitePage.last_discovery_run_id == parsed_discovery_id,
+                        WebsitePage.eligibility_status == "eligible",
+                    )
+                    .order_by(WebsitePage.crawl_depth, WebsitePage.normalized_url)
+                )
+            pages = select_scheduled_pages(
+                list(db.scalars(eligible_stmt)),
                 execution.structured_input.get("maximum_pages"),
             )
-        )
         pages = [
             page
             for page in pages

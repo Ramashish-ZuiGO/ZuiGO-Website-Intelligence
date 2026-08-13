@@ -846,7 +846,7 @@ def render_presentation_pdf(snapshot: dict[str, Any]) -> bytes:
             pdf.rect(0, 0, width, height, stroke=0, fill=1)
             pdf.setFillColor(HexColor("#FFFFFF"))
             pdf.setFont("Helvetica-Bold", 16)
-            pdf.drawString(56, height - 76, "ZuiGO WEBSITE INTELLIGENCE")
+            pdf.drawString(56, height - 76, "ZUIGO WEBIQ")
             pdf.setFont("Helvetica-Bold", 30)
             pdf.drawString(56, height - 160, "Website Analysis")
             pdf.drawString(56, height - 198, "Presentation Report")
@@ -874,7 +874,7 @@ def render_presentation_pdf(snapshot: dict[str, Any]) -> bytes:
             pdf.rect(0, height - 76, width, 76, stroke=0, fill=1)
             pdf.setFillColor(HexColor("#FFFFFF"))
             pdf.setFont("Helvetica-Bold", 11)
-            pdf.drawString(44, height - 44, "ZuiGO WEBSITE INTELLIGENCE")
+            pdf.drawString(44, height - 44, "ZUIGO WEBIQ")
             pdf.setFillColor(HexColor("#172033"))
             pdf.setFont("Helvetica-Bold", 22)
             pdf.drawString(56, height - 116, title)
@@ -892,7 +892,7 @@ def render_presentation_pdf(snapshot: dict[str, Any]) -> bytes:
         )
         pdf.showPage()
     pdf.setTitle("ZuiGO Website Analysis Presentation Report")
-    pdf.setAuthor("ZuiGO Website Intelligence")
+    pdf.setAuthor("ZuiGO WebIQ")
     pdf.setSubject("Concise evidence-grounded website analysis")
     pdf.save()
     content = output.getvalue()
@@ -928,7 +928,7 @@ a{{color:#0645ad}}a:focus{{outline:3px solid #c94f1d;outline-offset:3px}}
 .card{{padding:1rem;border:1px solid #cbd5e1;border-radius:.6rem}}
 @media print{{@page{{size:A4;margin:16mm}}section{{break-before:page}}header{{break-after:page}}}}
 </style></head><body>
-<header id="section-1" aria-labelledby="heading-1"><p>ZuiGO Website Intelligence</p>
+<header id="section-1" aria-labelledby="heading-1"><p>ZuiGO WebIQ</p>
 <h1 id="heading-1">Website Analysis Presentation Report</h1>
 <p>{html.escape(snapshot["website_name"])} - {html.escape(snapshot["website_url"])}</p>
 <p><strong>76/100</strong> - confidence 88% - page coverage 7/10 (70.0%)</p></header>

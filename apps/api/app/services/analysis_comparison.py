@@ -856,7 +856,7 @@ def _pdf_document(payload: dict[str, Any]) -> bytes:
         topMargin=18 * mm,
         bottomMargin=18 * mm,
         title=f"{payload['website']['name']} before and after comparison",
-        author="ZuiGO Website Intelligence",
+        author="ZuiGO WebIQ",
         subject="Evidence-grounded website analysis comparison",
     )
     story: list[Any] = [

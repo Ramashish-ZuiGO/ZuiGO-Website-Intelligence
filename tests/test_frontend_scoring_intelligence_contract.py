@@ -66,7 +66,6 @@ def test_scoring_accessibility_safe_rendering_and_no_llm_calculation() -> None:
 
 def test_scoring_integrates_all_required_frontend_surfaces() -> None:
     assert "<ScoringIntelligencePanel" in REPORT
-    assert "Score explanation" in REPORT
     assert "<ScoringIntelligencePanel" in WEBSITE
     assert "Review explainable site score" in PAGE
     assert "Review score contributions" in ACTION

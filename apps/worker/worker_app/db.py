@@ -96,8 +96,18 @@ website_pages = Table(
     Column("last_discovery_run_id", Uuid),
     Column("latest_analysis_run_id", Uuid),
     Column("latest_analysis_status", String(30), nullable=False),
-    Column("page_analysis_level_1_status", String(30), nullable=False),
-    Column("page_analysis_level_2_status", String(30), nullable=False),
+    Column(
+        "page_analysis_level_1_status",
+        String(30),
+        nullable=False,
+        server_default="pending",
+    ),
+    Column(
+        "page_analysis_level_2_status",
+        String(30),
+        nullable=False,
+        server_default="pending",
+    ),
     Column("page_analysis_level_1_run_id", Uuid),
     Column("page_analysis_level_2_run_id", Uuid),
     Column("page_analysis_level_1_at", DateTime(timezone=True)),
@@ -145,6 +155,19 @@ page_analysis_runs = Table(
     Column("deep_analysis_run_id", Uuid),
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("updated_at", DateTime(timezone=True), nullable=False),
+)
+# Run-scoped membership: which pages each discovery run found, with the
+# eligibility that run computed. Isolates concurrent same-website runs from the
+# shared, last-writer-wins ``website_pages.last_discovery_run_id`` pointer.
+discovery_run_pages = Table(
+    "discovery_run_pages",
+    metadata,
+    Column("id", Uuid, primary_key=True),
+    Column("discovery_run_id", Uuid, nullable=False),
+    Column("website_page_id", Uuid, nullable=False),
+    Column("eligibility_status", String(30), nullable=False),
+    Column("crawl_depth", Integer, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
 )
 analysis_results = Table(
     "analysis_results",

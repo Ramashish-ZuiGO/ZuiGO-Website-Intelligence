@@ -22,6 +22,114 @@ ENGINE_LABELS: dict[BrowserEngine, str] = {
     "firefox": "Firefox engine",
     "webkit": "WebKit engine",
 }
+ENGINE_UAT_LABELS: dict[BrowserEngine, str] = {
+    "chromium": "Chromium engine",
+    "firefox": "Firefox engine",
+    "webkit": "WebKit engine (internal signal only)",
+}
+
+# --- LOCKED customer-facing Browser UAT contract -----------------------------
+# The customer UAT scope is exactly these three branded browser families.
+# Engine execution (chromium/webkit/firefox) is an internal engineering signal
+# and must never be promoted to branded verification without actual branded
+# browser/platform evidence.
+
+# Canonical machine-readable verification states (locked).
+UAT_VERIFICATION_STATES: tuple[str, ...] = (
+    "VERIFIED",
+    "PARTIALLY_VERIFIED",
+    "NOT_VERIFIED",
+    "UNAVAILABLE_IN_CURRENT_ENVIRONMENT",
+    "NOT_TESTED",
+)
+UAT_VERIFICATION_STATE_LABELS: dict[str, str] = {
+    "VERIFIED": "Verified",
+    "PARTIALLY_VERIFIED": "Partially verified",
+    "NOT_VERIFIED": "Not verified in current environment",
+    "UNAVAILABLE_IN_CURRENT_ENVIRONMENT": "Unavailable in current environment",
+    "NOT_TESTED": "Not tested",
+}
+
+VERSION_POLICY_LIMITATION = (
+    "This environment cannot prove that a tested browser satisfies the "
+    "latest-2-stable version policy; the policy is recorded against the UAT date."
+)
+
+BRANDED_BROWSER_SCOPE: list[dict[str, Any]] = [
+    {
+        "browser": "Google Chrome",
+        "required_version_policy": "Latest 2 stable versions at the UAT date",
+        "required_scope": "Latest 2 stable versions at the UAT date",
+        "required_platforms": ["Windows 10/11", "macOS 13+", "Android 12+"],
+        "platforms": "Windows 10/11, macOS 13+, Android 12+",
+        "verification_state": "NOT_VERIFIED",
+        "verification_state_label": "Not verified in current environment",
+        "actual_tested_browser_version": None,
+        "actual_tested_platform": None,
+        "actual_verified_environments": [],
+        "evidence_source": "none",
+        "engineering_signals": [
+            "Chromium engine evidence available as an engineering relationship",
+        ],
+        "limitations": [
+            "Chromium engine evidence is not equivalent to branded Chrome UAT",
+            "Desktop Chromium emulation does not equal real Android Chrome verification",
+            VERSION_POLICY_LIMITATION,
+        ],
+        "related_engine": "chromium",
+    },
+    {
+        "browser": "Microsoft Edge",
+        "required_version_policy": "Latest 2 stable versions at the UAT date",
+        "required_scope": "Latest 2 stable versions at the UAT date",
+        "required_platforms": ["Windows 10/11"],
+        "platforms": "Windows 10/11",
+        "verification_state": "NOT_VERIFIED",
+        "verification_state_label": "Not verified in current environment",
+        "actual_tested_browser_version": None,
+        "actual_tested_platform": None,
+        "actual_verified_environments": [],
+        "evidence_source": "none",
+        "engineering_signals": [
+            "Shared Chromium ancestry is an engineering relationship only",
+        ],
+        "limitations": [
+            "Chromium engine evidence does not verify branded Edge",
+            VERSION_POLICY_LIMITATION,
+        ],
+        "related_engine": "chromium",
+    },
+    {
+        "browser": "Apple Safari",
+        "required_version_policy": "Safari 16.4 and above",
+        "required_scope": "Safari 16.4 and above",
+        "required_platforms": ["macOS 13+", "iOS 16+"],
+        "platforms": "macOS 13+, iOS 16+",
+        "verification_state": "NOT_VERIFIED",
+        "verification_state_label": "Not verified in current environment",
+        "actual_tested_browser_version": None,
+        "actual_tested_platform": None,
+        "actual_verified_environments": [],
+        "evidence_source": "none",
+        "engineering_signals": [
+            "WebKit engine evidence available as an engineering relationship",
+        ],
+        "limitations": [
+            "WebKit engine evidence does not verify real Safari",
+            "Requires real Safari on macOS or iOS for verification",
+        ],
+        "related_engine": "webkit",
+    },
+]
+
+VERIFICATION_STATE_LABELS: dict[CompatibilityState, str] = {
+    "compatible": "Engine compatible",
+    "partially_compatible": "Partially verified",
+    "incompatible": "Incompatible",
+    "not_tested": "Not verified in current environment",
+    "inconclusive": "Inconclusive",
+    "unavailable": "Not verified in current environment",
+}
 
 
 @dataclass(frozen=True)
@@ -231,23 +339,177 @@ def run_compatibility_analysis(
                 ),
             }
         )
+    status_labels = {state: VERIFICATION_STATE_LABELS[state] for state in VERIFICATION_STATE_LABELS}
+    engine_coverage = []
+    for engine in selected_profile.engines:
+        engine_pages = [row for row in matrix if row["engines"].get(engine) not in (None,)]
+        tested_count = sum(1 for row in engine_pages if row["engines"][engine] != "not_tested")
+        engine_coverage.append(
+            {
+                "engine": engine,
+                "label": ENGINE_LABELS[engine],
+                "uat_label": ENGINE_UAT_LABELS[engine],
+                "tested_pages": tested_count,
+                "eligible_pages": len(selected_pages),
+                "percentage": (
+                    round(tested_count / len(selected_pages) * 100, 1) if selected_pages else 0
+                ),
+            }
+        )
+    overall_tested = sum(1 for row in matrix if row["result"] != "not_tested")
+    overall_percentage = round(overall_tested / len(matrix) * 100, 1) if matrix else 0
+
+    uat_date = time.strftime("%Y-%m-%d", time.gmtime())
+    browser_uat_matrix = _build_browser_uat_matrix(engine_coverage, uat_date=uat_date)
+
     return {
         "profile_id": selected_profile.profile_id,
         "profile_version": selected_profile.version,
         "browser_engine_tests": True,
         "engines": [
-            {"engine": engine, "label": ENGINE_LABELS[engine]}
+            {
+                "engine": engine,
+                "label": ENGINE_LABELS[engine],
+                "uat_label": ENGINE_UAT_LABELS[engine],
+            }
             for engine in selected_profile.engines
         ],
         "viewports": [dict(viewport) for viewport in selected_profile.viewports],
         "eligible_page_count": len(selected_pages),
         "observations": observations,
         "matrix": matrix,
+        "status_labels": status_labels,
+        "engine_coverage": engine_coverage,
+        "browser_uat_matrix": browser_uat_matrix,
+        "browser_uat": {
+            "scope_locked": True,
+            "uat_date": uat_date,
+            "verification_state_labels": dict(UAT_VERIFICATION_STATE_LABELS),
+            "matrix": browser_uat_matrix,
+            "completion": browser_uat_completion(browser_uat_matrix),
+        },
+        "summary": {
+            "tested_page_count": overall_tested,
+            "eligible_page_count": len(matrix),
+            "compatibility_percentage": overall_percentage,
+        },
         "limitations": [
-            "Results describe Playwright browser engines, not every branded browser version.",
-            "Only pages and viewports explicitly listed as tested are covered.",
-            "Performance variation is not incompatibility unless an approved threshold is crossed.",
+            ("Results reflect Playwright engine-level evidence, not branded browser verification."),
+            (
+                "Chromium engine evidence is indicative of Chrome/Edge "
+                "compatibility but is not a substitute for branded "
+                "Chrome or Edge channel testing."
+            ),
+            (
+                "WebKit engine evidence is an internal engineering "
+                "signal only — it does not constitute Safari "
+                "verification without real Safari/macOS/iOS "
+                "infrastructure."
+            ),
+            (
+                "Firefox engine evidence reflects the Playwright "
+                "Firefox build, not an end-user Firefox installation."
+            ),
+            ("Only pages and viewports explicitly listed as tested are covered."),
+            (
+                "Performance variation is not incompatibility "
+                "unless an approved threshold is crossed."
+            ),
         ],
+    }
+
+
+def _build_browser_uat_matrix(
+    engine_coverage: list[dict[str, Any]],
+    *,
+    uat_date: str | None = None,
+) -> list[dict[str, Any]]:
+    """Build the customer-facing branded Browser UAT matrix.
+
+    Branded page counts stay at zero unless an actual branded browser/platform
+    was tested: engine execution is recorded only as an engineering signal and
+    is never promoted to branded verification.
+    """
+    engine_map = {item["engine"]: item for item in engine_coverage}
+    result = []
+    for entry in BRANDED_BROWSER_SCOPE:
+        engine = entry["related_engine"]
+        eng = engine_map.get(engine)
+        has_engine_evidence = bool(eng and eng["tested_pages"] > 0)
+        eligible = int(eng["eligible_pages"]) if eng else 0
+        state = str(entry["verification_state"])
+        result.append(
+            {
+                "browser": entry["browser"],
+                "required_version_policy": entry["required_version_policy"],
+                "required_scope": entry["required_scope"],
+                "required_platforms": list(entry["required_platforms"]),
+                "platforms": entry["platforms"],
+                "uat_date": uat_date,
+                "actual_tested_browser_version": entry["actual_tested_browser_version"],
+                "actual_tested_platform": entry["actual_tested_platform"],
+                "verification_state": state,
+                "verification_state_label": UAT_VERIFICATION_STATE_LABELS.get(state, state),
+                "actual_verified_environments": list(entry["actual_verified_environments"]),
+                # Branded page accounting: nothing is counted as passed unless a
+                # branded browser actually ran; the required scope stays not-tested.
+                "page_coverage": {
+                    "eligible_pages": eligible,
+                    "passed_pages": 0,
+                    "partial_pages": 0,
+                    "failed_pages": 0,
+                    "unavailable_pages": 0,
+                    "not_tested_pages": eligible,
+                },
+                "evidence_source": ("engineering_engine_signal" if has_engine_evidence else "none"),
+                "engineering_signals": (
+                    list(entry["engineering_signals"]) if has_engine_evidence else []
+                ),
+                "limitations": list(entry["limitations"]),
+                "related_engine": engine,
+                "engine_tested_pages": (eng["tested_pages"] if eng else 0),
+                "engine_eligible_pages": eligible,
+            }
+        )
+    return result
+
+
+def browser_uat_completion(matrix: list[dict[str, Any]]) -> dict[str, Any]:
+    """Independent Browser-UAT completeness status for the locked branded scope.
+
+    Browser UAT completeness is reported separately from website-analysis
+    completeness: an unavailable branded environment never blocks report
+    delivery, and an unverified mandatory environment is never counted as
+    passed or hidden.
+    """
+    states = [str(item.get("verification_state")) for item in matrix]
+    verified = sum(state == "VERIFIED" for state in states)
+    partially = sum(state == "PARTIALLY_VERIFIED" for state in states)
+    if matrix and verified == len(matrix):
+        status = "complete"
+    elif verified or partially:
+        status = "partially_verified"
+    else:
+        status = "not_verified"
+    return {
+        "status": status,
+        "required_browser_count": len(matrix),
+        "verified_browser_count": verified,
+        "partially_verified_browser_count": partially,
+        "unverified_browsers": [
+            item["browser"]
+            for item in matrix
+            if str(item.get("verification_state")) not in {"VERIFIED"}
+        ],
+        "statement": (
+            "All mandatory branded browsers were verified."
+            if status == "complete"
+            else (
+                "Mandatory branded-browser UAT environments were not verified in "
+                "the current environment. Engine evidence is retained as an "
+                "engineering signal only."
+            )
+        ),
     }
 
 

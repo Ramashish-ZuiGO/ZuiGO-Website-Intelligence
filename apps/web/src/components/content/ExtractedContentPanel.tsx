@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import { apiRequest } from "@/lib/api";
 import type { ExtractedContent } from "@/lib/types";
 
@@ -50,6 +50,23 @@ function EmptyState({ message }: { message: string }) {
   );
 }
 
+function normalizeContent(raw: ExtractedContent): ExtractedContent {
+  return {
+    ...raw,
+    sections: Array.isArray(raw.sections) ? raw.sections : [],
+    headings: Array.isArray(raw.headings) ? raw.headings : [],
+    paragraphs: Array.isArray(raw.paragraphs) ? raw.paragraphs : [],
+    tables: Array.isArray(raw.tables) ? raw.tables : [],
+    faqs: Array.isArray(raw.faqs) ? raw.faqs : [],
+    images: Array.isArray(raw.images) ? raw.images : [],
+    important_links: Array.isArray(raw.important_links) ? raw.important_links : [],
+    downloadable_files: Array.isArray(raw.downloadable_files) ? raw.downloadable_files : [],
+    structured_data: raw.structured_data && typeof raw.structured_data === "object" ? raw.structured_data : {},
+    metadata: raw.metadata && typeof raw.metadata === "object" ? raw.metadata : {},
+    content_stats: raw.content_stats ?? { word_count: 0, paragraph_count: 0, heading_count: 0, table_count: 0, faq_count: 0, image_count: 0, link_count: 0, download_count: 0 },
+  };
+}
+
 export default function ExtractedContentPanel({ analysisRunId }: { analysisRunId: string }) {
   const [content, setContent] = useState<ExtractedContent | null>(null);
   const [loading, setLoading] = useState(true);
@@ -65,7 +82,7 @@ export default function ExtractedContentPanel({ analysisRunId }: { analysisRunId
         const data = await apiRequest<ExtractedContent>(
           `/api/v1/analysis-runs/${analysisRunId}/extracted-content`
         );
-        if (!cancelled) setContent(data);
+        if (!cancelled) setContent(normalizeContent(data));
       } catch (err) {
         if (cancelled) return;
         const message = err instanceof Error ? err.message : "Failed to load content";
@@ -296,7 +313,7 @@ function TablesTab({ content }: { content: ExtractedContent }) {
           )}
           <div className="overflow-x-auto" tabIndex={0} role="region" aria-label={table.caption || `Table ${ti + 1}`}>
             <table className="w-full text-sm">
-              {table.headers.length > 0 && (
+              {Array.isArray(table.headers) && table.headers.length > 0 && (
                 <thead>
                   <tr className="bg-slate-50">
                     {table.headers.map((h, hi) => (
@@ -308,9 +325,9 @@ function TablesTab({ content }: { content: ExtractedContent }) {
                 </thead>
               )}
               <tbody>
-                {table.rows.slice(0, 20).map((row, ri) => (
+                {(Array.isArray(table.rows) ? table.rows : []).slice(0, 20).map((row, ri) => (
                   <tr key={ri} className="border-b border-slate-100 last:border-0">
-                    {row.map((cell, ci) => (
+                    {(Array.isArray(row) ? row : []).map((cell, ci) => (
                       <td key={ci} className="px-4 py-2 text-slate-700">{cell}</td>
                     ))}
                   </tr>

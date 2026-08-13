@@ -5,8 +5,13 @@ from types import SimpleNamespace
 import pytest
 from app.services import browser_compatibility
 from app.services.browser_compatibility import (
+    BRANDED_BROWSER_SCOPE,
     DESKTOP_VIEWPORT,
+    ENGINE_UAT_LABELS,
+    VERIFICATION_STATE_LABELS,
     CompatibilityProfile,
+    _build_browser_uat_matrix,
+    browser_uat_completion,
     classify_compatibility,
     run_compatibility_analysis,
     select_compatibility_pages,
@@ -197,3 +202,313 @@ def test_browser_report_finding_preserves_exact_affected_url_and_engines() -> No
         "Chromium engine",
         "Firefox engine",
     ]
+
+
+def test_uat_labels_do_not_overclaim_branded_browsers() -> None:
+    assert "Opera" not in ENGINE_UAT_LABELS["chromium"]
+    assert "Safari" not in ENGINE_UAT_LABELS["webkit"]
+    assert "Chrome" not in ENGINE_UAT_LABELS["chromium"]
+    assert ENGINE_UAT_LABELS["chromium"] == "Chromium engine"
+    assert ENGINE_UAT_LABELS["firefox"] == "Firefox engine"
+    assert "internal signal" in ENGINE_UAT_LABELS["webkit"]
+
+
+def test_verification_state_labels_cover_all_compatibility_states() -> None:
+    assert VERIFICATION_STATE_LABELS["compatible"] == "Engine compatible"
+    assert VERIFICATION_STATE_LABELS["partially_compatible"] == "Partially verified"
+    assert VERIFICATION_STATE_LABELS["incompatible"] == "Incompatible"
+    assert VERIFICATION_STATE_LABELS["not_tested"] == "Not verified in current environment"
+    assert VERIFICATION_STATE_LABELS["inconclusive"] == "Inconclusive"
+    assert VERIFICATION_STATE_LABELS["unavailable"] == "Not verified in current environment"
+
+
+def test_run_compatibility_analysis_output_includes_uat_fields() -> None:
+    def runner(engine, page, viewport, _profile):
+        return {
+            "state": "tested",
+            "navigation_success": True,
+            "render_success": True,
+            "critical_element_available": True,
+            "duration_ms": 50,
+        }
+
+    result = run_compatibility_analysis(_pages(1), runner=runner)
+    assert "status_labels" in result
+    assert result["status_labels"]["compatible"] == "Engine compatible"
+    assert "engine_coverage" in result
+    assert len(result["engine_coverage"]) == 3
+    for entry in result["engine_coverage"]:
+        assert "uat_label" in entry
+    assert "summary" in result
+    assert result["summary"]["tested_page_count"] == 1
+    for engine_info in result["engines"]:
+        assert "uat_label" in engine_info
+    assert "browser_uat_matrix" in result
+    uat_matrix = result["browser_uat_matrix"]
+    assert len(uat_matrix) == 3
+    browser_names = [entry["browser"] for entry in uat_matrix]
+    assert "Google Chrome" in browser_names
+    assert "Microsoft Edge" in browser_names
+    assert "Apple Safari" in browser_names
+    for entry in uat_matrix:
+        assert "verification_state" in entry
+        assert "limitations" in entry
+        assert "engineering_signals" in entry
+        assert "actual_verified_environments" in entry
+        assert entry["verification_state"] == "NOT_VERIFIED"
+        assert isinstance(entry["limitations"], list)
+        assert isinstance(entry["engineering_signals"], list)
+        assert isinstance(entry["actual_verified_environments"], list)
+
+
+def test_branded_browser_scope_does_not_include_opera() -> None:
+    browser_names = [entry["browser"] for entry in BRANDED_BROWSER_SCOPE]
+    assert "Opera" not in browser_names
+    for entry in BRANDED_BROWSER_SCOPE:
+        assert "Opera" not in entry["browser"]
+        assert "Opera" not in entry.get("platforms", "")
+
+
+def test_webkit_never_represented_as_safari_verification() -> None:
+    assert "Safari" not in ENGINE_UAT_LABELS["webkit"]
+    assert "internal signal" in ENGINE_UAT_LABELS["webkit"]
+    safari_entry = next(e for e in BRANDED_BROWSER_SCOPE if e["browser"] == "Apple Safari")
+    assert safari_entry["verification_state"] == "NOT_VERIFIED"
+    assert safari_entry["actual_verified_environments"] == []
+    assert any("WebKit" in s for s in safari_entry["engineering_signals"])
+    assert any("real Safari" in lim for lim in safari_entry["limitations"])
+
+
+def test_chromium_does_not_automatically_verify_edge() -> None:
+    assert "Edge" not in ENGINE_UAT_LABELS["chromium"]
+    chrome_entry = next(e for e in BRANDED_BROWSER_SCOPE if e["browser"] == "Google Chrome")
+    edge_entry = next(e for e in BRANDED_BROWSER_SCOPE if e["browser"] == "Microsoft Edge")
+    assert chrome_entry["related_engine"] == "chromium"
+    assert edge_entry["related_engine"] == "chromium"
+    assert chrome_entry["verification_state"] == "NOT_VERIFIED"
+    assert edge_entry["verification_state"] == "NOT_VERIFIED"
+    assert chrome_entry["actual_verified_environments"] == []
+    assert edge_entry["actual_verified_environments"] == []
+
+
+# --- Blocker 5 regression tests: engine → branded UAT overclaim prevention ---
+
+
+def test_chromium_engine_cannot_mark_chrome_verified() -> None:
+    engine_coverage = [
+        {
+            "engine": "chromium",
+            "tested_pages": 10,
+            "eligible_pages": 10,
+            "uat_label": "Chromium engine",
+        },
+        {
+            "engine": "firefox",
+            "tested_pages": 0,
+            "eligible_pages": 10,
+            "uat_label": "Firefox engine",
+        },
+        {"engine": "webkit", "tested_pages": 0, "eligible_pages": 10, "uat_label": "WebKit engine"},
+    ]
+    matrix = _build_browser_uat_matrix(engine_coverage)
+    chrome = next(e for e in matrix if e["browser"] == "Google Chrome")
+    assert chrome["verification_state"] == "NOT_VERIFIED"
+    assert chrome["actual_verified_environments"] == []
+    assert len(chrome["engineering_signals"]) > 0
+    assert any("Chromium" in s for s in chrome["engineering_signals"])
+
+
+def test_chromium_engine_cannot_mark_edge_verified() -> None:
+    engine_coverage = [
+        {
+            "engine": "chromium",
+            "tested_pages": 10,
+            "eligible_pages": 10,
+            "uat_label": "Chromium engine",
+        },
+        {
+            "engine": "firefox",
+            "tested_pages": 0,
+            "eligible_pages": 10,
+            "uat_label": "Firefox engine",
+        },
+        {"engine": "webkit", "tested_pages": 0, "eligible_pages": 10, "uat_label": "WebKit engine"},
+    ]
+    matrix = _build_browser_uat_matrix(engine_coverage)
+    edge = next(e for e in matrix if e["browser"] == "Microsoft Edge")
+    assert edge["verification_state"] == "NOT_VERIFIED"
+    assert edge["actual_verified_environments"] == []
+
+
+def test_webkit_engine_cannot_mark_safari_verified() -> None:
+    engine_coverage = [
+        {
+            "engine": "chromium",
+            "tested_pages": 0,
+            "eligible_pages": 10,
+            "uat_label": "Chromium engine",
+        },
+        {
+            "engine": "firefox",
+            "tested_pages": 0,
+            "eligible_pages": 10,
+            "uat_label": "Firefox engine",
+        },
+        {
+            "engine": "webkit",
+            "tested_pages": 10,
+            "eligible_pages": 10,
+            "uat_label": "WebKit engine",
+        },
+    ]
+    matrix = _build_browser_uat_matrix(engine_coverage)
+    safari = next(e for e in matrix if e["browser"] == "Apple Safari")
+    assert safari["verification_state"] == "NOT_VERIFIED"
+    assert safari["actual_verified_environments"] == []
+    assert len(safari["engineering_signals"]) > 0
+    assert any("WebKit" in s for s in safari["engineering_signals"])
+
+
+def test_engine_failure_does_not_fabricate_branded_incompatibility() -> None:
+    engine_coverage = [
+        {
+            "engine": "chromium",
+            "tested_pages": 0,
+            "eligible_pages": 0,
+            "uat_label": "Chromium engine",
+        },
+        {
+            "engine": "firefox",
+            "tested_pages": 0,
+            "eligible_pages": 0,
+            "uat_label": "Firefox engine",
+        },
+        {"engine": "webkit", "tested_pages": 0, "eligible_pages": 0, "uat_label": "WebKit engine"},
+    ]
+    matrix = _build_browser_uat_matrix(engine_coverage)
+    for entry in matrix:
+        assert entry["verification_state"] == "NOT_VERIFIED"
+        assert entry["actual_verified_environments"] == []
+        assert entry["engineering_signals"] == []
+        assert "incompatible" not in entry["verification_state"].lower()
+
+
+def test_opera_is_absent_from_branded_scope() -> None:
+    all_browsers = [e["browser"] for e in BRANDED_BROWSER_SCOPE]
+    assert "Opera" not in all_browsers
+    engine_coverage = [
+        {
+            "engine": "chromium",
+            "tested_pages": 10,
+            "eligible_pages": 10,
+            "uat_label": "Chromium engine",
+        },
+        {
+            "engine": "firefox",
+            "tested_pages": 10,
+            "eligible_pages": 10,
+            "uat_label": "Firefox engine",
+        },
+        {
+            "engine": "webkit",
+            "tested_pages": 10,
+            "eligible_pages": 10,
+            "uat_label": "WebKit engine",
+        },
+    ]
+    matrix = _build_browser_uat_matrix(engine_coverage)
+    matrix_browsers = [e["browser"] for e in matrix]
+    assert "Opera" not in matrix_browsers
+
+
+def test_branded_scope_schema_has_required_separated_fields() -> None:
+    required_fields = {
+        "browser",
+        "required_scope",
+        "platforms",
+        "verification_state",
+        "actual_verified_environments",
+        "engineering_signals",
+        "limitations",
+        "related_engine",
+    }
+    for entry in BRANDED_BROWSER_SCOPE:
+        missing = required_fields - set(entry.keys())
+        assert not missing, f"{entry['browser']} missing fields: {missing}"
+        assert isinstance(entry["actual_verified_environments"], list)
+        assert isinstance(entry["engineering_signals"], list)
+        assert isinstance(entry["limitations"], list)
+        assert entry["verification_state"] == "NOT_VERIFIED"
+
+
+def test_uat_matrix_output_schema_matches_separated_model() -> None:
+    engine_coverage = [
+        {
+            "engine": "chromium",
+            "tested_pages": 5,
+            "eligible_pages": 10,
+            "uat_label": "Chromium engine",
+        },
+        {
+            "engine": "firefox",
+            "tested_pages": 5,
+            "eligible_pages": 10,
+            "uat_label": "Firefox engine",
+        },
+        {"engine": "webkit", "tested_pages": 5, "eligible_pages": 10, "uat_label": "WebKit engine"},
+    ]
+    matrix = _build_browser_uat_matrix(engine_coverage, uat_date="2026-08-12")
+    # Locked-contract mandatory UAT result fields.
+    required_output_fields = {
+        "browser",
+        "required_version_policy",
+        "required_scope",
+        "required_platforms",
+        "platforms",
+        "uat_date",
+        "actual_tested_browser_version",
+        "actual_tested_platform",
+        "verification_state",
+        "verification_state_label",
+        "actual_verified_environments",
+        "page_coverage",
+        "evidence_source",
+        "engineering_signals",
+        "limitations",
+        "related_engine",
+        "engine_tested_pages",
+        "engine_eligible_pages",
+    }
+    for entry in matrix:
+        missing = required_output_fields - set(entry.keys())
+        assert not missing, f"{entry['browser']} missing output fields: {missing}"
+        assert "version_scope" not in entry
+        assert "limitation" not in entry
+        assert entry["uat_date"] == "2026-08-12"
+        # Engine evidence never promotes branded page counts: nothing passes
+        # while the branded browser itself was not tested.
+        coverage = entry["page_coverage"]
+        assert coverage["passed_pages"] == 0
+        assert coverage["failed_pages"] == 0
+        assert coverage["not_tested_pages"] == coverage["eligible_pages"]
+        assert entry["evidence_source"] in {"engineering_engine_signal", "none"}
+
+
+def test_uat_model_supports_future_real_branded_evidence_without_schema_change() -> None:
+    """Safari (or Chrome/Edge) can become VERIFIED in the future by populating
+    the existing provider-neutral fields with real branded evidence — no
+    canonical schema redesign and no vendor hard-coded into the model."""
+    matrix = _build_browser_uat_matrix([], uat_date="2027-01-15")
+    for entry in matrix:
+        # Fields a future real-browser provider (cloud device farm or
+        # Mac/iOS worker) would populate: they exist today and are neutral.
+        entry["verification_state"] = "VERIFIED"
+        entry["verification_state_label"] = "Verified"
+        entry["actual_tested_browser_version"] = "Safari 17.4"
+        entry["actual_tested_platform"] = "macOS 14 (real device)"
+        entry["actual_verified_environments"] = ["macOS 14 / Safari 17.4"]
+        entry["evidence_source"] = "real_branded_browser_provider"
+    completion = browser_uat_completion(matrix)
+    assert completion["status"] == "complete"
+    assert completion["verified_browser_count"] == 3
+    assert completion["unverified_browsers"] == []

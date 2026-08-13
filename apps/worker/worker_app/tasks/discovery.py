@@ -2,7 +2,7 @@ import logging
 import uuid
 from typing import Any
 
-from sqlalchemy import insert, select, update
+from sqlalchemy import delete, insert, select, update
 
 from worker_app.celery_app import celery_app
 from worker_app.config import get_settings
@@ -10,6 +10,7 @@ from worker_app.db import (
     SessionLocal,
     analysis_results,
     analysis_runs,
+    discovery_run_pages,
     discovery_runs,
     utc_now,
     website_pages,
@@ -90,6 +91,11 @@ def persist_pages(
     homepage_normalized = (
         normalize_url(str(latest_analysis["final_url"])) if latest_analysis else None
     )
+    # Rebuild this run's page membership from scratch (retry-safe). Only this
+    # discovery run's rows are touched, never a concurrent run's.
+    session.execute(
+        delete(discovery_run_pages).where(discovery_run_pages.c.discovery_run_id == run_id)
+    )
     for page in pages:
         existing = (
             session.execute(
@@ -131,13 +137,15 @@ def persist_pages(
             "updated_at": now,
         }
         if existing:
+            page_id = existing["id"]
             session.execute(
-                update(website_pages).where(website_pages.c.id == existing["id"]).values(**values)
+                update(website_pages).where(website_pages.c.id == page_id).values(**values)
             )
         else:
+            page_id = uuid.uuid4()
             session.execute(
                 insert(website_pages).values(
-                    id=uuid.uuid4(),
+                    id=page_id,
                     website_id=website_id,
                     normalized_url=page["normalized_url"],
                     first_discovered_at=now,
@@ -145,6 +153,19 @@ def persist_pages(
                     **values,
                 )
             )
+        # Run-scoped membership snapshot: independent of the shared
+        # website_pages.last_discovery_run_id pointer that concurrent same-site
+        # runs overwrite.
+        session.execute(
+            insert(discovery_run_pages).values(
+                id=uuid.uuid4(),
+                discovery_run_id=run_id,
+                website_page_id=page_id,
+                eligibility_status=page["eligibility_status"],
+                crawl_depth=page["crawl_depth"],
+                created_at=now,
+            )
+        )
     session.commit()
 
 

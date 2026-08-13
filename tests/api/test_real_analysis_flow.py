@@ -303,9 +303,10 @@ def test_real_submission_creates_history_and_prevents_duplicate_dispatch(
         )
         assert execution is not None
         assert execution.structured_input["execute_repository_agent"] is True
+        # Standard workflow schedules engineering-signal engines only; firefox
+        # is outside the locked customer UAT contract and is not scheduled.
         assert execution.structured_input["browser_engines"] == [
             "chromium",
-            "firefox",
             "webkit",
         ]
         assert execution.structured_input["maximum_pages"] == 12
@@ -350,7 +351,6 @@ def test_real_submission_creates_history_and_prevents_duplicate_dispatch(
     )
     assert {item["engine"] for item in progress_payload["browser_engine_progress"]["engines"]} == {
         "chromium",
-        "firefox",
         "webkit",
     }
     assert progress_payload["page_coverage"]["coverage_denominator"] == 0

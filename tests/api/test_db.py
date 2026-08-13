@@ -23,6 +23,7 @@ def test_database_foundation_uses_psycopg_with_mvp_tables() -> None:
         "analysis_diagnostics",
         "analysis_interpretations",
         "analysis_results",
+        "discovery_run_pages",
         "analysis_runs",
         "analysis_scores",
         "detected_technologies",

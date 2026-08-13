@@ -2,12 +2,15 @@
 
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { ApiError, apiRequest } from "@/lib/api";
-import type { AnalysisReport, DiagnosticGroup } from "@/lib/types";
+import type { AnalysisReport, AnalysisFinding, DiagnosticGroup } from "@/lib/types";
 import { PerformanceIntelligence } from "@/components/performance/PerformanceIntelligence";
-import { AccessibilityIntelligence, AccessibilityData } from "@/components/accessibility/AccessibilityIntelligence";
+import {
+  AccessibilityIntelligence,
+  AccessibilityData,
+} from "@/components/accessibility/AccessibilityIntelligence";
 import { ReanalysisComparisonPanel } from "@/components/comparisons/ReanalysisComparisonPanel";
 import { ScoreValue } from "@/components/metrics/ScoreValue";
 import { MetricRatingBadge } from "@/components/metrics/MetricRatingBadge";
@@ -20,6 +23,17 @@ import ExtractedContentPanel from "@/components/content/ExtractedContentPanel";
 import { SectionErrorBoundary } from "@/components/SectionErrorBoundary";
 import type { WorkflowProgress } from "@/components/reports/types";
 import { analysisComparisonApi } from "@/lib/analysis-comparison-api";
+import { StatusBadge } from "@/components/ui/StatusBadge";
+import { ScoreBar } from "@/components/ui/ScoreBadge";
+import { UrlCell } from "@/components/ui/UrlCell";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { MetricStat } from "@/components/ui/MetricStat";
+import { DataTable, Column } from "@/components/ui/DataTable";
+import { IssueRegister } from "@/components/findings/IssueRegister";
+import { ConceptInfoButton } from "@/components/metrics/ConceptInfoButton";
+// ---------------------------------------------------------------------------
+// Retry infrastructure (unchanged from previous)
+// ---------------------------------------------------------------------------
 
 const RETRY_DELAYS_MS = [2_000, 4_000, 8_000, 15_000] as const;
 
@@ -45,7 +59,6 @@ function startRetriedRequest<T>({
   let cancelled = false;
   let timer: number | undefined;
   let failureCount = 0;
-
   async function run() {
     try {
       const value = await request();
@@ -67,7 +80,6 @@ function startRetriedRequest<T>({
       timer = window.setTimeout(() => void run(), delay);
     }
   }
-
   timer = window.setTimeout(() => void run(), 0);
   return () => {
     cancelled = true;
@@ -75,21 +87,605 @@ function startRetriedRequest<T>({
   };
 }
 
+// ---------------------------------------------------------------------------
+// Utility helpers
+// ---------------------------------------------------------------------------
+
 function display(value: unknown): string {
-  if (value === null || value === undefined || value === "") return "Not available";
+  if (value === null || value === undefined || value === "") return "—";
   if (typeof value === "boolean") return value ? "Yes" : "No";
-  if (typeof value === "number") return Number.isInteger(value) ? String(value) : value.toFixed(2);
+  if (typeof value === "number")
+    return Number.isInteger(value) ? String(value) : value.toFixed(2);
   return String(value);
 }
 
-function label(value: string | null | undefined): string {
+function formatLabel(value: string | null | undefined): string {
   if (!value) return "Unknown";
-  return value.replaceAll("_", " ").replace(/\b\w/g, (character) => character.toUpperCase());
+  return value
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
 }
+
+type Obs = Record<string, unknown>;
+function s(v: unknown): string {
+  return v == null ? "" : String(v);
+}
+function sa(v: unknown): string[] {
+  return Array.isArray(v) ? v.map(String) : [];
+}
+function num(v: unknown): number {
+  return typeof v === "number" ? v : 0;
+}
+
+// ---------------------------------------------------------------------------
+// Signal card — used in Website Signals section
+// ---------------------------------------------------------------------------
+
+const SIGNAL_COLORS: Record<string, string> = {
+  current: "border-emerald-200 bg-emerald-50/60",
+  present: "border-emerald-200 bg-emerald-50/60",
+  detected: "border-emerald-200 bg-emerald-50/60",
+  valid: "border-emerald-200 bg-emerald-50/60",
+  strong: "border-emerald-200 bg-emerald-50/60",
+  good: "border-emerald-200 bg-emerald-50/60",
+  older_than_one_year: "border-amber-200 bg-amber-50/60",
+  possibly_outdated: "border-amber-200 bg-amber-50/60",
+  partial: "border-amber-200 bg-amber-50/60",
+  issues_found: "border-amber-200 bg-amber-50/60",
+  needs_attention: "border-amber-200 bg-amber-50/60",
+  date_not_published: "border-slate-200 bg-slate-50",
+  unavailable: "border-slate-200 bg-slate-50",
+  inconclusive: "border-slate-200 bg-slate-50",
+  missing: "border-red-200 bg-red-50/60",
+  weak: "border-red-200 bg-red-50/60",
+  high_observable_risk: "border-red-200 bg-red-50/60",
+  not_detected: "border-slate-200 bg-slate-50",
+};
+
+const SIGNAL_ICONS: Record<string, string> = {
+  current: "text-emerald-600",
+  present: "text-emerald-600",
+  detected: "text-emerald-600",
+  valid: "text-emerald-600",
+  strong: "text-emerald-600",
+  good: "text-emerald-600",
+  partial: "text-amber-600",
+  needs_attention: "text-amber-600",
+  missing: "text-red-600",
+  weak: "text-red-600",
+  high_observable_risk: "text-red-600",
+};
+
+function SignalCard({
+  title,
+  status,
+  detail,
+  metric,
+}: {
+  title: string;
+  status: string;
+  detail?: string;
+  metric?: string;
+}) {
+  const color =
+    SIGNAL_COLORS[status] ?? "border-slate-200 bg-white";
+  const iconColor = SIGNAL_ICONS[status] ?? "text-slate-400";
+  const isPositive = [
+    "current",
+    "present",
+    "detected",
+    "valid",
+    "strong",
+    "good",
+  ].includes(status);
+
+  return (
+    <div className={`rounded-lg border p-3 ${color}`}>
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-sm font-medium text-slate-700">{title}</p>
+        <span className={`text-sm ${iconColor}`}>
+          {isPositive ? "✓" : status === "missing" || status === "weak" ? "✗" : "—"}
+        </span>
+      </div>
+      {metric && (
+        <p className="mt-1 text-lg font-bold text-slate-900">{metric}</p>
+      )}
+      {!metric && (
+        <p className="mt-1 text-sm font-semibold capitalize text-slate-800">
+          {formatLabel(status)}
+        </p>
+      )}
+      {detail && (
+        <p className="mt-0.5 text-xs text-slate-500">{detail}</p>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Website Signals section (Executive View)
+// ---------------------------------------------------------------------------
+
+function WebsiteSignalsSection({
+  diagnostics,
+}: {
+  diagnostics: Record<string, DiagnosticGroup>;
+}) {
+  const policy = diagnostics.policy_diagnostics?.verified_observations as
+    | Obs
+    | undefined;
+  const policyDetail = (policy?.privacy_policy_detail ?? null) as Obs | null;
+  const copyrightData = (diagnostics.policy_diagnostics?.copyright
+    ?.verified_observations ?? null) as Obs | null;
+  const securityMatrix = diagnostics.security_diagnostics?.verified_observations
+    ?.security_header_matrix;
+  const matrixItems = Array.isArray(securityMatrix)
+    ? (securityMatrix as Obs[])
+    : [];
+  const analyticsData = (diagnostics.analytics_diagnostics
+    ?.verified_observations ?? null) as Obs | null;
+  const responsiveData = (diagnostics.responsive_diagnostics
+    ?.verified_observations ?? null) as Obs | null;
+  const htmlStdData = (diagnostics.html_standards_diagnostics
+    ?.verified_observations ?? null) as Obs | null;
+  const secDiagObs = (diagnostics.security_diagnostics?.verified_observations ??
+    null) as Obs | null;
+  const securityRisk = secDiagObs?.page_security_risk as Obs | null | undefined;
+
+  const privacyStatus = s(
+    policyDetail?.freshness_status ||
+      (policy?.privacy_policy ? "detected" : "unavailable"),
+  );
+  const privacyDetail = policyDetail?.explicit_update_date
+    ? `Updated ${s(policyDetail.explicit_update_date)}`
+    : policyDetail?.found
+      ? "Date not published"
+      : undefined;
+
+  const copyrightStatus = s(copyrightData?.freshness_status || "unavailable");
+  const copyrightDetail = copyrightData?.raw_text
+    ? s(copyrightData.raw_text).slice(0, 60)
+    : undefined;
+
+  const presentHeaders = matrixItems.filter(
+    (h) => h.status === "present" || h.status === "not_applicable",
+  ).length;
+  const totalHeaders = matrixItems.length;
+  const headerStatus =
+    totalHeaders === 0
+      ? "unavailable"
+      : presentHeaders === totalHeaders
+        ? "present"
+        : presentHeaders > 0
+          ? "partial"
+          : "missing";
+
+  const analyticsProviders = sa(analyticsData?.providers);
+  const analyticsStatus = analyticsData?.detected ? "detected" : "not_detected";
+
+  const testedVp = responsiveData?.tested_viewports as number | undefined;
+  const successVp = responsiveData?.successful_viewports as number | undefined;
+  const responsiveStatus =
+    testedVp == null || testedVp === 0
+      ? "unavailable"
+      : successVp === testedVp
+        ? "present"
+        : (successVp ?? 0) > 0
+          ? "partial"
+          : "missing";
+
+  const htmlStdScore = htmlStdData?.standards_score as
+    | number
+    | null
+    | undefined;
+  const htmlStdStatus = s(htmlStdData?.validation_status || "unavailable");
+  const secRiskScore = securityRisk?.score as number | null | undefined;
+  const secRiskBand = s(securityRisk?.risk_band || "unavailable");
+
+  return (
+    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+      <SignalCard
+        title="Privacy Policy"
+        status={privacyStatus}
+        detail={privacyDetail}
+      />
+      <SignalCard
+        title="Copyright"
+        status={copyrightStatus}
+        detail={copyrightDetail}
+      />
+      <SignalCard
+        title="Security Headers"
+        status={headerStatus}
+        metric={
+          totalHeaders > 0
+            ? `${presentHeaders} / ${totalHeaders}`
+            : undefined
+        }
+        detail={totalHeaders > 0 ? "headers present" : undefined}
+      />
+      <SignalCard
+        title="Analytics"
+        status={analyticsStatus}
+        detail={
+          analyticsProviders.length > 0
+            ? analyticsProviders.join(", ")
+            : undefined
+        }
+      />
+      <SignalCard
+        title="Responsiveness"
+        status={responsiveStatus}
+        metric={
+          testedVp != null && testedVp > 0
+            ? `${successVp ?? 0} / ${testedVp}`
+            : undefined
+        }
+        detail={
+          testedVp != null && testedVp > 0 ? "viewports passed" : undefined
+        }
+      />
+      <SignalCard
+        title="HTML Quality"
+        status={htmlStdStatus}
+        metric={htmlStdScore != null ? `${htmlStdScore} / 100` : undefined}
+        detail="ZuiGO structural score"
+      />
+      <SignalCard
+        title="Passive Security Posture"
+        status={secRiskScore != null ? secRiskBand : "unavailable"}
+        metric={secRiskScore != null ? `${secRiskScore} / 100` : undefined}
+        detail={
+          secRiskScore != null
+            ? `${s(securityRisk?.confidence)} confidence`
+            : undefined
+        }
+      />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Website Signals technical evidence (Technical View)
+// ---------------------------------------------------------------------------
+
+function WebsiteSignalsTechnicalEvidence({
+  diagnostics,
+}: {
+  diagnostics: Record<string, DiagnosticGroup>;
+}) {
+  const policy = diagnostics.policy_diagnostics?.verified_observations as
+    | Obs
+    | undefined;
+  const policyDetail = (policy?.privacy_policy_detail ?? null) as Obs | null;
+  const copyrightData = (diagnostics.policy_diagnostics?.copyright
+    ?.verified_observations ?? null) as Obs | null;
+  const securityMatrix = diagnostics.security_diagnostics?.verified_observations
+    ?.security_header_matrix;
+  const matrixItems = Array.isArray(securityMatrix)
+    ? (securityMatrix as Obs[])
+    : [];
+  const analyticsData = (diagnostics.analytics_diagnostics
+    ?.verified_observations ?? null) as Obs | null;
+  const htmlStdData = (diagnostics.html_standards_diagnostics
+    ?.verified_observations ?? null) as Obs | null;
+  const htmlStdIssues = Array.isArray(htmlStdData?.issues)
+    ? (htmlStdData.issues as Obs[])
+    : [];
+  const secDiagObs = (diagnostics.security_diagnostics?.verified_observations ??
+    null) as Obs | null;
+  const securityRisk = secDiagObs?.page_security_risk as Obs | null | undefined;
+  const secRiskDeductions = Array.isArray(securityRisk?.deductions)
+    ? (securityRisk.deductions as Obs[])
+    : [];
+  const analyticsProviders = sa(analyticsData?.providers);
+  const analyticsTech = sa(analyticsData?.technologies);
+  const analyticsIds = sa(analyticsData?.public_identifiers);
+
+  return (
+    <div className="grid gap-6 text-sm">
+      {!!policyDetail && (
+        <div>
+          <h4 className="font-semibold text-slate-900">Privacy Policy</h4>
+          <dl className="mt-2 grid gap-x-6 gap-y-1 sm:grid-cols-2">
+            <div>
+              <dt className="text-slate-500">Found</dt>
+              <dd>{policyDetail.found ? "Yes" : "No"}</dd>
+            </div>
+            {policyDetail.url ? (
+              <div className="sm:col-span-2">
+                <dt className="text-slate-500">URL</dt>
+                <dd>
+                  <UrlCell url={s(policyDetail.url)} />
+                </dd>
+              </div>
+            ) : null}
+            <div>
+              <dt className="text-slate-500">Freshness</dt>
+              <dd className="capitalize">{formatLabel(s(policyDetail.freshness_status))}</dd>
+            </div>
+            {policyDetail.explicit_update_date ? (
+              <div>
+                <dt className="text-slate-500">Update date</dt>
+                <dd>{s(policyDetail.explicit_update_date)}</dd>
+              </div>
+            ) : null}
+            {policyDetail.age_days != null ? (
+              <div>
+                <dt className="text-slate-500">Age</dt>
+                <dd>{s(policyDetail.age_days)} days</dd>
+              </div>
+            ) : null}
+          </dl>
+        </div>
+      )}
+
+      {!!copyrightData && (
+        <div>
+          <h4 className="font-semibold text-slate-900">Copyright</h4>
+          <dl className="mt-2 grid gap-x-6 gap-y-1 sm:grid-cols-2">
+            <div>
+              <dt className="text-slate-500">Detected</dt>
+              <dd>{copyrightData.detected ? "Yes" : "No"}</dd>
+            </div>
+            {copyrightData.raw_text ? (
+              <div>
+                <dt className="text-slate-500">Text</dt>
+                <dd>{s(copyrightData.raw_text)}</dd>
+              </div>
+            ) : null}
+            {copyrightData.start_year ? (
+              <div>
+                <dt className="text-slate-500">Year range</dt>
+                <dd>
+                  {s(copyrightData.start_year)}
+                  {copyrightData.end_year !== copyrightData.start_year
+                    ? `–${s(copyrightData.end_year)}`
+                    : ""}
+                </dd>
+              </div>
+            ) : null}
+            <div>
+              <dt className="text-slate-500">Freshness</dt>
+              <dd className="capitalize">
+                {formatLabel(s(copyrightData.freshness_status))}
+              </dd>
+            </div>
+          </dl>
+        </div>
+      )}
+
+      {matrixItems.length > 0 && (
+        <div>
+          <h4 className="font-semibold text-slate-900">Security Header Matrix</h4>
+          <div className="mt-2 overflow-x-auto">
+            <table className="w-full min-w-[600px] text-left text-xs">
+              <thead>
+                <tr className="border-b border-slate-200">
+                  <th className="pb-2 pr-3 font-semibold text-slate-500">Header</th>
+                  <th className="pb-2 pr-3 font-semibold text-slate-500">Status</th>
+                  <th className="pb-2 pr-3 font-semibold text-slate-500">Value</th>
+                  <th className="pb-2 font-semibold text-slate-500">Recommendation</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {matrixItems.map((item) => (
+                  <tr key={s(item.header)}>
+                    <td className="py-1.5 pr-3 font-mono text-xs">
+                      {s(item.header)}
+                    </td>
+                    <td className="py-1.5 pr-3">
+                      <StatusBadge status={s(item.status)} size="xs" />
+                    </td>
+                    <td className="max-w-48 break-all py-1.5 pr-3">
+                      {item.observed_value
+                        ? s(item.observed_value).slice(0, 120)
+                        : "—"}
+                    </td>
+                    <td className="max-w-64 py-1.5">
+                      {item.recommendation ? s(item.recommendation) : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {!!analyticsData && (
+        <div>
+          <h4 className="font-semibold text-slate-900">Analytics / Tagging</h4>
+          <dl className="mt-2 grid gap-x-6 gap-y-1 sm:grid-cols-2">
+            <div>
+              <dt className="text-slate-500">Detected</dt>
+              <dd>{analyticsData.detected ? "Yes" : "No"}</dd>
+            </div>
+            {analyticsProviders.length > 0 && (
+              <div>
+                <dt className="text-slate-500">Providers</dt>
+                <dd>{analyticsProviders.join(", ")}</dd>
+              </div>
+            )}
+            {analyticsTech.length > 0 && (
+              <div>
+                <dt className="text-slate-500">Technologies</dt>
+                <dd>{analyticsTech.join(", ")}</dd>
+              </div>
+            )}
+            {analyticsIds.length > 0 && (
+              <div className="sm:col-span-2">
+                <dt className="text-slate-500">Public identifiers</dt>
+                <dd className="font-mono text-xs">
+                  {analyticsIds.join(", ")}
+                </dd>
+              </div>
+            )}
+          </dl>
+          <p className="mt-2 text-xs text-slate-400">
+            Detection only. No traffic, visitors, or conversion data is
+            reported.
+          </p>
+        </div>
+      )}
+
+      {!!htmlStdData && htmlStdIssues.length > 0 && (
+        <div>
+          <h4 className="font-semibold text-slate-900">
+            HTML Standards Issues ({htmlStdIssues.length})
+          </h4>
+          <div className="mt-2 overflow-x-auto">
+            <table className="w-full min-w-[500px] text-left text-xs">
+              <thead>
+                <tr className="border-b border-slate-200">
+                  <th className="pb-2 pr-3 font-semibold text-slate-500">Code</th>
+                  <th className="pb-2 pr-3 font-semibold text-slate-500">Severity</th>
+                  <th className="pb-2 font-semibold text-slate-500">Message</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {htmlStdIssues.slice(0, 20).map((issue, i) => (
+                  <tr key={i}>
+                    <td className="py-1.5 pr-3 font-mono">{s(issue.code)}</td>
+                    <td className="py-1.5 pr-3">
+                      <StatusBadge status={s(issue.severity)} size="xs" />
+                    </td>
+                    <td className="max-w-80 py-1.5">{s(issue.message)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-2 text-xs text-slate-400">
+            ZuiGO HTML Standards Score, not an official W3C validation result.
+          </p>
+        </div>
+      )}
+
+      {!!securityRisk && (securityRisk.score as number) != null && (
+        <div>
+          <h4 className="font-semibold text-slate-900">Security & Risk Detail</h4>
+          <dl className="mt-2 grid gap-x-6 gap-y-1 sm:grid-cols-3">
+            <div>
+              <dt className="text-slate-500">Score</dt>
+              <dd className="text-lg font-bold">
+                {s(securityRisk.score)}/100
+              </dd>
+            </div>
+            <div>
+              <dt className="text-slate-500">Risk Band</dt>
+              <dd className="capitalize">
+                {formatLabel(s(securityRisk.risk_band))}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-slate-500">Confidence</dt>
+              <dd className="capitalize">{s(securityRisk.confidence)}</dd>
+            </div>
+          </dl>
+          {secRiskDeductions.length > 0 && (
+            <div className="mt-3 overflow-x-auto">
+              <table className="w-full min-w-[400px] text-left text-xs">
+                <thead>
+                  <tr className="border-b border-slate-200">
+                    <th className="pb-2 pr-3 font-semibold text-slate-500">Finding</th>
+                    <th className="pb-2 pr-3 font-semibold text-slate-500">Reason</th>
+                    <th className="pb-2 text-right font-semibold text-slate-500">Points</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {secRiskDeductions.map((d, i) => (
+                    <tr key={i}>
+                      <td className="py-1.5 pr-3 font-mono">{s(d.code)}</td>
+                      <td className="max-w-64 py-1.5 pr-3">{s(d.reason)}</td>
+                      <td className="py-1.5 text-right text-red-600">
+                        -{s(d.points)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <p className="mt-2 text-xs text-slate-400">
+            Observable security posture only. Not a penetration-test result.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Grouped findings for executive view — deduplicate by finding_code
+// ---------------------------------------------------------------------------
+
+interface GroupedFinding {
+  finding_code: string;
+  title: string;
+  description: string;
+  severity: string;
+  category: string;
+  totalOccurrences: number;
+  affectedUrls: Set<string>;
+  confidence: number;
+  ids: string[];
+}
+
+function groupFindings(findings: AnalysisFinding[]): GroupedFinding[] {
+  const groups = new Map<string, GroupedFinding>();
+  for (const f of findings) {
+    const existing = groups.get(f.finding_code);
+    if (existing) {
+      existing.totalOccurrences += 1;
+      existing.affectedUrls.add(f.affected_url);
+      existing.ids.push(f.id);
+    } else {
+      groups.set(f.finding_code, {
+        finding_code: f.finding_code,
+        title: f.title,
+        description: f.description,
+        severity: f.severity,
+        category: f.category,
+        totalOccurrences: 1,
+        affectedUrls: new Set([f.affected_url]),
+        confidence: f.confidence_percent,
+        ids: [f.id],
+      });
+    }
+  }
+  const severityOrder: Record<string, number> = {
+    critical: 0,
+    high: 1,
+    medium: 2,
+    low: 3,
+    informational: 4,
+  };
+  return [...groups.values()].sort(
+    (a, b) =>
+      (severityOrder[a.severity] ?? 5) - (severityOrder[b.severity] ?? 5) ||
+      b.affectedUrls.size - a.affectedUrls.size,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Diagnostic card (Technical View)
+// ---------------------------------------------------------------------------
+
+const diagnosticTitles: Record<string, string> = {
+  standards_diagnostics: "Web Standards",
+  cache_diagnostics: "Cache Efficiency",
+  policy_diagnostics: "Policies and Legal Metadata",
+  copyright_diagnostics: "Copyright Metadata",
+  security_diagnostics: "Security Posture",
+  analytics_diagnostics: "Analytics and Tracking",
+  responsive_diagnostics: "Responsive Testing",
+  browser_compatibility: "Browser Compatibility",
+};
 
 function HumanValue({ value }: { value: unknown }) {
   if (Array.isArray(value)) {
-    if (!value.length) return <span className="text-slate-500">None observed</span>;
+    if (!value.length) return <span className="text-slate-400">None observed</span>;
     return (
       <ul className="grid gap-2">
         {value.map((item, index) => (
@@ -103,35 +699,250 @@ function HumanValue({ value }: { value: unknown }) {
   if (value && typeof value === "object") {
     return (
       <dl className="grid gap-2 sm:grid-cols-2">
-        {Object.entries(value as Record<string, unknown>).map(([key, nested]) => (
-          <div className="min-w-0" key={key}>
-            <dt className="text-xs font-semibold text-slate-500">{label(key)}</dt>
-            <dd className="break-words text-sm"><HumanValue value={nested} /></dd>
-          </div>
-        ))}
+        {Object.entries(value as Record<string, unknown>).map(
+          ([key, nested]) => (
+            <div className="min-w-0" key={key}>
+              <dt className="text-xs font-medium text-slate-500">
+                {formatLabel(key)}
+              </dt>
+              <dd className="break-words text-sm">
+                <HumanValue value={nested} />
+              </dd>
+            </div>
+          ),
+        )}
       </dl>
     );
   }
   return <span>{display(value)}</span>;
 }
 
-function CopyId({ value }: { value: string }) {
-  const [copied, setCopied] = useState(false);
+// ---------------------------------------------------------------------------
+// Browser compatibility — executive-friendly presentation
+// ---------------------------------------------------------------------------
+
+const BRANDED_BROWSERS: {
+  browser: string;
+  engine: string;
+  versionScope: string;
+  platforms: string;
+}[] = [
+  {
+    browser: "Google Chrome",
+    engine: "chromium",
+    versionScope: "Latest 2 stable versions",
+    platforms: "Windows 10/11, macOS 13+, Android 12+",
+  },
+  {
+    browser: "Microsoft Edge",
+    engine: "chromium",
+    versionScope: "Latest 2 stable versions",
+    platforms: "Windows 10/11",
+  },
+  {
+    browser: "Apple Safari",
+    engine: "webkit",
+    versionScope: "16.4+",
+    platforms: "macOS 13+, iOS 16+",
+  },
+];
+
+const ENGINE_DISPLAY: Record<string, string> = {
+  chromium: "Chromium engine",
+  firefox: "Firefox engine",
+  webkit: "WebKit engine",
+};
+
+function BrowserSummary({
+  diagnostics,
+  viewMode,
+}: {
+  diagnostics: Record<string, DiagnosticGroup>;
+  viewMode: "executive" | "technical";
+}) {
+  const bcDiag = diagnostics.browser_compatibility;
+  const obs = bcDiag?.verified_observations as Obs | undefined;
+  const engines = Array.isArray(obs?.engines_tested)
+    ? (obs.engines_tested as Obs[])
+    : [];
+
+  const engineMap: Record<string, Obs> = {};
+  for (const eng of engines) {
+    engineMap[s(eng.engine)] = eng;
+  }
+
+  if (viewMode === "technical") {
+    if (engines.length === 0) {
+      return (
+        <div className="space-y-4">
+          <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+            Engine-Level Engineering Evidence
+          </p>
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+            <p className="text-sm text-slate-500">No technical engine evidence available.</p>
+          </div>
+        </div>
+      );
+    }
+    return (
+      <div className="space-y-4">
+        <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+          Engine-Level Engineering Evidence
+        </p>
+        <div className="grid gap-3 sm:grid-cols-3">
+          {engines.map((engine) => {
+            const name = s(engine.engine);
+            const isUnavailable =
+              s(engine.availability_status) === "unavailable";
+            const tested = num(engine.tested_pages);
+            const eligible = num(engine.eligible_pages);
+            return (
+              <div
+                key={name}
+                className={`rounded-lg border p-4 ${isUnavailable ? "border-slate-200 bg-slate-50" : "border-slate-200 bg-white"}`}
+              >
+                <p className="text-sm font-semibold text-slate-700">
+                  {ENGINE_DISPLAY[name] ?? formatLabel(name)}
+                </p>
+                {isUnavailable ? (
+                  <p className="mt-1 text-sm text-slate-500">
+                    Unavailable in this environment
+                  </p>
+                ) : (
+                  <p className="mt-1 text-xl font-bold text-slate-900">
+                    {tested}/{eligible} pages tested
+                  </p>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        <p className="text-xs text-slate-400">
+          Engine evidence is not equivalent to branded browser verification.
+        </p>
+      </div>
+    );
+  }
+
   return (
-    <button
-      className="rounded border border-slate-600 px-2 py-1 text-xs"
-      onClick={() => {
-        void navigator.clipboard.writeText(value).then(() => {
-          setCopied(true);
-          window.setTimeout(() => setCopied(false), 1200);
-        });
-      }}
-      type="button"
-    >
-      {copied ? "Copied" : "Copy"}
-    </button>
+    <div className="space-y-4">
+      <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+        Customer-Facing Browser Verification
+      </p>
+      <div className="grid gap-3 sm:grid-cols-3">
+        {(() => {
+          interface BrowserUATMatrixRow {
+            browser: string;
+            required_version_policy: string;
+            platforms: string;
+            verification_state: string;
+            verification_state_label?: string;
+            related_engine: string;
+            engine_tested_pages?: number;
+          }
+          const browserUat = obs?.browser_uat as { matrix?: BrowserUATMatrixRow[] } | undefined;
+          if (browserUat && Array.isArray(browserUat.matrix)) {
+            return browserUat.matrix.map((bb: BrowserUATMatrixRow) => {
+              const tested = Number(bb.engine_tested_pages) || 0;
+              const hasEvidence = tested > 0;
+
+              let badgeStatus = "unavailable";
+              if (bb.verification_state === "VERIFIED") badgeStatus = "completed";
+              if (bb.verification_state === "PARTIALLY_VERIFIED") badgeStatus = "partial";
+              if (bb.verification_state === "NOT_VERIFIED" && hasEvidence) badgeStatus = "unavailable";
+
+              return (
+                <div
+                  key={bb.browser}
+                  className={`rounded-lg border p-4 ${bb.verification_state === "VERIFIED" ? "border-z-success bg-white" : hasEvidence ? "border-slate-200 bg-white" : "border-slate-200 bg-slate-50"}`}
+                >
+                  <p className="text-sm font-semibold text-slate-700">
+                    {bb.browser}
+                  </p>
+                  <p className="mt-0.5 text-xs text-slate-400">
+                    {bb.required_version_policy} · {bb.platforms}
+                  </p>
+                  <StatusBadge
+                    status={badgeStatus}
+                    label={bb.verification_state_label || "Not verified in current environment"}
+                  />
+                  <p className="mt-1 text-xs text-slate-400">
+                    {hasEvidence && bb.verification_state !== "VERIFIED"
+                      ? `${ENGINE_DISPLAY[bb.related_engine] ?? bb.related_engine} evidence available in technical view`
+                      : !hasEvidence
+                        ? "No branded-browser execution evidence retained"
+                        : "Verified by branded channel"}
+                  </p>
+                </div>
+              );
+            });
+          }
+
+          // Legacy Fallback
+          return BRANDED_BROWSERS.map((bb) => {
+            const engineTested = engineMap[bb.engine];
+            const tested = engineTested ? num(engineTested.tested_pages) : 0;
+            const isUnavailable = !engineTested || s(engineTested.availability_status) === "unavailable";
+            const hasEvidence = !isUnavailable && tested > 0;
+            return (
+              <div
+                key={bb.browser}
+                className={`rounded-lg border p-4 ${hasEvidence ? "border-slate-200 bg-white" : "border-slate-200 bg-slate-50"}`}
+              >
+                <p className="text-sm font-semibold text-slate-700">
+                  {bb.browser}
+                </p>
+                <p className="mt-0.5 text-xs text-slate-400">
+                  {bb.versionScope} · {bb.platforms}
+                </p>
+                <StatusBadge
+                  status="unavailable"
+                  label="Not verified in current environment"
+                />
+                <p className="mt-1 text-xs text-slate-400">
+                  {hasEvidence
+                    ? `${ENGINE_DISPLAY[bb.engine] ?? bb.engine} evidence available in technical view`
+                    : "No branded-browser execution evidence retained"}
+                </p>
+              </div>
+            );
+          });
+        })()}
+      </div>
+    </div>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Report quality label
+// ---------------------------------------------------------------------------
+
+function qualityFromScore(score: {
+  overall_score: number | null;
+  confidence_percent: number;
+  available_categories: string[];
+}): string {
+  const availableCount = Array.isArray(score.available_categories) ? score.available_categories.length : 0;
+  if (
+    availableCount === 0 ||
+    score.overall_score == null
+  )
+    return "INCONCLUSIVE";
+  if (score.confidence_percent >= 50 && availableCount >= 4)
+    return "COMPLETE";
+  return "PARTIAL";
+}
+
+const QUALITY_STYLES: Record<string, string> = {
+  COMPLETE: "bg-emerald-100 text-emerald-800 border-emerald-200",
+  PARTIAL: "bg-amber-100 text-amber-800 border-amber-200",
+  INCONCLUSIVE: "bg-orange-100 text-orange-800 border-orange-200",
+  FAILED: "bg-red-100 text-red-800 border-red-200",
+};
+
+// ---------------------------------------------------------------------------
+// Metric labels
+// ---------------------------------------------------------------------------
 
 const metricLabels: Record<string, string> = {
   first_contentful_paint_ms: "First Contentful Paint (ms)",
@@ -160,330 +971,76 @@ const measurementLabels: Record<string, string> = {
   responsive_viewport: "Responsive viewport",
 };
 
-const diagnosticTitles: Record<string, string> = {
-  standards_diagnostics: "Web Standards",
-  cache_diagnostics: "Cache Efficiency",
-  policy_diagnostics: "Policies and Legal Metadata",
-  copyright_diagnostics: "Copyright Metadata",
-  security_diagnostics: "Security Posture",
-  analytics_diagnostics: "Analytics and Tracking",
-  responsive_diagnostics: "Responsive Testing",
-  browser_compatibility: "Browser Compatibility",
-};
+// ---------------------------------------------------------------------------
+// Collapsible section wrapper
+// ---------------------------------------------------------------------------
 
-const diagnosticWhy: Record<string, string> = {
-  standards_diagnostics: "Valid markup improves browser interoperability and makes defects easier to diagnose.",
-  cache_diagnostics: "Cache reuse can reduce repeat-load latency and transferred data.",
-  policy_diagnostics: "Visible policy metadata helps visitors locate important public information.",
-  copyright_diagnostics: "Current visible metadata can signal routine site maintenance.",
-  security_diagnostics: "Restrictive browser security controls reduce exposure to common client-side attacks.",
-  analytics_diagnostics: "Verified tracking evidence helps identify duplicate installation and consent risks.",
-  responsive_diagnostics: "Viewport and target behavior affects mobile and touch usability.",
-  browser_compatibility: "Explicit test coverage prevents Chromium-only evidence from being overstated.",
-};
-
-function SignalCard({ title, status, detail }: { title: string; status: string; detail?: string }) {
-  const colors: Record<string, string> = {
-    current: "border-emerald-300 bg-emerald-50",
-    present: "border-emerald-300 bg-emerald-50",
-    detected: "border-emerald-300 bg-emerald-50",
-    valid: "border-emerald-300 bg-emerald-50",
-    strong: "border-emerald-300 bg-emerald-50",
-    good: "border-emerald-300 bg-emerald-50",
-    older_than_one_year: "border-amber-300 bg-amber-50",
-    possibly_outdated: "border-amber-300 bg-amber-50",
-    partial: "border-amber-300 bg-amber-50",
-    issues_found: "border-amber-300 bg-amber-50",
-    needs_attention: "border-amber-300 bg-amber-50",
-    date_not_published: "border-slate-300 bg-slate-50",
-    unavailable: "border-slate-300 bg-slate-50",
-    inconclusive: "border-slate-300 bg-slate-50",
-    missing: "border-red-200 bg-red-50",
-    weak: "border-red-200 bg-red-50",
-    high_observable_risk: "border-red-200 bg-red-50",
-    not_detected: "border-slate-300 bg-slate-50",
-  };
+function CollapsibleSection({
+  title,
+  defaultOpen = false,
+  children,
+  id,
+}: {
+  title: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+  id?: string;
+}) {
   return (
-    <div className={`rounded-xl border p-4 ${colors[status] ?? "border-slate-200 bg-white"}`}>
-      <p className="text-sm font-semibold text-slate-700">{title}</p>
-      <p className="mt-1 text-lg font-bold capitalize">{label(status)}</p>
-      {detail && <p className="mt-1 text-xs text-slate-600">{detail}</p>}
-    </div>
-  );
-}
-
-type Obs = Record<string, unknown>;
-function s(v: unknown): string { return v == null ? "" : String(v); }
-function sa(v: unknown): string[] { return Array.isArray(v) ? v.map(String) : []; }
-
-function WebsiteSignalsSection({ diagnostics }: { diagnostics: Record<string, DiagnosticGroup> }) {
-  const policy = diagnostics.policy_diagnostics?.verified_observations as Obs | undefined;
-  const policyDetail = (policy?.privacy_policy_detail ?? null) as Obs | null;
-  const copyrightData = (diagnostics.policy_diagnostics?.copyright?.verified_observations ?? null) as Obs | null;
-  const securityMatrix = diagnostics.security_diagnostics?.verified_observations?.security_header_matrix;
-  const matrixItems = Array.isArray(securityMatrix) ? (securityMatrix as Obs[]) : [];
-  const analyticsData = (diagnostics.analytics_diagnostics?.verified_observations ?? null) as Obs | null;
-  const responsiveData = (diagnostics.responsive_diagnostics?.verified_observations ?? null) as Obs | null;
-
-  const privacyStatus = s(policyDetail?.freshness_status || (policy?.privacy_policy ? "detected" : "unavailable"));
-  const privacyDetail = policyDetail?.explicit_update_date
-    ? `Updated ${s(policyDetail.explicit_update_date)}`
-    : policyDetail?.found ? "Date not published" : undefined;
-
-  const copyrightStatus = s(copyrightData?.freshness_status || "unavailable");
-  const copyrightDetail = copyrightData?.raw_text ? s(copyrightData.raw_text).slice(0, 60) : undefined;
-
-  const presentHeaders = matrixItems.filter((h) => h.status === "present" || h.status === "not_applicable").length;
-  const totalHeaders = matrixItems.length;
-  const headerStatus = totalHeaders === 0 ? "unavailable" : presentHeaders === totalHeaders ? "present" : presentHeaders > 0 ? "partial" : "missing";
-  const headerDetail = totalHeaders > 0 ? `${presentHeaders} of ${totalHeaders} headers present` : undefined;
-
-  const analyticsProviders = sa(analyticsData?.providers);
-  const analyticsTech = sa(analyticsData?.technologies);
-  const analyticsIds = sa(analyticsData?.public_identifiers);
-  const analyticsStatus = analyticsData?.detected ? "detected" : "not_detected";
-  const analyticsDetail = analyticsProviders.length ? analyticsProviders.join(", ") : undefined;
-
-  const testedVp = responsiveData?.tested_viewports as number | undefined;
-  const successVp = responsiveData?.successful_viewports as number | undefined;
-  const responsiveStatus = testedVp == null || testedVp === 0 ? "unavailable" : successVp === testedVp ? "present" : (successVp ?? 0) > 0 ? "partial" : "missing";
-  const responsiveDetail = testedVp != null && testedVp > 0 ? `${successVp ?? 0} of ${testedVp} viewports passed` : undefined;
-
-  const htmlStdData = (diagnostics.html_standards_diagnostics?.verified_observations ?? null) as Obs | null;
-  const htmlStdStatus = s(htmlStdData?.validation_status || "unavailable");
-  const htmlStdScore = htmlStdData?.standards_score as number | null | undefined;
-  const htmlStdDetail = htmlStdScore != null ? `Score: ${htmlStdScore}/100` : undefined;
-  const htmlStdIssues = Array.isArray(htmlStdData?.issues) ? (htmlStdData.issues as Obs[]) : [];
-
-  const secDiagObs = (diagnostics.security_diagnostics?.verified_observations ?? null) as Obs | null;
-  const securityRisk = secDiagObs?.page_security_risk as Obs | null | undefined;
-  const secRiskScore = securityRisk?.score as number | null | undefined;
-  const secRiskBand = s(securityRisk?.risk_band || "unavailable");
-  const secRiskStatus = secRiskScore != null ? secRiskBand : "unavailable";
-  const secRiskDetail = secRiskScore != null ? `${secRiskScore}/100 · ${s(securityRisk?.confidence)} confidence` : undefined;
-  const secRiskDeductions = Array.isArray(securityRisk?.deductions) ? (securityRisk.deductions as Obs[]) : [];
-
-  return (
-    <section className="mt-6 scroll-mt-6 rounded-2xl border bg-white p-6" id="website-signals">
-      <h2 className="text-xl font-bold">Website Signals</h2>
-      <p className="mt-1 text-sm text-slate-600">Evidence-based detection of privacy policy, copyright, security headers, analytics, responsiveness, HTML standards, and security posture.</p>
-      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <SignalCard title="Privacy Policy" status={privacyStatus} detail={privacyDetail} />
-        <SignalCard title="Copyright Year" status={copyrightStatus} detail={copyrightDetail} />
-        <SignalCard title="Security Headers" status={headerStatus} detail={headerDetail} />
-        <SignalCard title="Analytics / Tagging" status={analyticsStatus} detail={analyticsDetail} />
-        <SignalCard title="Responsiveness" status={responsiveStatus} detail={responsiveDetail} />
-        <SignalCard title="HTML Standards" status={htmlStdStatus} detail={htmlStdDetail} />
-        <SignalCard title="Security & Risk" status={secRiskStatus} detail={secRiskDetail} />
-      </div>
-      <details className="mt-4">
-        <summary className="cursor-pointer text-sm font-semibold">Technical evidence</summary>
-        <div className="mt-3 grid gap-4 text-sm">
-          {policyDetail && (
-            <div>
-              <h4 className="font-semibold">Privacy Policy</h4>
-              <dl className="mt-1 grid gap-1 sm:grid-cols-2">
-                <div><dt className="text-slate-500">Found</dt><dd>{policyDetail.found ? "Yes" : "No"}</dd></div>
-                {policyDetail.url ? <div className="sm:col-span-2"><dt className="text-slate-500">URL</dt><dd className="break-all">{s(policyDetail.url)}</dd></div> : null}
-                {policyDetail.title ? <div><dt className="text-slate-500">Title</dt><dd>{s(policyDetail.title)}</dd></div> : null}
-                <div><dt className="text-slate-500">Freshness</dt><dd className="capitalize">{label(s(policyDetail.freshness_status))}</dd></div>
-                {policyDetail.explicit_update_date ? <div><dt className="text-slate-500">Update date</dt><dd>{s(policyDetail.explicit_update_date)}</dd></div> : null}
-                {policyDetail.age_days != null ? <div><dt className="text-slate-500">Age</dt><dd>{s(policyDetail.age_days)} days</dd></div> : null}
-                {policyDetail.evidence_text ? <div className="sm:col-span-2"><dt className="text-slate-500">Evidence</dt><dd>{s(policyDetail.evidence_text)}</dd></div> : null}
-              </dl>
-            </div>
-          )}
-          {copyrightData && (
-            <div>
-              <h4 className="font-semibold">Copyright</h4>
-              <dl className="mt-1 grid gap-1 sm:grid-cols-2">
-                <div><dt className="text-slate-500">Detected</dt><dd>{copyrightData.detected ? "Yes" : "No"}</dd></div>
-                {copyrightData.raw_text ? <div><dt className="text-slate-500">Text</dt><dd>{s(copyrightData.raw_text)}</dd></div> : null}
-                {copyrightData.start_year ? <div><dt className="text-slate-500">Year range</dt><dd>{s(copyrightData.start_year)}{copyrightData.end_year !== copyrightData.start_year ? `–${s(copyrightData.end_year)}` : ""}</dd></div> : null}
-                <div><dt className="text-slate-500">Freshness</dt><dd className="capitalize">{label(s(copyrightData.freshness_status))}</dd></div>
-                {copyrightData.evidence_url ? <div className="sm:col-span-2"><dt className="text-slate-500">Evidence URL</dt><dd className="break-all">{s(copyrightData.evidence_url)}</dd></div> : null}
-              </dl>
-            </div>
-          )}
-          {matrixItems.length > 0 && (
-            <div>
-              <h4 className="font-semibold">Security Header Matrix</h4>
-              <div className="mt-2 overflow-x-auto">
-                <table className="w-full min-w-[600px] text-left text-xs">
-                  <thead><tr className="border-b"><th className="p-2">Header</th><th>Status</th><th>Value</th><th>Recommendation</th></tr></thead>
-                  <tbody>
-                    {matrixItems.map((item) => (
-                      <tr className="border-b" key={s(item.header)}>
-                        <td className="p-2 font-mono">{s(item.header)}</td>
-                        <td className="capitalize">{label(s(item.status))}</td>
-                        <td className="max-w-48 break-all">{item.observed_value ? s(item.observed_value).slice(0, 120) : "—"}</td>
-                        <td className="max-w-64">{item.recommendation ? s(item.recommendation) : "—"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-          {analyticsData && (
-            <div>
-              <h4 className="font-semibold">Analytics / Tagging</h4>
-              <dl className="mt-1 grid gap-1 sm:grid-cols-2">
-                <div><dt className="text-slate-500">Detected</dt><dd>{analyticsData.detected ? "Yes" : "No"}</dd></div>
-                {analyticsProviders.length > 0 && <div><dt className="text-slate-500">Providers</dt><dd>{analyticsProviders.join(", ")}</dd></div>}
-                {analyticsTech.length > 0 && <div><dt className="text-slate-500">Technologies</dt><dd>{analyticsTech.join(", ")}</dd></div>}
-                {analyticsIds.length > 0 && <div className="sm:col-span-2"><dt className="text-slate-500">Public identifiers</dt><dd className="font-mono text-xs">{analyticsIds.join(", ")}</dd></div>}
-                <div><dt className="text-slate-500">Confidence</dt><dd>{s(analyticsData.confidence)}%</dd></div>
-              </dl>
-              <p className="mt-2 text-xs text-slate-500">Detection only. No traffic, visitors, or conversion data is reported.</p>
-            </div>
-          )}
-          {htmlStdData && (
-            <div>
-              <h4 className="font-semibold">HTML Standards Validation</h4>
-              <dl className="mt-1 grid gap-1 sm:grid-cols-2">
-                <div><dt className="text-slate-500">Status</dt><dd className="capitalize">{label(htmlStdStatus)}</dd></div>
-                <div><dt className="text-slate-500">Validator</dt><dd>{s(htmlStdData.validator_name)}</dd></div>
-                {htmlStdScore != null ? <div><dt className="text-slate-500">ZuiGO HTML Standards Score</dt><dd className="font-bold">{htmlStdScore}/100</dd></div> : null}
-                <div><dt className="text-slate-500">Errors</dt><dd>{s(htmlStdData.errors_count)}</dd></div>
-                <div><dt className="text-slate-500">Warnings</dt><dd>{s(htmlStdData.warnings_count)}</dd></div>
-              </dl>
-              {htmlStdIssues.length > 0 ? (
-                <div className="mt-2 overflow-x-auto">
-                  <table className="w-full min-w-[500px] text-left text-xs">
-                    <thead><tr className="border-b"><th className="p-2">Code</th><th>Severity</th><th>Message</th></tr></thead>
-                    <tbody>
-                      {htmlStdIssues.slice(0, 20).map((issue, i) => (
-                        <tr className="border-b" key={i}>
-                          <td className="p-2 font-mono">{s(issue.code)}</td>
-                          <td className="capitalize">{s(issue.severity)}</td>
-                          <td className="max-w-80">{s(issue.message)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : null}
-              <p className="mt-2 text-xs text-slate-500">This is a ZuiGO HTML Standards Score, not an official W3C validation result.</p>
-            </div>
-          )}
-          {securityRisk && secRiskScore != null ? (
-            <div>
-              <h4 className="font-semibold">Security & Risk Score</h4>
-              <dl className="mt-1 grid gap-1 sm:grid-cols-3">
-                <div><dt className="text-slate-500">Score</dt><dd className="text-lg font-bold">{secRiskScore}/100</dd></div>
-                <div><dt className="text-slate-500">Risk Band</dt><dd className="capitalize">{label(secRiskBand)}</dd></div>
-                <div><dt className="text-slate-500">Confidence</dt><dd className="capitalize">{s(securityRisk?.confidence)}</dd></div>
-                <div><dt className="text-slate-500">Evidence Coverage</dt><dd>{s(securityRisk?.evidence_coverage)}%</dd></div>
-              </dl>
-              {secRiskDeductions.length > 0 ? (
-                <div className="mt-2 overflow-x-auto">
-                  <table className="w-full min-w-[400px] text-left text-xs">
-                    <thead><tr className="border-b"><th className="p-2">Finding</th><th>Reason</th><th>Points</th></tr></thead>
-                    <tbody>
-                      {secRiskDeductions.map((d, i) => (
-                        <tr className="border-b" key={i}>
-                          <td className="p-2 font-mono">{s(d.code)}</td>
-                          <td className="max-w-64">{s(d.reason)}</td>
-                          <td className="text-right">-{s(d.points)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : null}
-              <p className="mt-2 text-xs text-slate-500">This score reflects observable security posture only. It is not a penetration-test result and does not prove the absence of vulnerabilities.</p>
-            </div>
-          ) : null}
-        </div>
-      </details>
-    </section>
-  );
-}
-
-function DiagnosticCard({ name, diagnostic }: { name: string; diagnostic: DiagnosticGroup }) {
-  const provisional =
-    diagnostic.status === "partial" ||
-    diagnostic.evidence_completeness === "html_only" ||
-    diagnostic.verified_observations.score_qualification === "provisional_html_only";
-  return (
-    <details className="rounded-2xl border bg-white p-6" open={name === "cache_diagnostics"}>
-      <summary className="cursor-pointer text-xl font-bold">{diagnosticTitles[name] ?? label(name)}</summary>
-      <div className="mt-4 grid gap-3 sm:grid-cols-3">
-        <div><p className="text-xs font-semibold text-slate-500">Status</p><p className="capitalize">{label(diagnostic.status)}</p></div>
-        <div><p className="text-xs font-semibold text-slate-500">Evidence completeness</p><p>{label(diagnostic.evidence_completeness ?? diagnostic.status)}</p></div>
-        <div><p className="text-xs font-semibold text-slate-500">Collected</p><p>{new Date(diagnostic.collected_at).toLocaleString()}</p></div>
-      </div>
-      {diagnostic.score && (
-        <div className={`mt-4 rounded-xl p-4 ${provisional ? "border border-amber-300 bg-amber-50" : "bg-slate-50"}`}>
-          <p className="text-xs font-bold uppercase">{diagnostic.score.label}</p>
-          <p className="text-4xl font-bold">
-            {diagnostic.score.final_score}
-            {provisional && <span className="ml-2 text-base font-semibold text-amber-800">Provisional</span>}
-          </p>
-          <p className="text-sm">Formula {diagnostic.score.formula_version} · Confidence {diagnostic.score.confidence_percent}%</p>
-          {name === "cache_diagnostics" && provisional && (
-            <p className="mt-2 font-semibold text-amber-900">Static asset analysis unavailable or incomplete; this is not a fully verified perfect result.</p>
-          )}
-        </div>
-      )}
-      <h3 className="mt-5 font-semibold">Why this matters</h3>
-      <p className="mt-1 text-sm text-slate-700">{diagnostic.why_it_matters || diagnosticWhy[name]}</p>
-      <h3 className="mt-5 font-semibold">Verified observations</h3>
-      <div className="mt-2"><HumanValue value={diagnostic.verified_observations} /></div>
-      {diagnostic.score?.deductions.length ? (
-        <>
-          <h3 className="mt-5 font-semibold">Deductions</h3>
-          <ul className="mt-2 grid gap-2 text-sm">
-            {diagnostic.score.deductions.map((item, index) => (
-              <li className="rounded-lg bg-rose-50 p-3" key={`${item.code}-${index}`}>
-                <strong>{item.code}</strong>: −{item.points} — {item.reason}
-              </li>
-            ))}
-          </ul>
-        </>
-      ) : diagnostic.score ? <p className="mt-4 text-sm"><strong>Deductions:</strong> None under this formula.</p> : null}
-      <h3 className="mt-5 font-semibold">Evidence</h3>
-      {diagnostic.evidence.length ? <HumanValue value={diagnostic.evidence} /> : <p className="mt-1 text-sm text-slate-500">No additional bounded evidence.</p>}
-      <p className="mt-5 text-sm"><strong>Unavailable measurements:</strong> {diagnostic.unavailable_observations.map(label).join(", ") || "None"}</p>
-      {diagnostic.limitations.length > 0 && (
-        <div className="mt-4 rounded-lg bg-slate-50 p-3">
-          <p className="font-semibold">Limitations</p>
-          <ul className="mt-1 grid gap-1 text-sm text-slate-600">{diagnostic.limitations.map((item) => <li key={item}>• {item}</li>)}</ul>
-        </div>
-      )}
-      <details className="mt-4">
-        <summary className="cursor-pointer text-sm font-semibold">Technical details (JSON)</summary>
-        <pre className="mt-2 overflow-auto whitespace-pre-wrap rounded-lg bg-slate-950 p-3 text-xs text-slate-100">{JSON.stringify(diagnostic, null, 2)}</pre>
-      </details>
+    <details className="group" open={defaultOpen} id={id}>
+      <summary className="flex cursor-pointer items-center gap-2 py-3 text-sm font-semibold text-slate-700 hover:text-slate-900">
+        <svg
+          className="h-4 w-4 shrink-0 transition-transform group-open:rotate-90"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={2}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+        </svg>
+        {title}
+      </summary>
+      <div className="pb-4">{children}</div>
     </details>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Main page component
+// ---------------------------------------------------------------------------
 
 export default function AnalysisReportPage() {
   const { analysisRunId } = useParams<{ analysisRunId: string }>();
   const searchParams = useSearchParams();
   const projectId = searchParams.get("projectId") ?? undefined;
   const websiteId = searchParams.get("websiteId") ?? undefined;
-  const workflowExecutionId = searchParams.get("workflowExecutionId") ?? undefined;
+  const workflowExecutionId =
+    searchParams.get("workflowExecutionId") ?? undefined;
   const baselineRunId = searchParams.get("baselineRunId") ?? undefined;
+
   const [report, setReport] = useState<AnalysisReport | null>(null);
-  const [performanceData, setPerformanceData] = useState<Record<string, unknown>[]>([]);
-  const [accessibilityData, setAccessibilityData] = useState<AccessibilityData | null>(null);
-  const [interpretations, setInterpretations] = useState<MetricInterpretation[]>([]);
-  const [interpretationsInterrupted, setInterpretationsInterrupted] =
-    useState(false);
+  const [performanceData, setPerformanceData] = useState<
+    Record<string, unknown>[]
+  >([]);
+  const [accessibilityData, setAccessibilityData] =
+    useState<AccessibilityData | null>(null);
+  const [interpretations, setInterpretations] = useState<
+    MetricInterpretation[]
+  >([]);
   const [interpretationsUnavailable, setInterpretationsUnavailable] =
     useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [interruptedResources, setInterruptedResources] = useState<string[]>([]);
-  const [workflowProgress, setWorkflowProgress] = useState<WorkflowProgress | null>(
-    null,
+  const [interruptedResources, setInterruptedResources] = useState<string[]>(
+    [],
   );
+  const [workflowProgress, setWorkflowProgress] =
+    useState<WorkflowProgress | null>(null);
   const [currentReportAvailable, setCurrentReportAvailable] = useState(false);
   const [baselineAvailable, setBaselineAvailable] = useState(false);
   const [comparisonDataAvailable, setComparisonDataAvailable] = useState(false);
+  type TabId = "overview" | "findings" | "performance" | "accessibility" | "seo" | "technical" | "browser" | "pages" | "actions" | "evidence";
+  const [activeTab, setActiveTab] = useState<TabId>("overview");
 
   const setResourceInterrupted = useCallback(
     (resource: string, interrupted: boolean) => {
@@ -500,9 +1057,14 @@ export default function AnalysisReportPage() {
   const handleProgressChange = useCallback((value: WorkflowProgress) => {
     setWorkflowProgress(value);
   }, []);
-  const handleReportAvailabilityChange = useCallback((available: boolean) => {
-    setCurrentReportAvailable(available);
-  }, []);
+  const handleReportAvailabilityChange = useCallback(
+    (available: boolean) => {
+      setCurrentReportAvailable(available);
+    },
+    [],
+  );
+
+  // ---- Data fetching (same as before) ----
 
   useEffect(
     () =>
@@ -524,9 +1086,8 @@ export default function AnalysisReportPage() {
             workflowExecutionId &&
             requestError instanceof ApiError &&
             requestError.status === 404
-          ) {
+          )
             return;
-          }
           setError(
             requestError instanceof Error
               ? requestError.message
@@ -544,8 +1105,7 @@ export default function AnalysisReportPage() {
           apiRequest<{ data?: Record<string, unknown>[] }>(
             `/api/v1/analysis-runs/${analysisRunId}/performance`,
           ),
-        onSuccess: (response) =>
-          setPerformanceData(response.data ?? []),
+        onSuccess: (response) => setPerformanceData(response.data ?? []),
         onConnectionChange: (interrupted) =>
           setResourceInterrupted("performance", interrupted),
       }),
@@ -561,14 +1121,10 @@ export default function AnalysisReportPage() {
         ),
       onSuccess: (loaded) => {
         setInterpretations(loaded);
-        setInterpretationsInterrupted(false);
         setInterpretationsUnavailable(false);
       },
-      onConnectionChange: setInterpretationsInterrupted,
-      onPermanentFailure: () => {
-        setInterpretationsInterrupted(false);
-        setInterpretationsUnavailable(true);
-      },
+      onConnectionChange: () => {},
+      onPermanentFailure: () => setInterpretationsUnavailable(true),
     });
     const stopAccessibility = startRetriedRequest({
       request: () =>
@@ -612,9 +1168,8 @@ export default function AnalysisReportPage() {
       !baselineAvailable ||
       !comparisonTerminal ||
       !currentReportAvailable
-    ) {
+    )
       return;
-    }
     return startRetriedRequest({
       request: async () => {
         try {
@@ -623,9 +1178,11 @@ export default function AnalysisReportPage() {
             baselineRunId,
           );
         } catch (requestError) {
-          if (!(requestError instanceof ApiError) || requestError.status !== 404) {
+          if (
+            !(requestError instanceof ApiError) ||
+            requestError.status !== 404
+          )
             throw requestError;
-          }
           return analysisComparisonApi.generate(
             analysisRunId,
             baselineRunId,
@@ -650,27 +1207,34 @@ export default function AnalysisReportPage() {
     setResourceInterrupted,
   ]);
 
+  // ---- In-progress state ----
+
   if (!report && websiteId && workflowExecutionId) {
     return (
       <main className="mx-auto min-h-screen max-w-6xl px-6 py-12">
-        <Link className="text-sm font-semibold text-slate-600" href="/">
+        <Link className="text-sm font-medium text-slate-500 hover:text-slate-700" href="/">
           ← Start another analysis
         </Link>
-        <h1 className="mt-6 text-3xl font-bold">Website analysis in progress</h1>
-        <p className="mt-2 text-slate-600">
-          Real evidence is being collected from the submitted website. No prepared
-          demo evidence is used in this analysis.
+        <h1 className="mt-6 text-2xl font-bold text-slate-900">
+          Website analysis in progress
+        </h1>
+        <p className="mt-2 text-sm text-slate-600">
+          Real evidence is being collected from the submitted website.
         </p>
         {essentialConnectionInterrupted && (
           <p className="mt-4 text-sm text-amber-800" role="status">
             Connection interrupted — retrying
           </p>
         )}
-        {loading && <p className="mt-4" role="status">Loading analysis progress…</p>}
+        {loading && (
+          <p className="mt-4 text-sm text-slate-500" role="status">
+            Loading analysis progress…
+          </p>
+        )}
         {error && (
-          <p className="mt-4 text-amber-800" role="status">
-            The final report is not available yet. Progress and safe recovery actions
-            remain available below.
+          <p className="mt-4 text-sm text-amber-800" role="status">
+            The final report is not available yet. Progress remains available
+            below.
           </p>
         )}
         <ReportDeliveryPanel
@@ -685,10 +1249,29 @@ export default function AnalysisReportPage() {
       </main>
     );
   }
-  if (loading) return <main className="mx-auto max-w-6xl px-6 py-12"><p role="status">Loading analysis report…</p></main>;
-  if (error || !report) return <main className="mx-auto max-w-6xl px-6 py-12"><h1 className="text-3xl font-bold">Report unavailable</h1><p className="mt-4 text-red-700" role="alert">{error ?? "The report could not be found."}</p></main>;
 
-  const categoryScores = {
+  if (loading)
+    return (
+      <main className="mx-auto max-w-6xl px-6 py-12">
+        <p role="status" className="text-sm text-slate-500">
+          Loading analysis report…
+        </p>
+      </main>
+    );
+
+  if (error || !report)
+    return (
+      <main className="mx-auto max-w-6xl px-6 py-12">
+        <h1 className="text-2xl font-bold">Report unavailable</h1>
+        <p className="mt-4 text-red-700" role="alert">
+          {error ?? "The report could not be found."}
+        </p>
+      </main>
+    );
+
+  // ---- Derived data ----
+
+  const categoryScores: Record<string, number | null> = {
     Performance: report.score.performance_score,
     Accessibility: report.score.accessibility_score,
     "Best Practices": report.score.best_practices_score,
@@ -698,9 +1281,12 @@ export default function AnalysisReportPage() {
   const diagnostics = Object.entries(report.diagnostics);
   const copyright = report.diagnostics.policy_diagnostics?.copyright;
   if (copyright) diagnostics.splice(3, 0, ["copyright_diagnostics", copyright]);
-  const lighthouseContext = report.lighthouse_metrics.lighthouse_context;
-  const auditBreakdown = Array.isArray(report.lighthouse_metrics.lighthouse_audit_breakdown)
-    ? report.lighthouse_metrics.lighthouse_audit_breakdown as Array<Record<string, unknown>>
+  const auditBreakdown = Array.isArray(
+    report.lighthouse_metrics.lighthouse_audit_breakdown,
+  )
+    ? (report.lighthouse_metrics.lighthouse_audit_breakdown as Array<
+        Record<string, unknown>
+      >)
     : [];
   const technology = report.playwright_measurements.technology_indicators;
   const comparisonReady = Boolean(
@@ -711,237 +1297,553 @@ export default function AnalysisReportPage() {
       comparisonDataAvailable,
   );
 
+  const quality = qualityFromScore(report.score);
+  const safeFindings = Array.isArray(report.findings) ? report.findings : [];
+  const grouped = groupFindings(safeFindings);
+  const topFindings = grouped
+    .filter((g) => ["critical", "high"].includes(g.severity))
+    .slice(0, 5);
+
+  const interpretation = report.interpretation;
+  const topActions =
+    interpretation?.priority_recommendations.slice(0, 5) ?? [];
+
+  // Collect all limitations from diagnostics
+  const allLimitations = new Set<string>();
+  for (const [, diag] of diagnostics) {
+    for (const lim of Array.isArray(diag.limitations) ? diag.limitations : []) {
+      allLimitations.add(lim);
+    }
+  }
+  const unavailableCategories = Array.isArray(report.score.unavailable_categories) ? report.score.unavailable_categories : [];
+  if (unavailableCategories.length > 0) {
+    allLimitations.add(
+      `Unavailable scoring categories: ${unavailableCategories.join(", ")}`,
+    );
+  }
+
+  // ---- Render ----
+
+  const TABS = [
+    { id: "overview", label: "Overview" },
+    { id: "findings", label: "Findings" },
+    { id: "performance", label: "Performance" },
+    { id: "accessibility", label: "Accessibility" },
+    { id: "seo", label: "SEO & Content" },
+    { id: "technical", label: "Security & Technical" },
+    { id: "browser", label: "Browser UAT & Responsive" },
+    { id: "pages", label: "Pages" },
+    { id: "actions", label: "Action Plan" },
+    { id: "evidence", label: "Evidence & Limitations" },
+  ] as const;
+
   return (
-    <main className="mx-auto min-h-screen max-w-6xl px-6 py-12">
-      <Link className="text-sm font-semibold text-slate-600" href="/projects">← Projects</Link>
-      <header className="mt-6 rounded-2xl bg-slate-950 p-7 text-white">
-        <h1 className="text-3xl font-bold">{report.website.name || "Website analysis"}</h1>
-        <dl className="mt-5 grid gap-3 text-sm sm:grid-cols-2">
-          <div><dt className="text-slate-400">Requested URL</dt><dd className="break-all">{report.result.requested_url}</dd></div>
-          <div><dt className="text-slate-400">Final URL</dt><dd className="break-all">{report.result.final_url}</dd></div>
-          <div><dt className="text-slate-400">Analysis date</dt><dd>{new Date(report.result.analysis_completed_at).toLocaleString()}</dd></div>
-          <div><dt className="text-slate-400">Status</dt><dd className="capitalize">{report.analysis_status}</dd></div>
-        </dl>
-        <details className="mt-5 rounded-lg border border-slate-700 p-3">
-          <summary className="cursor-pointer text-sm font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white">
-            Technical identifiers
-          </summary>
-          <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
-            <div><dt className="text-slate-400">Analysis run</dt><dd className="flex items-center gap-2 break-all">{report.analysis_run_id}<CopyId value={report.analysis_run_id} /></dd></div>
-            <div><dt className="text-slate-400">Legacy report</dt><dd className="flex items-center gap-2 break-all">{report.report_id}<CopyId value={report.report_id} /></dd></div>
-          </dl>
-        </details>
+    <main className="mx-auto min-h-screen max-w-[90rem] px-4 py-8">
+      {/* Top Breadcrumb */}
+      <Link className="text-sm font-medium text-slate-500 hover:text-slate-700 mb-6 inline-block" href="/projects">
+        ← Projects
+      </Link>
+
+      {/* NEW Run Header */}
+      <header className="overflow-hidden rounded-xl border border-z-border bg-z-surface shadow-sm mb-6">
+        <div className="bg-slate-900 px-6 py-5 border-b border-slate-800">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="min-w-0">
+              <p className="text-xs font-bold uppercase tracking-widest text-emerald-400">
+                ZuiGO WebIQ
+              </p>
+              <h1 className="mt-2 text-2xl font-black text-white">
+                {report.website.name || "Website Analysis"}
+              </h1>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className={`rounded-full border px-3 py-1 text-xs font-bold ${QUALITY_STYLES[quality] ?? "bg-slate-100 text-slate-700 border-slate-300"}`}>
+                {quality}
+              </span>
+            </div>
+          </div>
+
+          <div className="mt-5 flex flex-wrap gap-x-8 gap-y-3 text-sm">
+             <div className="flex gap-2 items-center text-slate-200"><span className="w-2 h-2 rounded-full bg-emerald-500"></span><span className="capitalize font-semibold">Analysis: {report.analysis_status}</span></div>
+             <div className="text-slate-300">Started {new Date(report.result.analysis_started_at).toLocaleString()}</div>
+             {report.result.analysis_completed_at && <div className="text-slate-300">Completed {new Date(report.result.analysis_completed_at).toLocaleString()}</div>}
+             <div className="text-slate-300 font-mono text-xs">{report.result.requested_url}</div>
+          </div>
+        </div>
+
+        {comparisonReady && (
+          <div className="mx-6 mt-4 flex items-center justify-between rounded-xl bg-blue-50 border border-blue-200 p-4 shadow-sm">
+            <div className="flex items-center gap-3">
+              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-100 text-blue-700">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+              </span>
+              <div>
+                <p className="font-semibold text-blue-900">Reanalysis comparison available</p>
+                <p className="text-xs text-blue-700">Compare these results with the baseline analysis.</p>
+              </div>
+            </div>
+            <Link
+              href={`/analysis-runs/${analysisRunId}/compare/${baselineRunId}${projectId ? `?projectId=${projectId}` : ""}`}
+              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+            >
+              View comparison
+            </Link>
+          </div>
+        )}
+
+        <div className="flex flex-wrap items-center justify-between gap-6 px-6 py-4 bg-z-surface">
+           <div className="flex items-baseline gap-2">
+            <span className="text-4xl font-bold text-z-text">
+              {report.score.overall_score != null ? (
+                <ScoreValue metricId="overall_score" value={report.score.overall_score} />
+              ) : "—"}
+            </span>
+            {(() => {
+              const interpretation = interpretations.find(i => i.metric_id === "overall_score");
+              if (!interpretation || ["unavailable", "not_applicable"].includes(interpretation.rating)) return null;
+              return (
+                <div className="ml-2">
+                  <MetricRatingBadge interpretation={interpretation} />
+                </div>
+              );
+            })()}
+          </div>
+          <div className="text-sm font-medium text-z-text-subtle flex gap-4 items-center">
+             <span>Confidence {report.score.confidence_percent}%</span>
+             <span>Formula {report.score.formula_version}</span>
+             {allLimitations.size > 0 ? (
+               <button onClick={() => setActiveTab("evidence")} className="text-amber-600 hover:text-amber-700 flex items-center gap-1 border-l pl-4 border-z-border underline decoration-amber-600/30 underline-offset-4">
+                 <span className="hidden sm:inline">Limitations: {allLimitations.size} evidence/scope limitation{allLimitations.size !== 1 ? 's' : ''}</span>
+                 <span className="sm:hidden">{allLimitations.size} limitation{allLimitations.size !== 1 ? 's' : ''}</span>
+               </button>
+             ) : (
+               <span className="text-emerald-600 flex items-center gap-1 border-l pl-4 border-z-border">Full evidence collected</span>
+             )}
+          </div>
+        </div>
       </header>
 
       {essentialConnectionInterrupted && (
-        <p className="mt-4 text-sm text-amber-800" role="status">
+        <p className="mt-4 text-sm text-amber-800 bg-amber-50 p-2 rounded" role="status">
           Connection interrupted — retrying
         </p>
       )}
 
-      {baselineRunId && (
-        <section className="mt-6 rounded-2xl border border-emerald-300 bg-emerald-50 p-6">
-          <h2 className="text-xl font-bold">
-            {comparisonReady
-              ? "Reanalysis evidence is ready"
-              : comparisonTerminal
-                ? "Preparing comparison evidence"
-                : "Reanalysis in progress"}
-          </h2>
-          <p className="mt-2 text-sm text-slate-700">
-            {comparisonReady
-              ? "The current run is terminal, its report evidence is available, and the preserved baseline is ready."
-              : comparisonTerminal
-                ? "The run has finished, but comparison evidence is not available yet."
-                : "Comparison becomes available after the new run finishes and its evidence is retained."}
-          </p>
-          {comparisonReady && (
-            <Link
-              className="mt-4 inline-block rounded-lg bg-emerald-800 px-4 py-2 font-semibold text-white"
-              href={`/analysis-runs/${analysisRunId}/compare/${baselineRunId}`}
-            >
-              Compare with baseline
-            </Link>
-          )}
-        </section>
-      )}
-
-      <SectionErrorBoundary sectionName="Reanalysis Comparison">
-      <ReanalysisComparisonPanel
-        analysisRunId={analysisRunId}
-        projectId={projectId}
-      />
-      </SectionErrorBoundary>
-
-      <section className="mt-8" id={`report-delivery-${report.website.id}`}>
-        <h2 className="mb-4 text-2xl font-bold">Final reports and exports</h2>
-        <ReportDeliveryPanel
-          analysisRunId={analysisRunId}
-          onProgressChange={handleProgressChange}
-          onReportAvailabilityChange={handleReportAvailabilityChange}
-          projectId={projectId}
-          showStartAction={false}
-          websiteId={report.website.id}
-          workflowExecutionId={workflowExecutionId}
-        />
-      </section>
-
-      <details className="mt-8 rounded-2xl border bg-slate-50 p-5">
-        <summary className="cursor-pointer text-lg font-bold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700">
-          Additional technical evidence
-        </summary>
-        <div className="mt-5">
-
-      <SectionErrorBoundary sectionName="Extracted Content">
-      <section className="rounded-2xl border bg-white p-6">
-        <ExtractedContentPanel analysisRunId={analysisRunId} />
-      </section>
-      </SectionErrorBoundary>
-
-      {report.interpretation && (
-        <section className="mt-6 grid gap-6">
-          <div className="rounded-2xl border bg-white p-6">
-            <div className="flex flex-wrap items-center gap-3"><h2 className="text-xl font-bold">Executive Summary</h2><span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold uppercase">{report.interpretation.generation_mode === "ai" ? "AI generated" : "Deterministic fallback"}</span></div>
-            <p className="mt-4 text-slate-700">{report.interpretation.executive_summary}</p>
-            <h3 className="mt-5 font-semibold">Overall assessment</h3><p className="mt-2 text-slate-700">{report.interpretation.overall_assessment}</p>
-          </div>
-          <div className="grid gap-6 lg:grid-cols-2">
-            <div className="rounded-2xl border bg-white p-6"><h2 className="text-xl font-bold">Key Strengths</h2>{report.interpretation.strengths.length ? <ul className="mt-4 grid gap-3">{report.interpretation.strengths.map((item, index) => <li className="rounded-lg bg-emerald-50 p-3 text-sm" key={`${item.text}-${index}`}>{item.text}</li>)}</ul> : <p className="mt-3 text-sm text-slate-600">Insufficient verified evidence is available.</p>}</div>
-            <div className="rounded-2xl border bg-white p-6"><h2 className="text-xl font-bold">Priority Weaknesses</h2>{report.interpretation.weaknesses.length ? <ul className="mt-4 grid gap-3">{report.interpretation.weaknesses.map((item, index) => <li className="rounded-lg bg-amber-50 p-3 text-sm" key={`${item.text}-${index}`}>{item.text}<p className="mt-1 font-mono text-xs">{item.related_finding_codes.join(", ")}</p></li>)}</ul> : <p className="mt-3 text-sm text-slate-600">No verified weaknesses were available.</p>}</div>
-          </div>
-          <div className="rounded-2xl border bg-white p-6"><h2 className="text-xl font-bold">Recommended Actions</h2>{report.interpretation.priority_recommendations.length ? <ul className="mt-4 grid gap-4">{report.interpretation.priority_recommendations.map((item) => <li className="rounded-xl border p-4" key={item.recommendation_id}><p className="text-xs font-bold uppercase">{item.priority} · {item.related_finding_codes.join(", ")}</p><h3 className="mt-2 font-bold">{item.title}</h3><p className="mt-2 text-sm text-slate-600">{item.explanation}</p><dl className="mt-3 grid gap-2 text-sm sm:grid-cols-2"><div><dt className="text-slate-500">Business impact</dt><dd>{item.business_impact}</dd></div><div><dt className="text-slate-500">Recommended fix</dt><dd>{item.recommended_fix}</dd></div><div><dt className="text-slate-500">Effort</dt><dd>{item.estimated_effort}</dd></div><div><dt className="text-slate-500">Confidence</dt><dd>{item.confidence_percent}%</dd></div></dl></li>)}</ul> : <p className="mt-3 text-sm text-slate-600">No evidence-grounded actions were generated.</p>}</div>
-        </section>
-      )}
-
-      <section className="mt-6 grid scroll-mt-6 gap-4 md:grid-cols-3" id="score-overview">
-        {(interpretationsInterrupted || interpretationsUnavailable) && (
-          <p
-            className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 md:col-span-3"
-            role="status"
-          >
-            {interpretationsInterrupted
-              ? "Metric interpretation help is temporarily unavailable — retrying. Scores and report evidence remain available."
-              : "Metric interpretation help is unavailable for this report. Scores and report evidence remain available."}
-          </p>
-        )}
-        <div className="rounded-2xl border bg-white p-6">
-          <div className="flex items-start justify-between">
-            <p className="text-sm text-slate-500">Overall score</p>
-            <MetricRatingBadge interpretation={interpretations.find(i => i.metric_id === "overall_score")} />
-          </div>
-          <p className="mt-2 text-6xl font-bold"><ScoreValue metricId="overall_score" value={report.score.overall_score} /></p>
-          <p className="mt-3 text-sm">Confidence: {report.score.confidence_percent}%</p>
-          <p className="text-sm">Formula: {report.score.formula_version}</p>
-        </div>
-
-        <div className="grid gap-3 sm:grid-cols-2 md:col-span-2">
-          {Object.entries(categoryScores).map(([name, score]) => {
-            const mId = name.toLowerCase().replace(" ", "_") + "_score";
-            return (
-              <div className="rounded-xl border bg-white p-4" key={name}>
-                <div className="flex items-start justify-between">
-                  <p className="text-sm text-slate-500">{name}</p>
-                  <MetricRatingBadge interpretation={interpretations.find(i => i.metric_id === mId)} />
-                </div>
-                <p className="mt-1 text-3xl font-bold"><ScoreValue metricId={mId} value={score} /></p>
-              </div>
-            );
-          })}
-        </div>
-      </section>
-
-      <section className="mt-6 rounded-2xl border bg-white p-6">
-        <h2 className="text-xl font-bold">Score transparency</h2>
-        <p className="mt-3 text-sm text-slate-600">Available weights are normalized when measurements are missing. Lighthouse findings are not deducted from Technical Quality.</p>
-        <p className="mt-3 text-sm"><strong>Available:</strong> {report.score.available_categories.join(", ") || "None"}</p>
-        <p className="mt-1 text-sm"><strong>Unavailable:</strong> {report.score.unavailable_categories.join(", ") || "None"}</p>
-        <h3 className="mt-5 font-semibold">Technical Quality deductions</h3>
-        {report.score.deductions.length ? <HumanValue value={report.score.deductions} /> : <p className="mt-2 text-sm text-slate-600">No eligible deductions.</p>}
-      </section>
-
-      <SectionErrorBoundary sectionName="Accessibility Intelligence">
-      <section className="mt-6">
-        <AccessibilityIntelligence accessibilityData={accessibilityData} />
-      </section>
-      </SectionErrorBoundary>
-
-      <SectionErrorBoundary sectionName="Website Signals">
-      <WebsiteSignalsSection diagnostics={report.diagnostics} />
-      </SectionErrorBoundary>
-
-      <section className="mt-6 grid scroll-mt-6 gap-5" id="verified-diagnostics">
-        <h2 className="text-2xl font-bold">Verified diagnostics</h2>
-        {diagnostics.map(([name, diagnostic]) => <DiagnosticCard diagnostic={diagnostic} key={name} name={name} />)}
-      </section>
-
-      <section className="mt-6 grid gap-6 lg:grid-cols-2">
-        <div className="rounded-2xl border bg-white p-6">
-          <h2 className="text-xl font-bold">Lighthouse metrics</h2>
-          <dl className="mt-4 grid gap-3">
-            {Object.entries(metricLabels).map(([key, name]) => (
-              <div key={key}>
-                <dt className="text-sm text-slate-500 flex items-center gap-2">
-                  {name}
-                  <MetricRatingBadge interpretation={interpretations.find(i => i.metric_id === key.replace('_ms', ''))} />
-                </dt>
-                <dd className="font-semibold">{display(report.lighthouse_metrics[key])}</dd>
-                {key === "time_to_interactive_ms" && <p className="text-xs text-slate-500">Legacy/supplementary; not a current Core Web Vital and not necessarily included in the performance score.</p>}
-              </div>
+      {/* Secondary Sticky Navigation */}
+      <div className="sticky top-0 z-40 -mx-4 px-4 sm:mx-0 sm:px-0 mb-8 bg-z-background/95 backdrop-blur-md border-b border-z-border overflow-x-auto custom-scrollbar">
+         <nav className="flex space-x-1 min-w-max" aria-label="Tabs">
+            {TABS.map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id as TabId)}
+                className={`whitespace-nowrap flex-shrink-0 px-4 py-3 text-sm font-bold border-b-2 transition-colors ${
+                  activeTab === tab.id
+                  ? 'border-z-primary text-z-primary'
+                  : 'border-transparent text-z-muted hover:text-z-text hover:border-z-border'
+                }`}
+              >
+                {tab.label}
+              </button>
             ))}
-          </dl>
-        </div>
-        <div className="rounded-2xl border bg-white p-6"><h2 className="text-xl font-bold">Lighthouse execution context</h2><div className="mt-4"><HumanValue value={lighthouseContext} /></div></div>
-      </section>
-
-      <section className="mt-6 rounded-2xl border bg-white p-6">
-        <h2 className="text-xl font-bold">Lighthouse audit breakdown</h2>
-        {auditBreakdown.length ? <HumanValue value={auditBreakdown} /> : <p className="mt-3 text-sm text-slate-500">No failed or manual-check audit breakdown was retained for this report.</p>}
-        <div className="mt-5 rounded-lg bg-blue-50 p-4 text-sm"><strong>Accessibility context:</strong> Lighthouse performs automated checks. A score of 100 does not prove complete accessibility compliance; manual accessibility testing is still required.</div>
-      </section>
-
-      <section className="mt-6 grid gap-6 lg:grid-cols-2">
-        <div className="rounded-2xl border bg-white p-6"><h2 className="text-xl font-bold">Technology detection</h2><div className="mt-4"><HumanValue value={technology} /></div><p className="mt-4 text-sm text-slate-500">Technology claims require framework-specific or corroborating indicators; a lone weak signal is reported as uncertain.</p></div>
-        <div className="rounded-2xl border bg-white p-6"><h2 className="text-xl font-bold">Page measurements</h2><dl className="mt-4 grid gap-3"><div><dt className="text-sm text-slate-500">HTTP status</dt><dd>{display(report.result.http_status_code)}</dd></div><div><dt className="text-sm text-slate-500">Page title</dt><dd>{display(report.result.page_title)}</dd></div>{Object.entries(measurementLabels).map(([key, name]) => <div key={key}><dt className="text-sm text-slate-500">{name}</dt><dd className="break-all"><HumanValue value={report.playwright_measurements[key]} /></dd></div>)}</dl></div>
-      </section>
-
-      <section className="mt-6 rounded-2xl border bg-white p-6"><h2 className="text-xl font-bold">Findings</h2>{report.findings.length === 0 ? <p className="mt-3 text-slate-600">No verified findings.</p> : <ul className="mt-4 grid gap-4">{report.findings.map((finding) => <li className="rounded-xl border p-4" key={finding.id}><p className="text-xs font-bold uppercase">{finding.severity} · {finding.category} · {finding.source}</p><h3 className="mt-2 font-bold">{finding.title}</h3><p className="mt-1 text-sm text-slate-600">{finding.description}</p><dl className="mt-3 grid gap-2 text-sm"><div><dt className="text-slate-500">Finding code</dt><dd>{finding.finding_code}</dd></div><div><dt className="text-slate-500">Affected URL</dt><dd className="break-all">{finding.affected_url}</dd></div><div><dt className="text-slate-500">Evidence</dt><dd><HumanValue value={finding.evidence} /></dd></div><div><dt className="text-slate-500">Confidence</dt><dd>{finding.confidence_percent}%</dd></div></dl></li>)}</ul>}</section>
-
-      <SectionErrorBoundary sectionName="Site Diagnostics">
-      <div className="mt-8">
-        <SiteDiagnosticsPanel
-          analysisRunId={analysisRunId}
-          restrictToAnalysisRun
-          websiteId={report.website.id}
-        />
+         </nav>
       </div>
-      </SectionErrorBoundary>
 
-      <SectionErrorBoundary sectionName="Agent Execution">
-      <section className="mt-6" id={`agent-execution-${report.website.id}`}>
-        <h2 className="mb-4 text-2xl font-bold">Agent execution</h2>
-        <AgentExecutionPanel
-          analysisRunId={analysisRunId}
-          websiteId={report.website.id}
-        />
-      </section>
-      </SectionErrorBoundary>
-      <SectionErrorBoundary sectionName="Score Explanation">
-      <section className="mt-6" id={`scoring-intelligence-${report.website.id}`}>
-        <h2 className="mb-4 text-2xl font-bold">Score explanation</h2>
-        <ScoringIntelligencePanel
-          analysisRunId={analysisRunId}
-          websiteId={report.website.id}
-        />
-      </section>
-      </SectionErrorBoundary>
+      <div className="min-h-[600px] mb-20">
+         {/* OVERVIEW TAB */}
+         {activeTab === 'overview' && (
+           <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
+             {/* Category Scores */}
+              <section className="rounded-xl border border-z-border bg-z-surface p-6">
+                <h2 className="text-lg font-bold text-z-text">Category Scores</h2>
+                {interpretationsUnavailable && (
+                  <p className="mt-2 text-xs text-z-muted">
+                    Metric interpretation help is unavailable. Scores remain available.
+                  </p>
+                )}
+                <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+                  {Object.entries(categoryScores).map(([name, score]) => {
+                    const mId = name.toLowerCase().replace(" ", "_") + "_score";
+                    return (
+                      <div key={name} className="bg-z-background p-4 rounded-lg border border-z-border">
+                        <ScoreBar score={score} label={name} />
+                        <div className="mt-2 flex justify-end">
+                          <MetricRatingBadge interpretation={interpretations.find((i) => i.metric_id === mId)} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
 
-      <SectionErrorBoundary sectionName="Performance Intelligence">
-      <div className="mt-8">
-        <PerformanceIntelligence data={performanceData as unknown as { id: string; metric_id: string; evidence_type: string; raw_value: number }[]} />
+              {/* Website Signals */}
+              <SectionErrorBoundary sectionName="Website Signals">
+                <section className="rounded-xl border border-z-border bg-z-surface p-6">
+                  <h2 className="text-lg font-bold text-z-text">Website Signals</h2>
+                  <p className="mt-1 text-sm text-z-muted">Evidence-based detection of privacy, copyright, security, analytics, responsiveness, HTML standards, and security posture.</p>
+                  <div className="mt-6">
+                    <WebsiteSignalsSection diagnostics={report.diagnostics} />
+                  </div>
+                </section>
+              </SectionErrorBoundary>
+
+              {/* Top Findings */}
+              <section className="rounded-xl border border-z-border bg-z-surface p-6">
+                <div className="flex items-baseline justify-between mb-4">
+                  <h2 className="text-lg font-bold text-z-text">Top Findings</h2>
+                  <span className="text-sm font-semibold text-z-muted bg-z-background px-3 py-1 rounded-full border border-z-border">
+                    {grouped.length} unique · {safeFindings.length} total
+                  </span>
+                </div>
+                {topFindings.length > 0 ? (
+                  <div className="space-y-3">
+                    {topFindings.map((finding) => (
+                      <div key={finding.finding_code} className="flex items-start gap-4 rounded-lg border border-z-border p-4 bg-z-background hover:border-z-border-hover transition-colors">
+                        <StatusBadge status={finding.severity} />
+                        <div className="min-w-0 flex-1">
+                          <p className="font-bold text-z-text">{finding.title}</p>
+                          <p className="mt-1 text-sm text-z-text-subtle line-clamp-2">{finding.description}</p>
+                          <div className="mt-3 flex flex-wrap gap-4 text-xs font-semibold text-z-muted">
+                            <span className="flex items-center gap-1">
+                              <span className="w-4 h-4 flex items-center justify-center bg-z-surface rounded border border-z-border">{finding.affectedUrls.size}</span>
+                              Page{finding.affectedUrls.size !== 1 ? "s" : ""}
+                            </span>
+                            <span className="flex items-center gap-1">
+                              <span className="w-4 h-4 flex items-center justify-center bg-z-surface rounded border border-z-border">{finding.totalOccurrences}</span>
+                              Occurrences
+                            </span>
+                            <span className="capitalize px-2 py-0.5 bg-z-surface rounded border border-z-border">{formatLabel(finding.category)}</span>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          className="shrink-0 text-sm font-bold text-z-primary hover:text-z-primary-hover bg-z-primary/10 px-3 py-1.5 rounded-md"
+                          onClick={() => setActiveTab("findings")}
+                        >
+                          Details
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <EmptyState title="No critical or high-severity findings detected" description="Review all findings in Findings Register." />
+                )}
+                {grouped.length > 5 && (
+                  <div className="mt-4 text-center">
+                    <button
+                      type="button"
+                      className="text-sm font-bold text-z-text hover:text-z-primary border border-z-border bg-z-background px-4 py-2 rounded-lg transition-colors"
+                      onClick={() => setActiveTab("findings")}
+                    >
+                      View all {grouped.length} findings
+                    </button>
+                  </div>
+                )}
+              </section>
+           </div>
+         )}
+
+         {/* FINDINGS TAB */}
+         {activeTab === 'findings' && (
+            <div className="animate-in fade-in slide-in-from-bottom-2 duration-300 h-full min-h-[600px]">
+              <IssueRegister findings={safeFindings} />
+            </div>
+         )}
+
+         {/* PERFORMANCE TAB */}
+         {activeTab === 'performance' && (
+            <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
+               <SectionErrorBoundary sectionName="Performance Intelligence">
+                 <PerformanceIntelligence data={performanceData as unknown as React.ComponentProps<typeof PerformanceIntelligence>['data']} />
+               </SectionErrorBoundary>
+
+               <section className="rounded-xl border border-z-border bg-z-surface p-6">
+                  <h2 className="text-lg font-bold text-z-text">Lighthouse Metrics</h2>
+                  <dl className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    {Object.entries(metricLabels).map(([key, name]) => (
+                      <div key={key} className="rounded-lg border border-z-border bg-z-background p-4">
+                        <dt className="flex items-center justify-between gap-2 text-sm font-semibold text-z-text-subtle">
+                          {name}
+                          <MetricRatingBadge interpretation={interpretations.find(i => i.metric_id === key.replace("_ms", ""))} />
+                        </dt>
+                        <dd className="mt-2 text-2xl font-black text-z-text tabular-nums">
+                          {display(report.lighthouse_metrics[key])}
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+               </section>
+
+               <section className="rounded-xl border border-z-border bg-z-surface p-6">
+                  <h2 className="text-lg font-bold text-z-text">Page Measurements</h2>
+                  <dl className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    <div className="rounded-lg border border-z-border bg-z-background p-4">
+                      <dt className="text-sm font-semibold text-z-text-subtle">HTTP status</dt>
+                      <dd className="mt-2 text-xl font-black text-z-text tabular-nums">{display(report.result.http_status_code)}</dd>
+                    </div>
+                    {Object.entries(measurementLabels).map(([key, name]) => (
+                      <div key={key} className="rounded-lg border border-z-border bg-z-background p-4">
+                        <dt className="text-sm font-semibold text-z-text-subtle">{name}</dt>
+                        <dd className="mt-2 text-xl font-black text-z-text tabular-nums">{display(report.playwright_measurements[key])}</dd>
+                      </div>
+                    ))}
+                  </dl>
+               </section>
+
+               {!!technology && (
+                 <section className="rounded-xl border border-z-border bg-z-surface p-6">
+                   <CollapsibleSection title="Technology Detection" defaultOpen>
+                     <div className="bg-z-background p-4 rounded-lg border border-z-border mt-2">
+                       <HumanValue value={technology} />
+                     </div>
+                   </CollapsibleSection>
+                 </section>
+               )}
+            </div>
+         )}
+
+         {/* ACCESSIBILITY TAB */}
+         {activeTab === 'accessibility' && (
+            <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
+               <SectionErrorBoundary sectionName="Accessibility Intelligence">
+                  <AccessibilityIntelligence accessibilityData={accessibilityData} />
+               </SectionErrorBoundary>
+
+               {auditBreakdown.length > 0 && (
+                 <section className="rounded-xl border border-z-border bg-z-surface p-6">
+                   <CollapsibleSection title={`Lighthouse Audit Breakdown (${auditBreakdown.length})`} defaultOpen>
+                     <div className="bg-z-background p-4 rounded-lg border border-z-border mt-2 overflow-x-auto">
+                       <HumanValue value={auditBreakdown} />
+                     </div>
+                   </CollapsibleSection>
+                   <p className="mt-4 text-xs font-semibold text-z-muted">Lighthouse automated checks. A score of 100 does not prove complete accessibility compliance.</p>
+                 </section>
+               )}
+            </div>
+         )}
+
+         {/* SEO & CONTENT TAB */}
+         {activeTab === 'seo' && (
+            <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
+               <SectionErrorBoundary sectionName="Extracted Content">
+                 <section className="rounded-xl border border-z-border bg-z-surface p-6">
+                   <h2 className="text-lg font-bold text-z-text">Extracted Content</h2>
+                   <div className="mt-4">
+                     <ExtractedContentPanel analysisRunId={analysisRunId} />
+                   </div>
+                 </section>
+               </SectionErrorBoundary>
+            </div>
+         )}
+
+         {/* SECURITY & TECHNICAL TAB */}
+         {activeTab === 'technical' && (
+            <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
+               <SectionErrorBoundary sectionName="Verified Diagnostics">
+                  <section className="rounded-xl border border-z-border bg-z-surface p-6">
+                    <h2 className="text-lg font-bold text-z-text mb-4">Verified Diagnostics</h2>
+                    <div className="space-y-4">
+                      {diagnostics.map(([name, diagnostic]) => (
+                        <div key={name} className="border border-z-border rounded-lg bg-z-background p-4">
+                          <CollapsibleSection title={`${diagnosticTitles[name] ?? formatLabel(name)} — ${formatLabel(diagnostic.status)}`}>
+                            <div className="grid gap-4 text-sm sm:grid-cols-3 mt-4">
+                              <MetricStat label="Status" value={formatLabel(diagnostic.status)} />
+                              <div className="flex items-start gap-1">
+                                <MetricStat
+                                  label="Evidence"
+                                  value={formatLabel(diagnostic.evidence_completeness ?? diagnostic.status)}
+                                />
+                                <div className="pt-0.5">
+                                  <ConceptInfoButton conceptId="evidence_completeness" title="Evidence completeness" />
+                                </div>
+                              </div>
+                              <MetricStat label="Collected" value={new Date(diagnostic.collected_at).toLocaleString()} />
+                            </div>
+                            {!!diagnostic.score && (
+                              <div className="mt-4 rounded-lg bg-z-surface border border-z-border p-4">
+                                <p className="text-xs font-bold uppercase text-z-muted mb-2">{diagnostic.score.label}</p>
+                                <div className="flex flex-wrap gap-x-8 gap-y-4">
+                                  <div>
+                                    <span className="text-xs font-semibold text-z-text-subtle block mb-1">Raw Base</span>
+                                    <span className="font-mono">{diagnostic.score.starting_score}</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-xs font-semibold text-z-text-subtle block mb-1">Deductions</span>
+                                    <span className="font-mono text-red-600">-{Array.isArray(diagnostic.score?.deductions) ? diagnostic.score.deductions.reduce((a: number, b: { points: number }) => a + b.points, 0) : 0}</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-xs font-semibold text-z-text-subtle block mb-1">Final Index</span>
+                                    <span className="font-mono font-bold">{diagnostic.score.final_score}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                          </CollapsibleSection>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+               </SectionErrorBoundary>
+
+               <SectionErrorBoundary sectionName="Website Signals Evidence">
+                 <section className="rounded-xl border border-z-border bg-z-surface p-6">
+                   <h2 className="text-lg font-bold text-z-text mb-4">Website Signals — Technical Evidence</h2>
+                   <WebsiteSignalsTechnicalEvidence diagnostics={report.diagnostics} />
+                 </section>
+               </SectionErrorBoundary>
+
+               <SectionErrorBoundary sectionName="Score Transparency">
+                 <section className="rounded-xl border border-z-border bg-z-surface p-6">
+                   <h2 className="text-lg font-bold text-z-text">Score Transparency</h2>
+                   <div className="mt-4 space-y-2 text-sm text-z-text-subtle">
+                     <p><strong>Available:</strong> {Array.isArray(report.score.available_categories) ? report.score.available_categories.join(", ") : "None"}</p>
+                     <p><strong>Unavailable:</strong> {Array.isArray(report.score.unavailable_categories) ? report.score.unavailable_categories.join(", ") : "None"}</p>
+                   </div>
+                   {Array.isArray(report.score.deductions) && report.score.deductions.length > 0 && (
+                     <div className="mt-6">
+                       <CollapsibleSection title={`Technical Quality deductions (${report.score.deductions.length})`}>
+                         <div className="bg-z-background border border-z-border rounded-lg p-4 mt-2">
+                           <HumanValue value={report.score.deductions} />
+                         </div>
+                       </CollapsibleSection>
+                     </div>
+                   )}
+                 </section>
+               </SectionErrorBoundary>
+            </div>
+         )}
+
+         {/* BROWSER & RESPONSIVE TAB */}
+         {activeTab === 'browser' && (
+            <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
+               <SectionErrorBoundary sectionName="Browser Compatibility">
+                 <section className="rounded-xl border border-z-border bg-z-surface p-6">
+                   <h2 className="text-lg font-bold text-z-text mb-2">Browser UAT & Responsive Verification</h2>
+                   <p className="text-sm text-z-muted mb-6">Browser UAT scope across Google Chrome, Microsoft Edge, and Apple Safari.</p>
+                   <BrowserSummary diagnostics={report.diagnostics} viewMode="executive" />
+                 </section>
+               </SectionErrorBoundary>
+
+               <SectionErrorBoundary sectionName="Reanalysis Comparison">
+                 <ReanalysisComparisonPanel analysisRunId={analysisRunId} projectId={projectId} />
+               </SectionErrorBoundary>
+            </div>
+         )}
+
+         {/* PAGES TAB */}
+         {activeTab === 'pages' && (
+            <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
+               <SectionErrorBoundary sectionName="Pages Analysis">
+                 <section className="rounded-xl border border-z-border bg-z-surface p-6">
+                   <h2 className="text-lg font-bold text-z-text mb-4">Discovered Pages Analysis</h2>
+                   <SiteDiagnosticsPanel websiteId={report.website.id} />
+                 </section>
+               </SectionErrorBoundary>
+            </div>
+         )}
+
+         {/* ACTION PLAN TAB */}
+         {activeTab === 'actions' && (
+            <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
+               <section className="rounded-xl border border-z-border bg-z-surface p-6">
+                 <h2 className="text-lg font-bold text-z-text mb-4">Priority Action Plan</h2>
+                 {topActions.length > 0 ? (
+                   <div className="space-y-4">
+                     {topActions.map((action, i) => (
+                       <div key={action.recommendation_id} className="rounded-xl border border-z-border bg-z-background p-5 shadow-sm">
+                         <div className="flex items-start gap-4">
+                           <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-z-dark-surface text-sm font-black text-white shadow-sm">
+                             {i + 1}
+                           </span>
+                           <div className="min-w-0 flex-1">
+                             <div className="flex items-start justify-between gap-2">
+                               <p className="font-bold text-z-text text-lg">{action.title}</p>
+                               <StatusBadge status={action.priority} />
+                             </div>
+                             <p className="mt-2 text-sm leading-relaxed text-z-text-subtle">
+                               {action.explanation}
+                             </p>
+                             <div className="mt-4 flex flex-wrap gap-4 text-xs font-semibold text-z-muted bg-z-surface p-3 rounded-lg border border-z-border">
+                               <div><span className="text-z-text-subtle block mb-1">Owner</span>{action.responsible_role}</div>
+                               <div className="border-l border-z-border pl-4"><span className="text-z-text-subtle block mb-1">Effort</span>{action.estimated_effort}</div>
+                               <div className="border-l border-z-border pl-4"><span className="text-z-text-subtle block mb-1">Confidence</span>{action.confidence_percent}%</div>
+                             </div>
+                           </div>
+                         </div>
+                       </div>
+                     ))}
+                   </div>
+                 ) : (
+                   <EmptyState title="No evidence-grounded actions available" description="This may indicate that no actionable findings were retained, or an AI-prioritized plan was unavailable." />
+                 )}
+               </section>
+            </div>
+         )}
+
+         {/* EVIDENCE & LIMITATIONS TAB */}
+         {activeTab === 'evidence' && (
+            <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
+               <SectionErrorBoundary sectionName="Agent Execution">
+                  <AgentExecutionPanel analysisRunId={analysisRunId} />
+               </SectionErrorBoundary>
+
+               <SectionErrorBoundary sectionName="Scoring Intelligence">
+                  <ScoringIntelligencePanel analysisRunId={analysisRunId} websiteId={report.website.id} />
+               </SectionErrorBoundary>
+
+               <SectionErrorBoundary sectionName="Methodology">
+                 <section className="rounded-xl border border-z-border bg-z-surface p-6">
+                   <h2 className="text-lg font-bold text-z-text mb-4">Methodology</h2>
+                   <dl className="grid gap-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
+                     <div className="bg-z-background border border-z-border p-4 rounded-lg">
+                       <dt className="text-z-text-subtle font-semibold mb-1">Scoring formula</dt>
+                       <dd className="font-mono text-xs">v{report.score.formula_version}</dd>
+                     </div>
+                     <div className="bg-z-background border border-z-border p-4 rounded-lg">
+                       <dt className="text-z-text-subtle font-semibold mb-1">Lighthouse version</dt>
+                       <dd className="font-mono text-xs">{report.result.lighthouse_version ?? "Not available"}</dd>
+                     </div>
+                     <div className="bg-z-background border border-z-border p-4 rounded-lg">
+                       <dt className="text-z-text-subtle font-semibold mb-1">Analysis run</dt>
+                       <dd className="font-mono text-xs break-all">{report.analysis_run_id}</dd>
+                     </div>
+                   </dl>
+                 </section>
+               </SectionErrorBoundary>
+
+               {allLimitations.size > 0 && (
+                 <SectionErrorBoundary sectionName="All Limitations">
+                   <section className="rounded-xl border border-z-border bg-z-surface p-6">
+                     <h2 className="text-lg font-bold text-z-text mb-4 flex items-center gap-2">
+                       <span className="text-amber-500">⚠</span> All Limitations
+                     </h2>
+                     <ul className="space-y-3">
+                       {[...allLimitations].map((lim) => (
+                         <li key={lim} className="flex items-start gap-3 text-sm text-z-text-subtle bg-z-background border border-z-border p-3 rounded-lg">
+                           <span className="text-amber-500 font-bold">•</span>
+                           <span>{lim}</span>
+                         </li>
+                       ))}
+                     </ul>
+                   </section>
+                 </SectionErrorBoundary>
+               )}
+
+               <SectionErrorBoundary sectionName="Report Delivery">
+                 <section>
+                   <ReportDeliveryPanel
+                     analysisRunId={analysisRunId}
+                     onProgressChange={handleProgressChange}
+                     onReportAvailabilityChange={handleReportAvailabilityChange}
+                     projectId={projectId}
+                     showStartAction={false}
+                     websiteId={report.website.id}
+                     workflowExecutionId={workflowExecutionId}
+                   />
+                 </section>
+               </SectionErrorBoundary>
+            </div>
+         )}
       </div>
-      </SectionErrorBoundary>
-        </div>
-      </details>
     </main>
   );
 }

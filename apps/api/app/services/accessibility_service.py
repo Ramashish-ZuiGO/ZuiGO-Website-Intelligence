@@ -189,7 +189,12 @@ def process_axe_results(
                 )
 
             for node in item.get("nodes", []):
-                target_selector = " ".join(node.get("target", []))
+                # axe-core target entries are `str | list[str]`; nested lists
+                # occur for elements inside iframes or shadow DOM.
+                target_selector = " ".join(
+                    part if isinstance(part, str) else " ".join(map(str, part))
+                    for part in node.get("target", [])
+                )
                 failure_summary = node.get("failureSummary", "")
                 nodes_to_insert.append(
                     {

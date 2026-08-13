@@ -51,9 +51,10 @@ export function AccessibilityIntelligence({ accessibilityData }: { accessibility
     );
   }
 
-  const { audit, findings, checklist } = accessibilityData;
-  const violations = findings.filter((f) => f.finding_type === 'violation');
-  const incomplete = findings.filter((f) => f.finding_type === 'incomplete');
+  const { audit, checklist } = accessibilityData;
+  const safeFindings = Array.isArray(accessibilityData.findings) ? accessibilityData.findings : [];
+  const violations = safeFindings.filter((f) => f.finding_type === 'violation');
+  const incomplete = safeFindings.filter((f) => f.finding_type === 'incomplete');
 
   return (
     <section className="mt-5 rounded-lg border border-slate-200 bg-white shadow-sm overflow-hidden">
@@ -135,7 +136,7 @@ export function AccessibilityIntelligence({ accessibilityData }: { accessibility
           </ul>
         </details>
 
-        {checklist && (
+        {checklist && Array.isArray(checklist.items) && checklist.items.length > 0 && (
           <details className="mt-2 group">
             <summary className="cursor-pointer text-sm font-semibold text-slate-700 hover:text-slate-900 p-2 bg-slate-50 rounded border border-slate-200">
               Manual Review Checklist ({checklist.items.filter((i) => i.status === 'fail').length} issues)

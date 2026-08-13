@@ -33,8 +33,12 @@ class RealWebsiteAnalysisStartRequest(BaseModel):
         le=10000,
         json_schema_extra={"deprecated": True},
     )
+    # Standard engineering-signal scope. Firefox is not part of the locked
+    # customer-facing UAT contract (Chrome/Edge/Safari) and is not scheduled by
+    # the standard workflow; the enum still accepts it for explicit
+    # engineering-diagnostic requests.
     browser_engines: list[Literal["chromium", "firefox", "webkit"]] = Field(
-        default_factory=lambda: ["chromium", "firefox", "webkit"],
+        default_factory=lambda: ["chromium", "webkit"],
         min_length=1,
         max_length=3,
     )

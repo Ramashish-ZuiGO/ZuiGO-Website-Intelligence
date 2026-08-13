@@ -484,10 +484,10 @@ export function SiteDiagnosticsPanel({
                 This execution is partial. Missing or failed evidence is preserved and must not be read as a clean result.
               </div>
             )}
-            {Object.keys(execution.error_metadata).length > 0 && (
+            {execution.error_metadata && typeof execution.error_metadata === "object" && Object.keys(execution.error_metadata).length > 0 && (
               <details className="mt-3"><summary className="cursor-pointer text-sm font-semibold">Unavailable/error metadata</summary><div className="mt-2"><EvidenceBlock value={execution.error_metadata} /></div></details>
             )}
-            {Object.keys(execution.partial_completion_metadata).length > 0 && (
+            {execution.partial_completion_metadata && typeof execution.partial_completion_metadata === "object" && Object.keys(execution.partial_completion_metadata).length > 0 && (
               <details className="mt-3"><summary className="cursor-pointer text-sm font-semibold">Partial evidence metadata</summary><div className="mt-2"><EvidenceBlock value={execution.partial_completion_metadata} /></div></details>
             )}
           </section>
@@ -530,12 +530,12 @@ export function SiteDiagnosticsPanel({
                   <div className="rounded-lg bg-slate-50 p-3"><dt>Malformed links</dt><dd className="text-xl font-bold">{graph.total_malformed_edges}</dd></div>
                 </dl>
                 <details className="mt-4">
-                  <summary className="cursor-pointer font-semibold">Link nodes ({graph.nodes.length} shown)</summary>
-                  <div className="mt-2 overflow-x-auto"><table className="w-full min-w-[640px] text-left text-xs"><thead><tr className="border-b"><th className="p-2">URL</th><th>Depth</th><th>Inbound</th><th>Outbound</th><th>Status</th></tr></thead><tbody>{graph.nodes.map((node) => <tr className="border-b" key={node.page_id}><td className="max-w-80 break-all p-2">{node.normalized_url}</td><td>{node.crawl_depth}</td><td>{node.inbound_link_count}</td><td>{node.outbound_evidence_available ? node.outbound_link_count : "Unavailable"}</td><td>{node.http_status_code ?? "Unavailable"}</td></tr>)}</tbody></table></div>
+                  <summary className="cursor-pointer font-semibold">Link nodes ({Array.isArray(graph.nodes) ? graph.nodes.length : 0} shown)</summary>
+                  <div className="mt-2 overflow-x-auto"><table className="w-full min-w-[640px] text-left text-xs"><thead><tr className="border-b"><th className="p-2">URL</th><th>Depth</th><th>Inbound</th><th>Outbound</th><th>Status</th></tr></thead><tbody>{(Array.isArray(graph.nodes) ? graph.nodes : []).map((node) => <tr className="border-b" key={node.page_id}><td className="max-w-80 break-all p-2">{node.normalized_url}</td><td>{node.crawl_depth}</td><td>{node.inbound_link_count}</td><td>{node.outbound_evidence_available ? node.outbound_link_count : "Unavailable"}</td><td>{node.http_status_code ?? "Unavailable"}</td></tr>)}</tbody></table></div>
                 </details>
                 <details className="mt-4">
-                  <summary className="cursor-pointer font-semibold">Link edges ({graph.edges.length} shown)</summary>
-                  <ul className="mt-2 grid gap-2">{graph.edges.map((edge, index) => <li className="rounded-lg border p-3 text-xs" key={`${edge.source_page_id}-${edge.raw_target}-${index}`}><p className="break-all"><strong>From:</strong> {edge.source_url}</p><p className="break-all"><strong>To:</strong> {edge.target_url}</p><p className="break-all text-slate-600"><strong>Evidence:</strong> {edge.evidence_reference}</p></li>)}</ul>
+                  <summary className="cursor-pointer font-semibold">Link edges ({Array.isArray(graph.edges) ? graph.edges.length : 0} shown)</summary>
+                  <ul className="mt-2 grid gap-2">{(Array.isArray(graph.edges) ? graph.edges : []).map((edge, index) => <li className="rounded-lg border p-3 text-xs" key={`${edge.source_page_id}-${edge.raw_target}-${index}`}><p className="break-all"><strong>From:</strong> {edge.source_url}</p><p className="break-all"><strong>To:</strong> {edge.target_url}</p><p className="break-all text-slate-600"><strong>Evidence:</strong> {edge.evidence_reference}</p></li>)}</ul>
                 </details>
               </>
             )}

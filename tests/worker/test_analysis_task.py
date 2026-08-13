@@ -263,3 +263,20 @@ def test_progress_is_monotonic(session_factory: sessionmaker) -> None:
         analysis.stage(session, run_id, 20, "loading_website")
     stored = load_run(session_factory, run_id)
     assert stored["progress_percent"] == 40
+
+
+def test_lighthouse_accessibility_called_with_required_normalized_url() -> None:
+    """Regression: the primary-analysis stage previously invoked
+    process_lighthouse_accessibility() with only four positional arguments,
+    omitting the required ``normalized_url`` so the call always raised
+    'missing 1 required positional argument: lighthouse_data' and Lighthouse
+    accessibility evidence was silently never collected.
+    """
+    import inspect
+
+    source = inspect.getsource(analysis)
+    start = source.index("process_lighthouse_accessibility(")
+    call = source[start : start + 300]
+    # The fixed call passes the page URL (final_url) before lighthouse_data.
+    assert 'playwright_data["final_url"]' in call
+    assert "lighthouse_data" in call

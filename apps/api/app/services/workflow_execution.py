@@ -481,53 +481,68 @@ class DeterministicWorkflowOrchestrator:
             execution_pk = execution.id
             max_concurrency = int(execution.structured_input.get("max_concurrency", 3))
 
-        for batch in batches:
+        try:
+            for batch in batches:
+                with self.session_factory() as db:
+                    execution = db.get(AgentExecution, execution_pk)
+                    assert execution is not None
+                    if execution.status == ExecutionStatus.CANCELLED.value:
+                        return execution
+                    runnable, blocked = self._partition_batch(db, execution, workflow, batch)
+
+                outcomes: list[AgentRunOutcome] = []
+                for agent_id in blocked:
+                    outcomes.append(self._record_blocked_agent(execution_pk, agent_id))
+
+                if runnable:
+                    worker_count = min(max_concurrency, len(runnable))
+                    executor = ThreadPoolExecutor(max_workers=worker_count)
+                    futures = {
+                        agent_id: executor.submit(
+                            self._execute_agent_to_terminal,
+                            execution_pk,
+                            agent_id,
+                        )
+                        for agent_id in runnable
+                    }
+                    for agent_id in runnable:
+                        definition = AgentRegistry.get(agent_id)
+                        assert definition is not None
+                        future = futures[agent_id]
+                        try:
+                            outcomes.append(future.result(timeout=definition.timeout_seconds))
+                        except FutureTimeoutError:
+                            future.cancel()
+                            outcomes.append(self._mark_agent_timeout(execution_pk, agent_id))
+                        except Exception:
+                            future.cancel()
+                            outcomes.append(
+                                self._mark_agent_unexpected_failure(execution_pk, agent_id)
+                            )
+                    executor.shutdown(wait=False, cancel_futures=True)
+
+                with self.session_factory() as db:
+                    execution = db.get(AgentExecution, execution_pk)
+                    assert execution is not None
+                    for outcome in sorted(
+                        outcomes,
+                        key=lambda item: workflow.deterministic_order.index(item.agent_id),
+                    ):
+                        run = db.scalar(
+                            select(AgentRun).where(AgentRun.agent_run_id == outcome.agent_run_id)
+                        )
+                        assert run is not None
+                        self._record_agent_terminal_state(db, execution, run)
+                    db.commit()
+        except Exception:
             with self.session_factory() as db:
                 execution = db.get(AgentExecution, execution_pk)
-                assert execution is not None
-                if execution.status == ExecutionStatus.CANCELLED.value:
+                if execution is not None and execution.status == ExecutionStatus.RUNNING.value:
+                    self._finalize_execution(db, execution, workflow)
+                    db.commit()
+                    db.refresh(execution)
                     return execution
-                runnable, blocked = self._partition_batch(db, execution, workflow, batch)
-
-            outcomes: list[AgentRunOutcome] = []
-            for agent_id in blocked:
-                outcomes.append(self._record_blocked_agent(execution_pk, agent_id))
-
-            if runnable:
-                worker_count = min(max_concurrency, len(runnable))
-                executor = ThreadPoolExecutor(max_workers=worker_count)
-                futures = {
-                    agent_id: executor.submit(
-                        self._execute_agent_to_terminal,
-                        execution_pk,
-                        agent_id,
-                    )
-                    for agent_id in runnable
-                }
-                for agent_id in runnable:
-                    definition = AgentRegistry.get(agent_id)
-                    assert definition is not None
-                    future = futures[agent_id]
-                    try:
-                        outcomes.append(future.result(timeout=definition.timeout_seconds))
-                    except FutureTimeoutError:
-                        future.cancel()
-                        outcomes.append(self._mark_agent_timeout(execution_pk, agent_id))
-                executor.shutdown(wait=False, cancel_futures=True)
-
-            with self.session_factory() as db:
-                execution = db.get(AgentExecution, execution_pk)
-                assert execution is not None
-                for outcome in sorted(
-                    outcomes,
-                    key=lambda item: workflow.deterministic_order.index(item.agent_id),
-                ):
-                    run = db.scalar(
-                        select(AgentRun).where(AgentRun.agent_run_id == outcome.agent_run_id)
-                    )
-                    assert run is not None
-                    self._record_agent_terminal_state(db, execution, run)
-                db.commit()
+            raise
 
         with self.session_factory() as db:
             execution = db.get(AgentExecution, execution_pk)
@@ -688,89 +703,111 @@ class DeterministicWorkflowOrchestrator:
 
             activities: list[dict[str, Any]] = []
             results: list[ToolResult] = []
-            for sequence, tool_id in enumerate(AGENT_TOOL_PLAN[agent_id]):
-                db.refresh(execution)
-                if execution.status == ExecutionStatus.CANCELLED.value:
-                    run.status = ExecutionStatus.CANCELLED.value
-                    run.completed_at = utc_now()
-                    run.partial_completion_details = {"reason": "execution_cancelled"}
-                    db.commit()
-                    return AgentRunOutcome(
-                        run.agent_run_id,
+            try:
+                for sequence, tool_id in enumerate(AGENT_TOOL_PLAN[agent_id]):
+                    db.refresh(execution)
+                    if execution.status == ExecutionStatus.CANCELLED.value:
+                        run.status = ExecutionStatus.CANCELLED.value
+                        run.completed_at = utc_now()
+                        run.partial_completion_details = {"reason": "execution_cancelled"}
+                        db.commit()
+                        return AgentRunOutcome(
+                            run.agent_run_id,
+                            agent_id,
+                            ExecutionStatus.CANCELLED,
+                            attempt,
+                            False,
+                        )
+                    payload = self._tool_input(
+                        tool_id,
+                        execution,
+                        dependency_evidence,
                         agent_id,
-                        ExecutionStatus.CANCELLED,
-                        attempt,
-                        False,
                     )
-                payload = self._tool_input(
-                    tool_id,
-                    execution,
-                    dependency_evidence,
-                    agent_id,
-                )
-                try:
-                    record = self.tool_manager.execute(
-                        context=ToolContext(
-                            db=db,
-                            execution=execution,
-                            agent_run=run,
-                            agent_definition=definition,
-                            execution_input=execution.structured_input,
-                            dependency_evidence=dependency_evidence,
-                        ),
-                        tool_id=tool_id,
-                        payload=payload,
-                    )
-                except ToolExecutionError as exception:
-                    result = ToolResult(
-                        status=ExecutionStatus.FAILED,
-                        failure_code=exception.code,
-                        failure_message=exception.safe_message,
-                        transient=exception.transient,
-                    )
-                    activity = {
-                        "tool_id": tool_id,
-                        "tool_version": ToolRegistry.get(tool_id).version
-                        if ToolRegistry.get(tool_id)
-                        else "unregistered",
-                        "status": ExecutionStatus.FAILED.value,
-                        "attempts": 0,
-                        "failure_code": exception.code,
-                    }
-                else:
-                    result = record.result
-                    activity = record.activity
-                results.append(result)
-                activities.append(activity)
-                step = AgentStep(
-                    step_id=uuid.uuid5(
-                        run.agent_run_id,
-                        f"tool-step:{sequence}:{tool_id}:attempt:{attempt}",
-                    ),
-                    agent_run_id=run.id,
-                    step_name=f"Execute {tool_id}",
-                    sequence_number=sequence,
-                    tool_id=tool_id,
-                    tool_version=activity["tool_version"],
-                    status=result.status.value,
-                    attempt=attempt,
-                    structured_input=sanitize_persisted_value(payload),
-                    structured_output=result.structured_output,
-                    tool_activity_summary=activity,
-                    evidence_references=result.evidence_references,
-                    failure_details=(
-                        {
-                            "code": result.failure_code,
-                            "message": result.failure_message,
-                            "transient": result.transient,
+                    try:
+                        record = self.tool_manager.execute(
+                            context=ToolContext(
+                                db=db,
+                                execution=execution,
+                                agent_run=run,
+                                agent_definition=definition,
+                                execution_input=execution.structured_input,
+                                dependency_evidence=dependency_evidence,
+                            ),
+                            tool_id=tool_id,
+                            payload=payload,
+                        )
+                    except ToolExecutionError as exception:
+                        result = ToolResult(
+                            status=ExecutionStatus.FAILED,
+                            failure_code=exception.code,
+                            failure_message=exception.safe_message,
+                            transient=exception.transient,
+                        )
+                        activity = {
+                            "tool_id": tool_id,
+                            "tool_version": ToolRegistry.get(tool_id).version
+                            if ToolRegistry.get(tool_id)
+                            else "unregistered",
+                            "status": ExecutionStatus.FAILED.value,
+                            "attempts": 0,
+                            "failure_code": exception.code,
                         }
-                        if result.failure_code
-                        else {}
-                    ),
-                    partial_completion_details={},
-                    completed_at=utc_now(),
+                    else:
+                        result = record.result
+                        activity = record.activity
+                    results.append(result)
+                    activities.append(activity)
+                    step = AgentStep(
+                        step_id=uuid.uuid5(
+                            run.agent_run_id,
+                            f"tool-step:{sequence}:{tool_id}:attempt:{attempt}",
+                        ),
+                        agent_run_id=run.id,
+                        step_name=f"Execute {tool_id}",
+                        sequence_number=sequence,
+                        tool_id=tool_id,
+                        tool_version=activity["tool_version"],
+                        status=result.status.value,
+                        attempt=attempt,
+                        structured_input=sanitize_persisted_value(payload),
+                        structured_output=result.structured_output,
+                        tool_activity_summary=activity,
+                        evidence_references=result.evidence_references,
+                        failure_details=(
+                            {
+                                "code": result.failure_code,
+                                "message": result.failure_message,
+                                "transient": result.transient,
+                            }
+                            if result.failure_code
+                            else {}
+                        ),
+                        partial_completion_details={},
+                        completed_at=utc_now(),
+                    )
+                    db.add(step)
+            except Exception:
+                run.status = ExecutionStatus.FAILED.value
+                run.failure_details = {
+                    "failures": [
+                        {
+                            "code": "unexpected_error",
+                            "message": "Agent tool execution failed with an unexpected error.",
+                            "transient": False,
+                        }
+                    ],
+                    "transient": False,
+                }
+                run.completed_at = utc_now()
+                db.commit()
+                return AgentRunOutcome(
+                    run.agent_run_id,
+                    agent_id,
+                    ExecutionStatus.FAILED,
+                    attempt,
+                    False,
                 )
-                db.add(step)
 
             status = self._aggregate_agent_status(definition, results)
             evidence = self._deduplicate_evidence(
@@ -939,6 +976,39 @@ class DeterministicWorkflowOrchestrator:
                 ExecutionStatus(latest.status),
                 latest.attempt,
                 bool(latest.failure_details.get("transient")),
+            )
+
+    def _mark_agent_unexpected_failure(
+        self,
+        execution_pk: uuid.UUID,
+        agent_id: str,
+    ) -> AgentRunOutcome:
+        with self.session_factory() as db:
+            execution = db.get(AgentExecution, execution_pk)
+            assert execution is not None
+            latest = latest_agent_runs(db, execution).get(agent_id)
+            if latest is None:
+                return self._record_blocked_agent(execution_pk, agent_id)
+            if latest.status == ExecutionStatus.RUNNING.value:
+                latest.status = ExecutionStatus.FAILED.value
+                latest.failure_details = {
+                    "failures": [
+                        {
+                            "code": "unexpected_error",
+                            "message": "Agent execution failed with an unexpected error.",
+                            "transient": False,
+                        }
+                    ],
+                    "transient": False,
+                }
+                latest.completed_at = utc_now()
+                db.commit()
+            return AgentRunOutcome(
+                latest.agent_run_id,
+                agent_id,
+                ExecutionStatus(latest.status),
+                latest.attempt,
+                False,
             )
 
     def _cancelled_agent_outcome(

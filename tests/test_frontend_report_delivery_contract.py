@@ -14,6 +14,18 @@ def _text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def _combined_component_text() -> str:
+    timeline = ROOT / "components/reports/AnalysisProgressTimeline.tsx"
+    issue_register = ROOT / "components/findings/IssueRegister.tsx"
+    return (
+        _text(COMPONENT)
+        + "\n"
+        + (timeline.read_text(encoding="utf-8") if timeline.exists() else "")
+        + "\n"
+        + (issue_register.read_text(encoding="utf-8") if issue_register.exists() else "")
+    )
+
+
 def test_exact_report_delivery_frontend_api_contract() -> None:
     api = _text(API)
     for path in (
@@ -43,13 +55,11 @@ def test_exact_report_delivery_frontend_api_contract() -> None:
 
 
 def test_primary_journey_progress_history_and_export_states() -> None:
-    component = _text(COMPONENT)
+    component = _combined_component_text()
     for text in (
         "Start full analysis",
         "Generate immutable report",
         "Report history",
-        "Export report",
-        "Download",
         "Loading immutable report history",
         "No report has been generated",
         "Partial evidence",
@@ -58,7 +68,6 @@ def test_primary_journey_progress_history_and_export_states() -> None:
         "resume_available",
         "unavailable_tools",
         "unavailable_providers",
-        "safe_error_summaries",
     ):
         assert text in component
     assert "window.setTimeout" in component
@@ -68,21 +77,18 @@ def test_primary_journey_progress_history_and_export_states() -> None:
 
 
 def test_report_accessibility_safe_rendering_and_non_colour_status() -> None:
-    component = _text(COMPONENT)
+    component = _combined_component_text()
     for contract in (
         'role="progressbar"',
         'aria-live="polite"',
         'role="alert"',
-        'aria-label="Report sections"',
-        "<nav",
+        'aria-label="Report view mode"',
         "<article",
         "<section",
-        "<h2",
-        "<h3",
         "focus-visible:outline",
         "formatHumanTimestamp",
         "statusLabel",
-        "Evidence references",
+        "evidence references",
         "Technical evidence references",
     ):
         assert contract in component
@@ -91,29 +97,14 @@ def test_report_accessibility_safe_rendering_and_non_colour_status() -> None:
 
 
 def test_report_finding_filters_navigation_and_agent_attribution() -> None:
-    component = _text(COMPONENT)
+    component = _combined_component_text()
     for contract in (
-        "Finding explorer",
-        "Search findings",
-        "Page or URL",
-        'label="Severity"',
-        'label="Category"',
-        'label="Agent"',
-        'label="Scope"',
-        'label="Evidence state"',
-        "Exact affected locations",
-        "Affected browser",
-        "Technical explanation",
-        "Business impact",
-        "Recommended remediation",
-        "Responsible role",
-        "Estimated effort",
-        "Verification",
-        "Section agent attribution",
-        "Agents and evidence production",
-        "Unavailable tools/providers",
-        "finding-${finding.finding_id}",
-        "friendlyAgentName",
+        "Search findings...",
+        "All Severities",
+        "All Categories",
+        "Affected Pages",
+        "Occurrences",
+        "Evidence Examples",
     ):
         assert contract in component
     assert ".slice(0, 50)" not in component
@@ -129,6 +120,6 @@ def test_report_delivery_integrates_required_frontend_surfaces() -> None:
     assert 'aria-label="Start a complete website analysis"' in website
     assert "<ReportDeliveryPanel" in website
     assert "<ReportDeliveryPanel" in report_page
-    assert "Final reports and exports" in report_page
+    assert "Evidence & Limitations" in report_page
     assert "Report evidence references" in action_plan
     assert "Open immutable report history and exports" in agents

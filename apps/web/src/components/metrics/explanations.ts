@@ -156,6 +156,21 @@ const CONCEPT_EXPLANATIONS: Record<string, ExplanationContent> = {
     limitation:
       "When discovery is partial, failed or inconclusive, this is analysed-page coverage only; full-site coverage remains unknown.",
   },
+  discovery_completeness: {
+    shortTooltip: "See how thoroughly the website was explored during discovery.",
+    meaning:
+      "The extent to which the crawler successfully traversed and mapped the target website.",
+    included:
+      "Successfully visited pages, documents, and media within the defined origin scope.",
+    excluded:
+      "Unreachable URLs, skipped targets, and external links are not treated as completed discovery.",
+    calculation:
+      "Calculated deterministically based on discovery termination states and visited/scheduled ratios.",
+    interpretation:
+      "Incomplete discovery means the subsequent analysis is bounded to a partial sample of the real website.",
+    limitation:
+      "Discovery completeness is bounded by crawling rules, timeouts, and configured concurrency.",
+  },
   evidence_completeness: {
     shortTooltip: "See which required evidence groups were available for this report.",
     meaning:

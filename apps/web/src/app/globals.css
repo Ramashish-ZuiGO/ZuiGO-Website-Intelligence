@@ -1,17 +1,415 @@
 @import "tailwindcss";
 
-:root {
-  --background: #f7f8fa;
-  --foreground: #171717;
+/* ================================================================
+   ZuiGO Website Intelligence — Design Tokens
+   ================================================================
+   "Controlled Intelligence Instrument" design direction.
+   Semantic tokens via CSS custom properties.
+   ================================================================ */
+
+/* ---- Tailwind v4 theme extensions ---- */
+@theme {
+  --font-display: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-body: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Code", "Fira Code", monospace;
+
+  --color-z-canvas: var(--z-canvas);
+  --color-z-surface: var(--z-surface);
+  --color-z-surface-muted: var(--z-surface-muted);
+  --color-z-surface-elevated: var(--z-surface-elevated);
+
+  --color-z-dark: var(--z-dark);
+  --color-z-dark-surface: var(--z-dark-surface);
+  --color-z-dark-muted: var(--z-dark-muted);
+
+  --color-z-ink: var(--z-ink);
+  --color-z-ink-secondary: var(--z-ink-secondary);
+  --color-z-ink-muted: var(--z-ink-muted);
+  --color-z-ink-inverse: var(--z-ink-inverse);
+
+  --color-z-accent: var(--z-accent);
+  --color-z-accent-hover: var(--z-accent-hover);
+  --color-z-accent-subtle: var(--z-accent-subtle);
+
+  --color-z-success: var(--z-success);
+  --color-z-success-subtle: var(--z-success-subtle);
+  --color-z-warning: var(--z-warning);
+  --color-z-warning-subtle: var(--z-warning-subtle);
+  --color-z-danger: var(--z-danger);
+  --color-z-danger-subtle: var(--z-danger-subtle);
+  --color-z-info: var(--z-info);
+  --color-z-info-subtle: var(--z-info-subtle);
+  --color-z-neutral: var(--z-neutral);
+  --color-z-neutral-subtle: var(--z-neutral-subtle);
+
+  --color-z-border: var(--z-border);
+  --color-z-border-strong: var(--z-border-strong);
+  --color-z-border-subtle: var(--z-border-subtle);
 }
+
+/* ================================================================
+   ROOT TOKENS — Light mode (default)
+   ================================================================ */
+
+:root {
+  /* ---- Canvas & Surfaces ---- */
+  --z-canvas: #F8FAFC;
+  --z-surface: #FFFFFF;
+  --z-surface-muted: #F1F5F9;
+  --z-surface-elevated: #FFFFFF;
+
+  /* ---- Dark surfaces (nav, report header) ---- */
+  --z-dark: #0C1222;
+  --z-dark-surface: #151D2E;
+  --z-dark-muted: #1E293B;
+
+  /* ---- Text ---- */
+  --z-ink: #0F172A;
+  --z-ink-secondary: #475569;
+  --z-ink-muted: #94A3B8;
+  --z-ink-inverse: #F8FAFC;
+
+  /* ---- Accent (controlled professional blue) ---- */
+  --z-accent: #3B6CF4;
+  --z-accent-hover: #2D5BD7;
+  --z-accent-subtle: #EFF4FE;
+
+  /* ---- Semantic status ---- */
+  --z-success: #16A34A;
+  --z-success-subtle: #F0FDF4;
+  --z-warning: #D97706;
+  --z-warning-subtle: #FFFBEB;
+  --z-danger: #DC2626;
+  --z-danger-subtle: #FEF2F2;
+  --z-info: #0EA5E9;
+  --z-info-subtle: #F0F9FF;
+  --z-neutral: #64748B;
+  --z-neutral-subtle: #F1F5F9;
+
+  /* ---- Borders ---- */
+  --z-border: #E2E8F0;
+  --z-border-strong: #CBD5E1;
+  --z-border-subtle: #F1F5F9;
+
+  /* ---- Focus ---- */
+  --z-focus-ring: #3B6CF4;
+
+  /* ---- Spacing (4px base unit) ---- */
+  --z-space-xxs: 0.25rem;   /* 4px  */
+  --z-space-xs: 0.5rem;     /* 8px  */
+  --z-space-sm: 0.75rem;    /* 12px */
+  --z-space-md: 1rem;       /* 16px */
+  --z-space-lg: 1.5rem;     /* 24px */
+  --z-space-xl: 2rem;       /* 32px */
+  --z-space-xxl: 3rem;      /* 48px */
+  --z-space-section: 4rem;  /* 64px */
+
+  /* ---- Radius ---- */
+  --z-radius-xs: 0.25rem;   /* 4px  — badges, chips  */
+  --z-radius-sm: 0.375rem;  /* 6px  — inputs, buttons */
+  --z-radius-md: 0.5rem;    /* 8px  — cards           */
+  --z-radius-lg: 0.75rem;   /* 12px — panels          */
+  --z-radius-xl: 1rem;      /* 16px — large containers*/
+  --z-radius-pill: 9999px;
+
+  /* ---- Shadows ---- */
+  --z-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05);
+  --z-shadow-md: 0 4px 6px -1px rgba(15, 23, 42, 0.07), 0 2px 4px -2px rgba(15, 23, 42, 0.05);
+  --z-shadow-lg: 0 10px 15px -3px rgba(15, 23, 42, 0.08), 0 4px 6px -4px rgba(15, 23, 42, 0.04);
+
+  /* ---- Content widths ---- */
+  --z-max-w-content: 72rem;  /* 1152px */
+  --z-max-w-narrow: 40rem;   /* 640px  */
+  --z-gutter: 1.5rem;        /* 24px   */
+
+  /* ---- Transitions ---- */
+  --z-transition-fast: 100ms ease;
+  --z-transition-default: 150ms ease;
+  --z-transition-slow: 250ms ease;
+}
+
+/* ================================================================
+   BASE STYLES
+   ================================================================ */
 
 * {
   box-sizing: border-box;
 }
 
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
 body {
   margin: 0;
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--z-canvas);
+  color: var(--z-ink);
+  font-family: var(--font-body);
+  font-size: 0.875rem; /* 14px base */
+  line-height: 1.5;
+}
+
+/* ---- Typography hierarchy ---- */
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  color: var(--z-ink);
+}
+
+code, pre, kbd, samp {
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+}
+
+/* ---- Focus management ---- */
+
+:focus-visible {
+  outline: 2px solid var(--z-focus-ring);
+  outline-offset: 2px;
+}
+
+/* ---- Selection ---- */
+
+::selection {
+  background-color: var(--z-accent-subtle);
+  color: var(--z-ink);
+}
+
+/* ---- Reduced motion ---- */
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ================================================================
+   COMPONENT FOUNDATIONS (utility classes)
+   ================================================================ */
+
+/* ---- Buttons ---- */
+
+.z-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--z-space-xs);
+  padding: var(--z-space-xs) 0.875rem;
+  font-family: var(--font-body);
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.25rem;
+  border-radius: var(--z-radius-sm);
+  cursor: pointer;
+  transition: background var(--z-transition-default),
+              color var(--z-transition-default),
+              border-color var(--z-transition-default),
+              box-shadow var(--z-transition-default);
+  border: 1px solid transparent;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.z-btn:disabled, .z-btn[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.z-btn-primary {
+  background: var(--z-accent);
+  color: #fff;
+  border-color: var(--z-accent);
+}
+
+.z-btn-primary:hover:not(:disabled) {
+  background: var(--z-accent-hover);
+  border-color: var(--z-accent-hover);
+}
+
+.z-btn-secondary {
+  background: transparent;
+  color: var(--z-ink);
+  border-color: var(--z-border-strong);
+}
+
+.z-btn-secondary:hover:not(:disabled) {
+  background: var(--z-surface-muted);
+  border-color: var(--z-ink-muted);
+}
+
+.z-btn-ghost {
+  background: transparent;
+  color: var(--z-accent);
+  border-color: transparent;
+}
+
+.z-btn-ghost:hover:not(:disabled) {
+  background: var(--z-accent-subtle);
+}
+
+.z-btn-danger {
+  background: var(--z-danger);
+  color: #fff;
+  border-color: var(--z-danger);
+}
+
+.z-btn-danger:hover:not(:disabled) {
+  background: #B91C1C;
+}
+
+.z-btn-sm {
+  padding: var(--z-space-xxs) var(--z-space-xs);
+  font-size: 0.8125rem;
+}
+
+.z-btn-lg {
+  padding: var(--z-space-sm) var(--z-space-md);
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+
+/* ---- Inputs ---- */
+
+.z-input {
+  width: 100%;
+  padding: var(--z-space-xs) var(--z-space-sm);
+  font-family: var(--font-body);
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: var(--z-ink);
+  background: var(--z-surface);
+  border: 1px solid var(--z-border-strong);
+  border-radius: var(--z-radius-sm);
+  transition: border-color var(--z-transition-default),
+              box-shadow var(--z-transition-default);
+}
+
+.z-input::placeholder {
+  color: var(--z-ink-muted);
+}
+
+.z-input:focus {
+  border-color: var(--z-accent);
+  box-shadow: 0 0 0 3px var(--z-accent-subtle);
+  outline: none;
+}
+
+.z-input:disabled {
+  background: var(--z-surface-muted);
+  color: var(--z-ink-muted);
+  cursor: not-allowed;
+}
+
+/* ---- Cards ---- */
+
+.z-card {
+  background: var(--z-surface);
+  border: 1px solid var(--z-border);
+  border-radius: var(--z-radius-md);
+  padding: var(--z-space-lg);
+}
+
+.z-card-compact {
+  padding: var(--z-space-md);
+}
+
+.z-card-elevated {
+  box-shadow: var(--z-shadow-sm);
+}
+
+.z-card-hover:hover {
+  box-shadow: var(--z-shadow-sm);
+  border-color: var(--z-border-strong);
+}
+
+/* ---- Section spacing ---- */
+
+.z-section {
+  padding-top: var(--z-space-xxl);
+  padding-bottom: var(--z-space-xxl);
+}
+
+/* ---- Content container ---- */
+
+.z-container {
+  max-width: var(--z-max-w-content);
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: var(--z-gutter);
+  padding-right: var(--z-gutter);
+}
+
+/* ---- Eyebrow label ---- */
+
+.z-eyebrow {
+  font-family: var(--font-body);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--z-ink-muted);
+}
+
+/* ---- Metric display ---- */
+
+.z-metric {
+  font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+/* ---- Technical / mono values ---- */
+
+.z-mono {
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+/* ---- Skip to content (a11y) ---- */
+
+.z-skip-link {
+  position: absolute;
+  top: -100%;
+  left: var(--z-space-md);
+  padding: var(--z-space-xs) var(--z-space-md);
+  background: var(--z-accent);
+  color: #fff;
+  border-radius: var(--z-radius-sm);
+  font-size: 0.875rem;
+  font-weight: 500;
+  z-index: 9999;
+  text-decoration: none;
+}
+
+.z-skip-link:focus {
+  top: var(--z-space-xs);
+}
+
+/* ---- Scrollbar (subtle) ---- */
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--z-border-strong);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--z-ink-muted);
 }

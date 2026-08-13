@@ -8,13 +8,14 @@ from app.services.resource_classification import (
     ResourceClassification,
     classify_resource,
 )
-from sqlalchemy import and_, insert, select, update
+from sqlalchemy import and_, func, insert, select, update
 
 from worker_app.celery_app import celery_app
 from worker_app.config import get_settings
 from worker_app.db import (
     SessionLocal,
     analysis_runs,
+    discovery_run_pages,
     discovery_runs,
     page_analysis_runs,
     utc_now,
@@ -22,6 +23,52 @@ from worker_app.db import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def eligible_pages_for_run(session: Any, run_id: uuid.UUID, website_id: uuid.UUID) -> list[Any]:
+    """Return this discovery run's eligible pages, ordered by depth then URL.
+
+    Uses the run-scoped ``discovery_run_pages`` membership so a concurrent
+    same-website run cannot change which pages this run sees. Falls back to the
+    legacy ``website_pages.last_discovery_run_id`` pointer only when no
+    membership rows exist for the run (data written before that table existed).
+    """
+    member_count = (
+        session.scalar(
+            select(func.count())
+            .select_from(discovery_run_pages)
+            .where(discovery_run_pages.c.discovery_run_id == run_id)
+        )
+        or 0
+    )
+    if member_count > 0:
+        query = (
+            select(website_pages)
+            .join(
+                discovery_run_pages,
+                discovery_run_pages.c.website_page_id == website_pages.c.id,
+            )
+            .where(
+                and_(
+                    discovery_run_pages.c.discovery_run_id == run_id,
+                    discovery_run_pages.c.eligibility_status == "eligible",
+                )
+            )
+            .order_by(website_pages.c.crawl_depth.asc(), website_pages.c.normalized_url.asc())
+        )
+    else:
+        query = (
+            select(website_pages)
+            .where(
+                and_(
+                    website_pages.c.website_id == website_id,
+                    website_pages.c.eligibility_status == "eligible",
+                    website_pages.c.last_discovery_run_id == run_id,
+                )
+            )
+            .order_by(website_pages.c.crawl_depth.asc(), website_pages.c.normalized_url.asc())
+        )
+    return list(session.execute(query).mappings())
 
 
 def select_level2_pages(
@@ -113,19 +160,7 @@ def run_page_analysis(discovery_run_id: str, page_analysis_execution_id: str) ->
         per_page_timeout = config.get("request_timeout_seconds", 15)
         total_deadline = job_started + config.get("deadline_seconds", 300)
 
-        eligible_pages = list(
-            session.execute(
-                select(website_pages)
-                .where(
-                    and_(
-                        website_pages.c.website_id == website_id,
-                        website_pages.c.eligibility_status == "eligible",
-                        website_pages.c.last_discovery_run_id == run_id,
-                    )
-                )
-                .order_by(website_pages.c.crawl_depth.asc(), website_pages.c.normalized_url.asc())
-            ).mappings()
-        )
+        eligible_pages = eligible_pages_for_run(session, run_id, website_id)
         eligible_pages = select_scheduled_pages(eligible_pages, max_l1)
 
         for page in eligible_pages:
@@ -248,23 +283,7 @@ def run_page_analysis(discovery_run_id: str, page_analysis_execution_id: str) ->
                     exception,
                 )
 
-        refreshed_pages = list(
-            session.execute(
-                select(website_pages)
-                .where(
-                    and_(
-                        website_pages.c.website_id == website_id,
-                        website_pages.c.eligibility_status == "eligible",
-                        website_pages.c.last_discovery_run_id == run_id,
-                    )
-                )
-                .order_by(
-                    website_pages.c.crawl_depth.asc(),
-                    website_pages.c.normalized_url.asc(),
-                )
-                .limit(max_l1)
-            ).mappings()
-        )
+        refreshed_pages = eligible_pages_for_run(session, run_id, website_id)[:max_l1]
         l2_candidates = [
             page
             for page in refreshed_pages

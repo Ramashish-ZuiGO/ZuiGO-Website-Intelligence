@@ -515,7 +515,7 @@ export function AgentExecutionPanel({
       ? Math.min(100, Math.round((terminalRunCount / activeNodeCount) * 100))
       : 0;
   const activities = allRuns.flatMap((run) =>
-    run.tool_activity_summary.map((activity) => ({
+    (Array.isArray(run.tool_activity_summary) ? run.tool_activity_summary : []).map((activity) => ({
       ...activity,
       agent_id: run.agent_id,
       agent_run_id: run.agent_run_id,
@@ -523,9 +523,9 @@ export function AgentExecutionPanel({
   );
   const evidence = new Map<string, EvidenceReference>();
   for (const reference of [
-    ...(execution?.evidence_references ?? []),
-    ...allRuns.flatMap((run) => run.evidence_references),
-    ...events.flatMap((event) => event.evidence_references),
+    ...(Array.isArray(execution?.evidence_references) ? execution.evidence_references : []),
+    ...allRuns.flatMap((run) => Array.isArray(run.evidence_references) ? run.evidence_references : []),
+    ...events.flatMap((event) => Array.isArray(event.evidence_references) ? event.evidence_references : []),
   ]) {
     evidence.set(JSON.stringify(reference), reference);
   }
@@ -972,7 +972,7 @@ export function AgentExecutionPanel({
                         <div className="mt-3">
                           <SafeStructuredValue value={run.structured_output} />
                         </div>
-                        {Object.keys(run.partial_completion_details).length > 0 && (
+                        {run.partial_completion_details && typeof run.partial_completion_details === "object" && Object.keys(run.partial_completion_details).length > 0 && (
                           <div className="mt-3">
                             <h5 className="text-sm font-semibold">Partial completion</h5>
                             <SafeStructuredValue value={run.partial_completion_details} />

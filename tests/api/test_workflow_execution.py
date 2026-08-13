@@ -845,3 +845,156 @@ def test_tool_timeout_is_transient_and_bounded(tmp_path: Path) -> None:
             )
         assert timeout.value.code == "timeout"
         assert timeout.value.transient
+
+
+def test_unexpected_tool_error_marks_agent_run_as_failed(tmp_path: Path) -> None:
+    factory = _session_factory(tmp_path)
+    project_id, website_id = _seed_scope(factory)
+
+    def exploding_tool(context: ToolContext, _typed: BaseModel) -> ToolResult:
+        raise RuntimeError("unexpected internal error")
+
+    manager = _tool_manager({"website_discovery": exploding_tool})
+    with factory() as db:
+        execution, _ = create_workflow_execution(
+            db,
+            _request(project_id, website_id, key="unexpected-error"),
+        )
+    orchestrator = DeterministicWorkflowOrchestrator(factory, tool_manager=manager)
+    result = orchestrator.execute(execution.execution_id)
+    assert result.status in {
+        ExecutionStatus.PARTIAL.value,
+        ExecutionStatus.FAILED.value,
+    }
+    with factory() as db:
+        runs = list(
+            db.scalars(
+                select(AgentRun).where(
+                    AgentRun.execution_id == result.id,
+                    AgentRun.agent_id == "discovery_agent",
+                )
+            )
+        )
+        assert len(runs) >= 1
+        discovery_run = runs[0]
+        assert discovery_run.status == ExecutionStatus.FAILED.value
+        assert discovery_run.completed_at is not None
+
+
+def test_unexpected_future_exception_marks_agent_as_failed(
+    tmp_path: Path,
+) -> None:
+    factory = _session_factory(tmp_path)
+    project_id, website_id = _seed_scope(factory)
+
+    call_count = 0
+
+    def sometimes_explode(context: ToolContext, _typed: BaseModel) -> ToolResult:
+        nonlocal call_count
+        call_count += 1
+        if context.agent_run.agent_id == "discovery_agent":
+            raise RuntimeError("thread crash")
+        return _completed_result(context.agent_run.agent_id)
+
+    manager = _tool_manager({"website_discovery": sometimes_explode})
+    with factory() as db:
+        execution, _ = create_workflow_execution(
+            db,
+            _request(project_id, website_id, key="future-error"),
+        )
+    orchestrator = DeterministicWorkflowOrchestrator(factory, tool_manager=manager)
+    result = orchestrator.execute(execution.execution_id)
+    assert result.status in TERMINAL_STATUSES
+    assert result.completed_at is not None
+
+
+TERMINAL_STATUSES = {
+    ExecutionStatus.COMPLETED.value,
+    ExecutionStatus.PARTIAL.value,
+    ExecutionStatus.FAILED.value,
+    ExecutionStatus.CANCELLED.value,
+    ExecutionStatus.UNAVAILABLE.value,
+}
+
+
+def test_stale_detection_and_retry_resume_lifecycle(tmp_path: Path) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from app.services.workflow_execution import (
+        REAL_EXECUTION_STALE_AFTER_SECONDS,
+        real_execution_is_stale,
+    )
+
+    assert REAL_EXECUTION_STALE_AFTER_SECONDS == 900
+
+    factory = _session_factory(tmp_path)
+    project_id, website_id = _seed_scope(factory)
+
+    fail_count = 0
+
+    def fail_first_discovery(context: ToolContext, _typed: BaseModel) -> ToolResult:
+        nonlocal fail_count
+        if context.agent_run.agent_id == "discovery_agent" and fail_count == 0:
+            fail_count += 1
+            raise RuntimeError("simulated worker crash")
+        return _completed_result(context.agent_run.agent_id)
+
+    manager = _tool_manager({"website_discovery": fail_first_discovery})
+    with factory() as db:
+        execution, _ = create_workflow_execution(
+            db,
+            _request(project_id, website_id, key="stale-lifecycle"),
+        )
+    orchestrator = DeterministicWorkflowOrchestrator(factory, tool_manager=manager)
+    result = orchestrator.execute(execution.execution_id)
+    assert result.status in TERMINAL_STATUSES
+
+    with factory() as db:
+        persisted = db.scalar(
+            select(AgentExecution).where(AgentExecution.execution_id == execution.execution_id)
+        )
+        assert persisted is not None
+        assert persisted.status in TERMINAL_STATUSES
+
+        now = datetime.now(UTC)
+        stale_exec = type(persisted)()
+        stale_exec.structured_input = {"discovery_run_id": "test-id"}
+        stale_exec.status = ExecutionStatus.RUNNING.value
+        stale_exec.started_at = now - timedelta(seconds=1200)
+        stale_exec.structured_output = {
+            "journey_updated_at": (
+                now - timedelta(seconds=REAL_EXECUTION_STALE_AFTER_SECONDS + 60)
+            ).isoformat(),
+        }
+        assert real_execution_is_stale(stale_exec) is True
+
+        fresh_exec = type(persisted)()
+        fresh_exec.structured_input = {"discovery_run_id": "test-id"}
+        fresh_exec.status = ExecutionStatus.RUNNING.value
+        fresh_exec.started_at = now - timedelta(seconds=120)
+        fresh_exec.structured_output = {
+            "journey_updated_at": (now - timedelta(seconds=30)).isoformat(),
+        }
+        assert real_execution_is_stale(fresh_exec) is False
+
+        completed_exec = type(persisted)()
+        completed_exec.structured_input = {"discovery_run_id": "test-id"}
+        completed_exec.status = ExecutionStatus.COMPLETED.value
+        completed_exec.started_at = now - timedelta(hours=2)
+        completed_exec.structured_output = {
+            "journey_updated_at": (
+                now - timedelta(seconds=REAL_EXECUTION_STALE_AFTER_SECONDS + 600)
+            ).isoformat(),
+        }
+        assert real_execution_is_stale(completed_exec) is False
+
+        no_disc_exec = type(persisted)()
+        no_disc_exec.structured_input = {}
+        no_disc_exec.status = ExecutionStatus.RUNNING.value
+        no_disc_exec.started_at = now - timedelta(hours=2)
+        no_disc_exec.structured_output = {
+            "journey_updated_at": (
+                now - timedelta(seconds=REAL_EXECUTION_STALE_AFTER_SECONDS + 600)
+            ).isoformat(),
+        }
+        assert real_execution_is_stale(no_disc_exec) is False

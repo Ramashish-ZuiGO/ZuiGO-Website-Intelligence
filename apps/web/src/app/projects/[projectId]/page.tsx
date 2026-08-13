@@ -12,6 +12,7 @@ import { PageAnalysisPanel } from "./PageAnalysisPanel";
 import { WebsiteAnalysisPanel } from "./WebsiteAnalysisPanel";
 import { WebsiteCoveragePanel } from "./WebsiteCoveragePanel";
 import { ProfileSelector } from "@/components/profiles/ProfileSelector";
+import { SectionErrorBoundary } from "@/components/SectionErrorBoundary";
 
 export default function ProjectDetailsPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -111,7 +112,7 @@ export default function ProjectDetailsPage() {
 
           <section className="mt-10"><h2 className="text-2xl font-semibold">Websites</h2>
             {project.websites.length === 0 ? <div className="mt-5 rounded-xl border border-dashed border-slate-300 p-8 text-center text-slate-600">No websites yet. Add the first URL above.</div> : (
-              <ul className="mt-5 grid gap-4">{project.websites.map((website) => <li className="rounded-xl border border-slate-200 bg-white p-5" key={website.id}><p className="font-semibold">{website.name || "Unnamed website"}</p><a className="mt-1 block break-all text-slate-600 underline" href={website.url} target="_blank" rel="noreferrer">{website.url}</a><div className="mt-4"><ProfileSelector websiteId={website.id} currentProfileId={website.profile_id} /></div><WebsiteAnalysisPanel projectId={projectId} websiteId={website.id} /><WebsiteCoveragePanel websiteId={website.id} /><PageAnalysisPanel websiteId={website.id} /><ActionPlanPanel websiteId={website.id} projectId={projectId} /></li>)}</ul>
+              <ul className="mt-5 grid gap-4">{project.websites.map((website) => <li className="rounded-xl border border-slate-200 bg-white p-5" key={website.id}><p className="font-semibold">{website.name || "Unnamed website"}</p><a className="mt-1 block break-all text-slate-600 underline" href={website.url} target="_blank" rel="noreferrer">{website.url}</a><div className="mt-4"><ProfileSelector websiteId={website.id} currentProfileId={website.profile_id} /></div><SectionErrorBoundary sectionName="Website Analysis"><WebsiteAnalysisPanel projectId={projectId} websiteId={website.id} /></SectionErrorBoundary><SectionErrorBoundary sectionName="Website Coverage"><WebsiteCoveragePanel websiteId={website.id} /></SectionErrorBoundary><SectionErrorBoundary sectionName="Page Analysis"><PageAnalysisPanel websiteId={website.id} /></SectionErrorBoundary><SectionErrorBoundary sectionName="Action Plan"><ActionPlanPanel websiteId={website.id} projectId={projectId} /></SectionErrorBoundary></li>)}</ul>
             )}
           </section>
 
@@ -120,7 +121,7 @@ export default function ProjectDetailsPage() {
             <p className="mt-1 text-sm text-slate-500">
               Connect a local repository to enable repository-aware remediation guidance.
             </p>
-            <RepositoryPanel projectId={projectId} />
+            <SectionErrorBoundary sectionName="Repository"><RepositoryPanel projectId={projectId} /></SectionErrorBoundary>
           </section>
         </>
       )}

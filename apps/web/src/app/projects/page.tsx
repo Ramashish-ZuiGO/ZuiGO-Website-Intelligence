@@ -77,7 +77,7 @@ export default function ProjectsPage() {
   return (
     <main className="mx-auto min-h-screen max-w-5xl px-6 py-12">
       <header className="mb-10">
-        <p className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">MVP</p>
+        <p className="text-sm font-semibold uppercase tracking-[0.18em] text-z-accent">ZuiGO WebIQ</p>
         <h1 className="mt-2 text-4xl font-bold text-slate-950">Projects</h1>
         <p className="mt-3 text-slate-600">Create a project, then add websites to it.</p>
       </header>

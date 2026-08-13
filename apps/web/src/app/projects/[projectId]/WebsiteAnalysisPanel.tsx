@@ -13,6 +13,7 @@ import { SiteDiagnosticsPanel } from "@/components/diagnostics/SiteDiagnosticsPa
 import { AgentExecutionPanel } from "@/components/agents/AgentExecutionPanel";
 import { ScoringIntelligencePanel } from "@/components/scoring/ScoringIntelligencePanel";
 import { ReportDeliveryPanel } from "@/components/reports/ReportDeliveryPanel";
+import { SectionErrorBoundary } from "@/components/SectionErrorBoundary";
 import { reportDeliveryApi } from "@/lib/report-delivery-api";
 
 interface WebsiteAnalysisPanelProps {
@@ -156,7 +157,10 @@ export function WebsiteAnalysisPanel({
     setStarting(true);
     setError(null);
     setResults(null);
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 30_000);
     try {
+      const signal = controller.signal;
       const analysisRun = projectId
         ? await reportDeliveryApi
             .startAnalysis(
@@ -172,18 +176,24 @@ export function WebsiteAnalysisPanel({
               );
               return apiRequest<AnalysisRun>(
                 `/api/v1/analysis-runs/${journey.analysis_run_id}`,
+                { signal },
               );
             })
         : await apiRequest<AnalysisRun>(
             `/api/v1/websites/${websiteId}/analysis-runs`,
-            { method: "POST" },
+            { method: "POST", signal },
           );
       setHistory((current) => [analysisRun, ...current]);
     } catch (requestError) {
-      setError(
-        requestError instanceof Error ? requestError.message : "Unable to start analysis.",
-      );
+      if (requestError instanceof DOMException && requestError.name === "AbortError") {
+        setError("Starting the analysis timed out. The server may be busy — try again.");
+      } else {
+        setError(
+          requestError instanceof Error ? requestError.message : "Unable to start analysis.",
+        );
+      }
     } finally {
+      window.clearTimeout(timeout);
       setStarting(false);
     }
   }
@@ -356,46 +366,58 @@ export function WebsiteAnalysisPanel({
           </ul>
         )}
       </details>
-      <div className="mt-8">
-        <PerformanceIntelligence
-          data={performanceData.snapshots as unknown as { id: string; metric_id: string; evidence_type: string; raw_value: number }[]}
-          disagreement={performanceData.disagreement}
-          explanation={performanceData.explanation}
-        />
-      </div>
+      <SectionErrorBoundary sectionName="Performance Intelligence">
+        <div className="mt-8">
+          <PerformanceIntelligence
+            data={performanceData.snapshots as unknown as { id: string; metric_id: string; evidence_type: string; raw_value: number }[]}
+            disagreement={performanceData.disagreement}
+            explanation={performanceData.explanation}
+          />
+        </div>
+      </SectionErrorBoundary>
 
-      <div className="mt-8">
-        <AccessibilityIntelligence
-          accessibilityData={accessibilityData}
-        />
-      </div>
+      <SectionErrorBoundary sectionName="Accessibility Intelligence">
+        <div className="mt-8">
+          <AccessibilityIntelligence
+            accessibilityData={accessibilityData}
+          />
+        </div>
+      </SectionErrorBoundary>
 
-      <div className="mt-8">
-        <SiteDiagnosticsPanel
+      <SectionErrorBoundary sectionName="Site Diagnostics">
+        <div className="mt-8">
+          <SiteDiagnosticsPanel
+            analysisRunId={latestRun?.status === "completed" ? latestRun.id : undefined}
+            websiteId={websiteId}
+          />
+        </div>
+      </SectionErrorBoundary>
+
+      <SectionErrorBoundary sectionName="Agent Execution">
+        <AgentExecutionPanel
           analysisRunId={latestRun?.status === "completed" ? latestRun.id : undefined}
+          compact
+          projectId={projectId}
           websiteId={websiteId}
         />
-      </div>
-
-      <AgentExecutionPanel
-        analysisRunId={latestRun?.status === "completed" ? latestRun.id : undefined}
-        compact
-        projectId={projectId}
-        websiteId={websiteId}
-      />
-      <ScoringIntelligencePanel
-        analysisRunId={latestRun?.status === "completed" ? latestRun.id : undefined}
-        compact
-        websiteId={websiteId}
-      />
-      <ReportDeliveryPanel
-        analysisRunId={latestRun?.id}
-        compact
-        projectId={projectId}
-        showStartAction={false}
-        websiteId={websiteId}
-        workflowExecutionId={workflowExecutionId}
-      />
+      </SectionErrorBoundary>
+      <SectionErrorBoundary sectionName="Scoring Intelligence">
+        <ScoringIntelligencePanel
+          analysisRunId={latestRun?.status === "completed" ? latestRun.id : undefined}
+          compact
+          websiteId={websiteId}
+        />
+      </SectionErrorBoundary>
+      <SectionErrorBoundary sectionName="Report Delivery">
+        <ReportDeliveryPanel
+          analysisRunId={latestRun?.id}
+          compact
+          projectId={projectId}
+          showStartAction={false}
+          websiteId={websiteId}
+          workflowExecutionId={workflowExecutionId}
+        />
+      </SectionErrorBoundary>
 
       <button className="mt-3 text-xs font-semibold text-slate-600" onClick={() => void loadHistory().catch((requestError: unknown) => setError(requestError instanceof Error ? requestError.message : "Unable to refresh analysis history."))}>Refresh analysis history</button>
     </section>

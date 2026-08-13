@@ -10,6 +10,12 @@ import type {
 } from "@/components/reports/types";
 import { ConceptInfoButton } from "@/components/metrics/ConceptInfoButton";
 import { reportDeliveryApi } from "@/lib/report-delivery-api";
+import { StatusBadge } from "@/components/ui/StatusBadge";
+import { ScoreBar } from "@/components/ui/ScoreBadge";
+import { UrlCell } from "@/components/ui/UrlCell";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { MetricStat } from "@/components/ui/MetricStat";
+import { AnalysisProgressTimeline } from "@/components/reports/AnalysisProgressTimeline";
 
 const PAGE_SIZE = 5;
 const FINDINGS_PAGE_SIZE = 20;
@@ -34,7 +40,7 @@ const AGENT_LABELS: Record<string, string> = {
 const ENGINE_LABELS: Record<string, string> = {
   chromium: "Chromium engine",
   firefox: "Firefox engine",
-  webkit: "WebKit engine",
+  webkit: "WebKit engine (internal signal only)",
 };
 
 interface ReportDeliveryPanelProps {
@@ -106,48 +112,6 @@ function displayStatus(
   return labels[status] ?? statusLabel(status);
 }
 
-function Coverage({
-  numerator,
-  denominator,
-  percentage,
-}: {
-  numerator: number;
-  denominator: number;
-  percentage: number | null;
-}) {
-  return (
-    <p className="text-sm">
-      <span className="inline-flex items-center gap-1">
-        Evidence completeness
-        <ConceptInfoButton
-          conceptId="evidence_completeness"
-          title="Evidence completeness"
-        />
-      </span>
-      : {numerator}/{denominator} required groups
-      {" · "}
-      {percentage === null ? "Unavailable" : `${percentage.toFixed(1)}%`}
-    </p>
-  );
-}
-
-function ReportSectionHeading({
-  conceptId,
-  number,
-  title,
-}: {
-  conceptId: string;
-  number: number;
-  title: string;
-}) {
-  return (
-    <h4 className="flex items-center gap-1 text-xl font-black">
-      {number}. {title}
-      <ConceptInfoButton conceptId={conceptId} title={title} />
-    </h4>
-  );
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -190,6 +154,7 @@ function isFinding(value: unknown): value is DetailedReportFinding {
 
 function findingsFromReport(report: DeliveredReport): DetailedReportFinding[] {
   const findings = new Map<string, DetailedReportFinding>();
+  if (!Array.isArray(report.sections)) return [];
   const section = report.sections.find(
     (candidate) => candidate.section_key === "page_level_findings",
   );
@@ -270,9 +235,9 @@ function FindingDetail({ finding }: { finding: DetailedReportFinding }) {
       </dl>
       <details className="mt-4 rounded border bg-white p-3">
         <summary className="cursor-pointer font-semibold">
-          Technical evidence references ({finding.evidence_references.length})
+          Technical evidence references ({Array.isArray(finding.evidence_references) ? finding.evidence_references.length : 0})
         </summary>
-        {finding.evidence_references.length > 0 ? (
+        {Array.isArray(finding.evidence_references) && finding.evidence_references.length > 0 ? (
           <ul className="mt-2 grid gap-2 text-xs">
             {finding.evidence_references.map((reference, index) => (
               <li
@@ -389,10 +354,11 @@ function FilterSelect({
 }
 
 function ReportViewer({ report }: { report: DeliveredReport }) {
+  const safeSections = Array.isArray(report.sections) ? report.sections : [];
   const findings = useMemo(() => findingsFromReport(report), [report]);
   const sections = useMemo(
-    () => new Map(report.sections.map((section) => [section.section_key, section])),
-    [report.sections],
+    () => new Map(safeSections.map((section) => [section.section_key, section])),
+    [safeSections],
   );
   const executive = sections.get("executive_summary")?.content ?? {};
   const scores = sections.get("scores")?.content ?? {};
@@ -417,7 +383,7 @@ function ReportViewer({ report }: { report: DeliveredReport }) {
   );
   const unavailableCapabilities = [
     ...new Set(
-      report.sections.flatMap((section) => {
+      safeSections.flatMap((section) => {
         const attribution = isRecord(section.content.agent_attribution)
           ? section.content.agent_attribution
           : {};
@@ -561,11 +527,8 @@ function ReportViewer({ report }: { report: DeliveredReport }) {
     (total, engine) => total + numberValue(engine.tested_pages),
     0,
   );
-  const reportStatus =
-    report.status === "partial" ||
-    (report.status === "completed" && report.unavailable_sections.length > 0)
-      ? "Completed with limitations"
-      : displayStatus(report.status, "historical");
+  const safeUnavailableSections = Array.isArray(report.unavailable_sections) ? report.unavailable_sections : [];
+  const reportStatus = displayStatus(report.status, "historical");
   const reportQuality = (() => {
     const n = report.evidence_coverage_numerator;
     const d = report.evidence_coverage_denominator;
@@ -587,1008 +550,659 @@ function ReportViewer({ report }: { report: DeliveredReport }) {
   return (
     <article
       aria-labelledby={`delivered-report-${report.report_id}`}
-      className="mt-6 min-w-0 max-w-full overflow-hidden rounded-2xl border border-slate-300 bg-white"
+      className="mt-6 min-w-0 max-w-full overflow-hidden rounded-2xl border border-slate-200 bg-white"
     >
-      <header className="bg-slate-950 p-6 text-white">
-        <p className="text-sm font-black uppercase tracking-[0.2em] text-orange-300">
+      {/* ======== REPORT HEADER ======== */}
+      <header className="bg-slate-950 px-6 py-5 text-white">
+        <p className="text-xs font-semibold uppercase tracking-widest text-orange-400">
           ZuiGO Website Intelligence
         </p>
-        <h3 className="mt-4 text-3xl font-black" id={`delivered-report-${report.report_id}`}>
-          Evidence-grounded website analysis
+        <h3 className="mt-2 text-2xl font-bold" id={`delivered-report-${report.report_id}`}>
+          {String(executive.website_analysed ?? "Website Analysis")}
         </h3>
-        <p className="mt-2 flex items-center gap-2 text-sm text-slate-200">
-          <span>Immutable evidence snapshot · {reportStatus}</span>
-          <span className={`inline-block rounded-full border px-2 py-0.5 text-xs font-bold uppercase ${qualityColor[reportQuality] ?? "bg-slate-100 text-slate-700 border-slate-300"}`}>
+        <p className="mt-2 flex flex-wrap items-center gap-2 text-sm text-slate-300">
+          <span>Immutable evidence snapshot</span>
+          <span className="text-slate-500">·</span>
+          <span>{reportStatus}</span>
+          <span className={`inline-block rounded-full border px-2.5 py-0.5 text-xs font-bold ${qualityColor[reportQuality] ?? "bg-slate-100 text-slate-700 border-slate-300"}`}>
             {reportQuality}
           </span>
         </p>
-        <p className="mt-2 break-all text-sm text-slate-200">
-          {String(executive.website_analysed ?? "Website not recorded")} ·{" "}
-          {formatHumanTimestamp(executive.analysis_date)}
-        </p>
-        <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="rounded-xl bg-white/10 p-4">
-            <p className="flex items-center gap-1 text-xs font-bold uppercase">
-              Analysed-page coverage
-              <ConceptInfoButton
-                conceptId="website_coverage"
-                title="Analysed-page coverage"
-              />
-            </p>
-            <p className="mt-1 text-2xl font-black">
-              {numberValue(pageCoverage.coverage_numerator)}/
-              {numberValue(pageCoverage.coverage_denominator)}
-            </p>
-            <p className="text-sm">
-              {pagePercentage === null
-                ? "Unavailable"
-                : `${pagePercentage.toFixed(1)}% of discovered eligible pages analysed`}
-            </p>
-            {!discoveryComplete && !discoveryPending && (
-              <p className="mt-1 text-sm font-semibold text-amber-200">
-                Full-site coverage is not established.
-              </p>
-            )}
-            {discoveryPending && !reportTerminal && (
-              <p className="mt-1 text-sm text-slate-300">
-                Full-site coverage will be evaluated after discovery completes.
-              </p>
-            )}
-            {discoveryPending && reportTerminal && (
-              <p className="mt-1 text-sm text-slate-300">
-                Discovery completeness was not recorded for this analysis.
-              </p>
-            )}
+        <div className="mt-4 grid gap-x-8 gap-y-2 text-sm sm:grid-cols-2">
+          <div>
+            <span className="text-slate-400">Website</span>
+            <p className="mt-0.5 break-all">{String(executive.website_analysed ?? "Unavailable")}</p>
           </div>
-          <div className="rounded-xl bg-white/10 p-4">
-            <p className="text-xs font-bold uppercase">Discovery completeness</p>
-            <p className="mt-1 text-2xl font-black">
-              {discoveryPending
-                ? reportTerminal
-                  ? "Not Recorded"
-                  : discoveryRunning ? "In Progress" : "Pending"
-                : statusLabel(discoveryCompleteness)}
-            </p>
-            <p className="text-sm">
-              {discoveryCompletenessMessage || (
-                discoveryComplete
-                  ? "The bounded discovery completed."
-                  : discoveryPending && reportTerminal
-                    ? "Discovery completeness was not recorded for this analysis."
-                    : discoveryPending
-                      ? "Website discovery is in progress."
-                      : "The retained page set may not represent the full website."
-              )}
-            </p>
+          <div>
+            <span className="text-slate-400">Analysis date</span>
+            <p className="mt-0.5">{formatHumanTimestamp(executive.analysis_date)}</p>
           </div>
-          <div className="rounded-xl bg-white/10 p-4">
-            <p className="flex items-center gap-1 text-xs font-bold uppercase">
-              Browser coverage
-              <ConceptInfoButton
-                conceptId="browser_coverage"
-                title="Browser coverage"
-              />
-            </p>
-            <p className="mt-1 text-2xl font-black">
-              {browserTestedNumerator}/{browserAttemptDenominator}
-            </p>
-            <p className="text-sm">Requested engine-page tests completed</p>
-          </div>
-          <div className="rounded-xl bg-white/10 p-4">
-            <p className="flex items-center gap-1 text-xs font-bold uppercase">
-              Evidence completeness
-              <ConceptInfoButton
-                conceptId="evidence_completeness"
-                title="Evidence completeness"
-              />
-            </p>
-            <p className="mt-1 text-2xl font-black">
-              {report.evidence_coverage_numerator}/{report.evidence_coverage_denominator}
-            </p>
-            <p className="text-sm">Required evidence groups available</p>
-          </div>
-          <div className="rounded-xl bg-white/10 p-4">
-            <p className="flex items-center gap-1 text-xs font-bold uppercase">
-              Unique findings
-              <ConceptInfoButton conceptId="unique_findings" title="Unique findings" />
-            </p>
-            <p className="mt-1 text-2xl font-black">{findings.length}</p>
-            <p className="text-sm">
-              {totalOccurrences} occurrences
-              <ConceptInfoButton conceptId="occurrences" title="Occurrences" /> across{" "}
-              {affectedPageCount} pages
-            </p>
-          </div>
-          <div className="rounded-xl bg-white/10 p-4">
-            <p className="text-xs font-bold uppercase">Overall score</p>
-            <p className="mt-1 text-2xl font-black">
+        </div>
+
+        {/* Score strip */}
+        <div className="mt-4 flex flex-wrap items-center gap-6 rounded-lg bg-white/10 px-4 py-3">
+          <div className="flex items-baseline gap-2">
+            <span className="text-3xl font-bold">
               {typeof scores.overall_score === "number"
-                ? `${scores.overall_score}/100`
-                : "Not available"}
-            </p>
-            <p className="text-sm">
-              Report confidence
-              <ConceptInfoButton
-                conceptId="report_confidence"
-                title="Report confidence"
-              />{" "}
-              {report.confidence_percent === null
-                ? "not available"
-                : `${report.confidence_percent}%`}
-            </p>
+                ? `${scores.overall_score}`
+                : "—"}
+            </span>
+            <span className="text-sm text-slate-300">/100</span>
           </div>
-        </div>
-        <dl className="mt-3 grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
-          {[
-            ["Discovered URLs", pageCoverage.total_urls_discovered],
-            ["Eligible HTML pages", pageCoverage.eligible_pages],
-            ["Analysed pages", pageCoverage.successfully_analysed_pages],
-            ["Failed HTML pages", pageCoverage.failed_pages],
-          ].map(([label, value]) => (
-            <div className="rounded-lg bg-white/10 p-3" key={String(label)}>
-              <dt className="flex items-center gap-1 font-semibold">
-                {String(label)}
-                {label === "Eligible HTML pages" && (
-                  <ConceptInfoButton
-                    conceptId="eligible_html_pages"
-                    title="Eligible HTML pages"
-                  />
-                )}
-              </dt>
-              <dd>{numberValue(value)}</dd>
+          <div className="text-sm text-slate-300">
+            <span>Confidence {report.confidence_percent === null ? "N/A" : `${report.confidence_percent}%`}</span>
+            <ConceptInfoButton conceptId="report_confidence" title="Report confidence" />
+          </div>
+          <div className="ml-auto">
+            <div className="inline-flex rounded-lg border border-white/20 bg-white/10 p-0.5" role="tablist" aria-label="Report view mode">
+              <button
+                aria-selected={viewMode === "executive"}
+                className={`rounded-md px-4 py-2 text-sm font-medium transition-colors ${viewMode === "executive" ? "bg-white text-slate-900 shadow-sm" : "text-white/80 hover:text-white"}`}
+                onClick={() => setViewMode("executive")}
+                role="tab"
+                type="button"
+              >
+                Executive
+              </button>
+              <button
+                aria-selected={viewMode === "technical"}
+                className={`rounded-md px-4 py-2 text-sm font-medium transition-colors ${viewMode === "technical" ? "bg-white text-slate-900 shadow-sm" : "text-white/80 hover:text-white"}`}
+                onClick={() => setViewMode("technical")}
+                role="tab"
+                type="button"
+              >
+                Technical
+              </button>
             </div>
-          ))}
-        </dl>
-        <div className="mt-3 grid gap-3 lg:grid-cols-2">
-          <div className="min-w-0 rounded-lg bg-white/10 p-3">
-            <p className="font-semibold">Top problems</p>
-            <ul className="mt-1 list-disc pl-5 text-sm">
-              {topFindings.slice(0, 5).map((finding) => (
-                <li className="break-words" key={finding.finding_id}>
-                  {finding.issue_title}
-                </li>
-              ))}
-            </ul>
           </div>
-          <div className="min-w-0 rounded-lg bg-white/10 p-3">
-            <p className="font-semibold">Top actions</p>
-            <ul className="mt-1 list-disc pl-5 text-sm">
-              {actions.slice(0, 5).map((action, index) => (
-                <li className="break-words" key={`${index}-${String(action.title)}`}>
-                  {String(action.title ?? "Recommended action")}
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
-        <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-5">
-          {categoryScores.slice(0, 5).map((categoryScore) => (
-            <p className="rounded bg-white/10 p-2" key={String(categoryScore.category_id)}>
-              {statusLabel(String(categoryScore.category_id))}:{" "}
-              {categoryScore.evidence_available === false
-                ? "Unavailable"
-                : typeof categoryScore.score === "number"
-                  ? `${categoryScore.score}/100`
-                  : "Not available"}
-              {categoryScore.included === false && categoryScore.exclusion_reason ? (
-                <span className="ml-1 text-xs opacity-70">
-                  ({String(categoryScore.exclusion_reason)})
-                </span>
-              ) : null}
-              {categoryScore.score_limitation ? (
-                <span className="ml-1 text-xs text-amber-200" title={String(categoryScore.score_limitation)}>⚠</span>
-              ) : null}
-            </p>
-          ))}
         </div>
       </header>
 
-      <div className="p-5">
-        {report.unavailable_sections.length > 0 && (
-          <div className="rounded-lg border border-amber-300 bg-amber-50 p-3" role="note">
-            <p className="font-semibold">Partial evidence</p>
-            <p className="mt-1 text-sm">
-              Unavailable sections: {report.unavailable_sections.join(", ")}. These are
-              not represented as successful or issue-free.
+      <div className="space-y-5 p-5">
+        {safeUnavailableSections.length > 0 && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3" role="note">
+            <p className="text-sm font-medium text-amber-800">
+              Partial evidence — unavailable sections: {safeUnavailableSections.join(", ")}.
+              Not represented as successful or issue-free.
             </p>
           </div>
         )}
 
-        <div className="mt-5 flex gap-2" role="tablist" aria-label="Report view mode">
-          <button
-            aria-selected={viewMode === "executive"}
-            className={`rounded-lg px-5 py-2.5 text-sm font-bold transition-colors ${viewMode === "executive" ? "bg-orange-600 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"}`}
-            onClick={() => setViewMode("executive")}
-            role="tab"
-            type="button"
-          >
-            Executive View
-          </button>
-          <button
-            aria-selected={viewMode === "technical"}
-            className={`rounded-lg px-5 py-2.5 text-sm font-bold transition-colors ${viewMode === "technical" ? "bg-orange-600 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"}`}
-            onClick={() => setViewMode("technical")}
-            role="tab"
-            type="button"
-          >
-            Technical View
-          </button>
-        </div>
-
-        <nav aria-label="Report sections" className="mt-3 rounded-lg bg-slate-50 p-3">
-          <h4 className="font-semibold">{viewMode === "executive" ? "Executive" : "Technical"} sections</h4>
-          <ol className="mt-2 grid gap-1 text-sm sm:grid-cols-2">
-            {(viewMode === "executive"
-              ? [
-                  ["executive-summary", "Executive Summary"],
-                  ["website-coverage", "Coverage and Confidence"],
-                  ["scores-summary", "Category Scores"],
-                  ["top-findings", "Top Five Findings"],
-                  ["action-plan-summary", "Top Five Actions"],
-                  ["browser-coverage", "Browser Compatibility"],
-                  ["evidence-limitations", "Evidence Limitations"],
-                ]
-              : [
-                  ["all-findings", "All Findings"],
-                  ["page-results", "Page Inventory"],
-                  ["browser-coverage", "Browser Matrix"],
-                  ["technical-details", "Agent Execution"],
-                  ["evidence-limitations", "Methodology"],
-                ]
-            ).map(([anchor, title], index) => (
-              <li key={anchor}>
-                <a
-                  className="underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600"
-                  href={`#${anchor}`}
-                >
-                  {index + 1}. {title}
-                </a>
-              </li>
-            ))}
-          </ol>
-        </nav>
-
-        {viewMode === "executive" && (<section className="mt-5 rounded-xl border p-5" id="executive-summary">
-          <ReportSectionHeading
-            conceptId="report_executive_summary"
-            number={1}
-            title="Executive Summary"
-          />
-          <p className="mt-2 break-all">
-            <strong>Website analysed:</strong>{" "}
-            {String(executive.website_analysed ?? "Unavailable")}
-          </p>
-          <p>
-            <strong>Analysis date:</strong>{" "}
-            {String(executive.analysis_date ?? "Unavailable")}
-          </p>
-          <div className="mt-4 grid gap-3 sm:grid-cols-3">
-            {[
-              ["URLs discovered", pageCoverage.total_urls_discovered],
-              ["Eligible pages", pageCoverage.eligible_pages],
-              ["Pages analysed", pageCoverage.successfully_analysed_pages],
-              ["Pages not analysed", numberValue(pageCoverage.eligible_pages) - numberValue(pageCoverage.successfully_analysed_pages)],
-              ["Overall score", executive.overall_health],
-              [
-                "Score confidence",
-                report.confidence_percent === null
-                  ? "Unavailable"
-                  : `${report.confidence_percent}%`,
-              ],
-            ].map(([label, value]) => (
-              <div className="rounded-lg bg-slate-50 p-3" key={String(label)}>
-                <p className="flex items-center gap-1 text-xs font-bold uppercase">
-                  {String(label)}
-                  {label === "Eligible pages" && (
-                    <ConceptInfoButton
-                      conceptId="eligible_html_pages"
-                      title="Eligible HTML pages"
-                    />
-                  )}
-                  {label === "Score confidence" && (
-                    <ConceptInfoButton
-                      conceptId="report_confidence"
-                      title="Report confidence"
-                    />
-                  )}
-                </p>
-                <p className="mt-1 text-xl font-black">{String(value ?? "Unavailable")}</p>
+        {/* ======== EXECUTIVE VIEW ======== */}
+        {viewMode === "executive" && (
+          <>
+            {/* 1. Executive Summary */}
+            <section className="rounded-xl border border-slate-200 p-5" id="executive-summary">
+              <h4 className="text-lg font-bold text-slate-900">Executive Summary</h4>
+              <div className="mt-3 grid gap-4 sm:grid-cols-3">
+                <MetricStat label="Overall Score" value={typeof scores.overall_score === "number" ? `${scores.overall_score}/100` : "Unavailable"} />
+                <MetricStat label="Confidence" value={report.confidence_percent === null ? "Unavailable" : `${report.confidence_percent}%`} />
+                <MetricStat label="Findings" value={`${findings.length} unique`} detail={`${totalOccurrences} occurrences · ${affectedPageCount} pages`} />
               </div>
-            ))}
-          </div>
-          {limitations.length > 0 && (
-            <p className="mt-4 text-sm text-amber-800">
-              {limitations.length} evidence limitation{limitations.length > 1 ? "s" : ""} noted —{" "}
-              <a className="underline" href="#evidence-limitations">see Evidence Limitations</a>.
-            </p>
-          )}
-        </section>)}
-
-        {viewMode === "executive" && (<section className="mt-5 rounded-xl border p-5" id="website-coverage">
-          <ReportSectionHeading
-            conceptId="report_website_coverage"
-            number={2}
-            title="Website Coverage"
-          />
-          <p className="mt-2 text-lg font-semibold">
-            {numberValue(pageCoverage.coverage_numerator)} of{" "}
-            {numberValue(pageCoverage.coverage_denominator)} discovered eligible pages
-            analysed
-            {pagePercentage === null ? "" : ` — ${pagePercentage.toFixed(1)}%`}
-          </p>
-          {!discoveryComplete && !discoveryPending && (
-            <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-amber-950">
-              <p className="font-semibold">
-                {discoveryCompletenessMessage || "Website discovery was incomplete, so full-site coverage is unknown."}
-              </p>
-              {pageCoverage.discovery_failure_message ? (
-                <p className="mt-1 text-sm">
-                  {String(pageCoverage.discovery_failure_message)}
+              {limitations.length > 0 && (
+                <p className="mt-4 text-xs text-slate-500">
+                  {limitations.length} limitation{limitations.length > 1 ? "s" : ""} noted — see{" "}
+                  <a className="underline" href="#evidence-limitations">Key Limitations</a>.
                 </p>
-              ) : null}
-            </div>
-          )}
-          {discoveryPending && (
-            <div className="mt-3 rounded-lg border border-blue-200 bg-blue-50 p-3 text-blue-900">
-              <p className="font-semibold">
-                {discoveryCompletenessMessage || "Website discovery is in progress."}
-              </p>
-            </div>
-          )}
-          {numberValue(pageCoverage.coverage_denominator) >
-            numberValue(pageCoverage.coverage_numerator) && (
-            <p className="mt-1 text-amber-800">
-              {numberValue(pageCoverage.coverage_denominator) -
-                numberValue(pageCoverage.coverage_numerator)}{" "}
-              eligible pages were not successfully analysed.
-            </p>
-          )}
-          <dl className="mt-4 grid gap-3 sm:grid-cols-3 lg:grid-cols-5">
-            {[
-              ["URLs discovered", pageCoverage.total_urls_discovered],
-              ["Normalized pages", pageCoverage.normalized_pages],
-              ["Eligible", pageCoverage.eligible_pages],
-              ["Scheduled", pageCoverage.total_pages_scheduled],
-              ["Visited", pageCoverage.total_pages_visited],
-              ["Successful", pageCoverage.successfully_analysed_pages],
-              ["Failed", pageCoverage.failed_pages],
-              ["Skipped", pageCoverage.skipped_pages],
-              ["Not scheduled", pageCoverage.not_scheduled_pages],
-              ["Incomplete", pageCoverage.pages_with_incomplete_evidence],
-            ].map(([label, value]) => (
-              <div className="rounded-lg bg-slate-50 p-3" key={String(label)}>
-                <dt className="text-xs font-bold uppercase">{String(label)}</dt>
-                <dd className="mt-1 text-xl font-black">{numberValue(value)}</dd>
+              )}
+            </section>
+
+            {/* 2. Coverage */}
+            <section className="rounded-xl border border-slate-200 p-5" id="website-coverage">
+              <h4 className="text-lg font-bold text-slate-900">Website Coverage</h4>
+              <div className="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <MetricStat
+                  label="Analysed-page coverage"
+                  value={`${numberValue(pageCoverage.coverage_numerator)}/${numberValue(pageCoverage.coverage_denominator)}`}
+                  detail={pagePercentage === null ? "Unavailable" : `${pagePercentage.toFixed(1)}% of eligible pages`}
+                />
+                <MetricStat
+                  label="Discovery completeness"
+                  value={discoveryPending ? (reportTerminal ? "Not Recorded" : discoveryRunning ? "In Progress" : "Pending") : statusLabel(discoveryCompleteness)}
+                />
+                <MetricStat
+                  label="Browser coverage"
+                  value={`${browserTestedNumerator}/${browserAttemptDenominator}`}
+                  detail="Engine-page tests completed"
+                />
+                <MetricStat
+                  label="Evidence completeness"
+                  value={`${report.evidence_coverage_numerator}/${report.evidence_coverage_denominator}`}
+                  detail="Required evidence groups"
+                />
               </div>
-            ))}
-          </dl>
-        </section>)}
-
-        {viewMode === "executive" && (<section className="mt-5 rounded-xl border p-5" id="scores-summary">
-          <ReportSectionHeading
-            conceptId="report_scores"
-            number={3}
-            title="Overall and Category Scores"
-          />
-          <p className="mt-2 text-3xl font-black">
-            {typeof scores.overall_score === "number"
-              ? `${scores.overall_score}/100`
-              : "Overall score unavailable"}
-          </p>
-          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-            {categoryScores.map((categoryScore) => (
-              <div
-                className="rounded-lg bg-slate-50 p-3"
-                key={String(categoryScore.category_id)}
-              >
-                <p className="font-semibold">
-                  {statusLabel(String(categoryScore.category_id))}
+              {!discoveryComplete && !discoveryPending && (
+                <p className="mt-3 text-sm text-amber-700">
+                  {discoveryCompletenessMessage || "Website discovery was incomplete, so full-site coverage is unknown."}
                 </p>
-                <p className="text-2xl font-black">
-                  {categoryScore.evidence_available === false
-                    ? "N/A"
+              )}
+            </section>
+
+            {/* 3. Category Scores */}
+            <section className="rounded-xl border border-slate-200 p-5" id="scores-summary">
+              <h4 className="text-lg font-bold text-slate-900">Category Scores</h4>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                {categoryScores.map((categoryScore) => {
+                  const scoreValue = categoryScore.evidence_available === false
+                    ? null
                     : typeof categoryScore.score === "number"
-                      ? `${categoryScore.score}/100`
-                      : "Unavailable"}
-                </p>
-                {categoryScore.included === false && categoryScore.exclusion_reason ? (
-                  <p className="mt-1 text-xs text-slate-500">
-                    {String(categoryScore.exclusion_reason)}
-                  </p>
-                ) : null}
+                      ? categoryScore.score
+                      : null;
+                  return (
+                    <div key={String(categoryScore.category_id)}>
+                      <ScoreBar
+                        score={scoreValue}
+                        label={statusLabel(String(categoryScore.category_id))}
+                      />
+                      {categoryScore.included === false && categoryScore.exclusion_reason ? (
+                        <p className="mt-1 text-xs text-slate-500">
+                          {String(categoryScore.exclusion_reason)}
+                        </p>
+                      ) : null}
+                    </div>
+                  );
+                })}
               </div>
-            ))}
-          </div>
-        </section>)}
+            </section>
 
-        {viewMode === "executive" && (<section className="mt-5 rounded-xl border p-5" id="top-findings">
-          <ReportSectionHeading
-            conceptId="report_top_findings"
-            number={4}
-            title="Top Findings"
-          />
-          <p className="mt-1 text-sm text-slate-600">
-            {findings.length} unique findings
-            <ConceptInfoButton conceptId="unique_findings" title="Unique findings" /> ·{" "}
-            {totalOccurrences} total occurrences
-            <ConceptInfoButton conceptId="occurrences" title="Occurrences" /> ·{" "}
-            {affectedPageCount} affected pages
-          </p>
-          <div className="mt-4 grid gap-3">
-            {topFindings.length > 0 ? (
-              topFindings.map((finding) => (
-                <article
-                  className="rounded-lg border-l-4 border-orange-600 bg-slate-50 p-4"
-                  key={finding.finding_id}
-                >
-                  <p className="text-xs font-bold uppercase">
-                    {displayStatus(finding.severity)}
-                  </p>
-                  <h5 className="font-bold">{finding.issue_title}</h5>
-                  <p className="mt-1">{finding.plain_language_explanation}</p>
-                  <p className="mt-2 text-sm font-semibold">
-                    Affected pages: {finding.affected_page_count} · Occurrences:{" "}
-                    {finding.occurrence_count}
-                    <ConceptInfoButton conceptId="occurrences" title="Occurrences" />
-                  </p>
+            {/* 4. Top Findings */}
+            <section className="rounded-xl border border-slate-200 p-5" id="top-findings">
+              <div className="flex items-baseline justify-between">
+                <h4 className="text-lg font-bold text-slate-900">Top Findings</h4>
+                <span className="text-sm text-slate-500">
+                  {findings.length} unique · {totalOccurrences} occurrences
+                </span>
+              </div>
+              {topFindings.length > 0 ? (
+                <div className="mt-4 space-y-3">
+                  {topFindings.map((finding) => (
+                    <div
+                      className="flex items-start gap-3 rounded-lg border border-slate-200 p-4"
+                      key={finding.finding_id}
+                    >
+                      <StatusBadge status={finding.severity} />
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium text-slate-900">{finding.issue_title}</p>
+                        <p className="mt-1 text-sm text-slate-500 line-clamp-2">
+                          {finding.plain_language_explanation}
+                        </p>
+                        <div className="mt-2 flex flex-wrap gap-3 text-xs text-slate-500">
+                          <span>{finding.affected_page_count} pages affected</span>
+                          <span>{finding.occurrence_count} occurrences</span>
+                          <span>{statusLabel(finding.category)}</span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className="shrink-0 text-sm font-medium text-blue-600 hover:text-blue-800"
+                        onClick={() => { setViewMode("technical"); setTimeout(() => document.getElementById(`finding-${finding.finding_id}`)?.scrollIntoView({ behavior: "smooth" }), 100); }}
+                      >
+                        Details
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <EmptyState
+                  title="No critical or high-severity findings detected"
+                  description="Review all findings in Technical View for the complete picture."
+                />
+              )}
+            </section>
+
+            {/* 5. Priority Action Plan */}
+            <section className="rounded-xl border border-slate-200 p-5" id="action-plan-summary">
+              <h4 className="text-lg font-bold text-slate-900">Priority Action Plan</h4>
+              {String(sections.get("priority_action_plan")?.content.generation_status ?? "") ===
+                "deterministic_from_findings" && (
+                <p className="mt-2 text-xs text-blue-700">
+                  Generated from evidence findings. AI-prioritized plan unavailable.
+                </p>
+              )}
+              {actions.length > 0 ? (
+                <div className="mt-4 space-y-3">
+                  {actions.slice(0, 5).map((action, index) => (
+                    <div className="rounded-lg border border-slate-200 p-4" key={`${index}-${String(action.title)}`}>
+                      <div className="flex items-start gap-3">
+                        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-slate-900 text-xs font-bold text-white">
+                          {index + 1}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="font-medium text-slate-900">
+                            {String(action.title ?? "Recommended action")}
+                          </p>
+                          <p className="mt-1 text-sm text-slate-600">
+                            {String(action.impact ?? "Impact not quantified.")}
+                          </p>
+                          <div className="mt-2 flex flex-wrap gap-3 text-xs text-slate-500">
+                            <span><span className="font-medium text-slate-600">Owner:</span> {String(action.responsible_role ?? "Unassigned")}</span>
+                            <span><span className="font-medium text-slate-600">Effort:</span> {String(action.effort ?? "Unestimated")}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <EmptyState
+                  title="No evidence-grounded actions available"
+                  description="This may indicate that no actionable findings were retained."
+                />
+              )}
+            </section>
+
+            {/* 6. Browser Compatibility */}
+            <section className="rounded-xl border border-slate-200 p-5" id="browser-coverage">
+              <h4 className="text-lg font-bold text-slate-900">Browser Compatibility</h4>
+              <p className="mt-1 text-xs text-slate-500">
+                Unavailable engines are not represented as passed or failed.
+              </p>
+              {browserCoverage.length > 0 ? (
+                <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                  {browserCoverage.map((engine) => {
+                    const tested = numberValue(engine.tested_pages);
+                    const eligible = numberValue(engine.eligible_pages);
+                    const isUnavailable = String(engine.availability_status) === "unavailable";
+                    return (
+                      <div
+                        className={`rounded-lg border p-4 ${isUnavailable ? "border-slate-200 bg-slate-50" : "border-slate-200 bg-white"}`}
+                        key={String(engine.engine)}
+                      >
+                        <p className="text-sm font-semibold text-slate-700">
+                          {ENGINE_LABELS[String(engine.engine)] ?? statusLabel(String(engine.engine))}
+                        </p>
+                        {isUnavailable ? (
+                          <>
+                            <p className="mt-1 text-sm text-slate-500">Unavailable in this environment</p>
+                            <p className="mt-0.5 text-xs text-slate-400">Not represented as passed or failed</p>
+                          </>
+                        ) : (
+                          <>
+                            <p className="mt-1 text-xl font-bold text-slate-900">{tested}/{eligible} tested</p>
+                            <StatusBadge status={tested === eligible && eligible > 0 ? "compatible" : tested > 0 ? "partial" : "unavailable"} />
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <EmptyState title="Browser compatibility testing was not available for this analysis." />
+              )}
+            </section>
+
+            {/* 7. Key Limitations */}
+            <section className="rounded-xl border border-slate-200 p-5" id="evidence-limitations">
+              <h4 className="text-lg font-bold text-slate-900">Key Limitations</h4>
+              <p className="mt-2 text-sm text-slate-500">
+                {report.evidence_coverage_numerator}/{report.evidence_coverage_denominator} report sections have available evidence.
+              </p>
+              {limitations.length > 0 ? (
+                <ul className="mt-3 space-y-2">
+                  {limitations.map((limitation) => (
+                    <li key={limitation} className="flex gap-2 text-sm text-slate-600">
+                      <span className="mt-0.5 text-slate-400">•</span>
+                      {limitation}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-3 text-sm text-slate-500">No specific limitations recorded.</p>
+              )}
+            </section>
+
+            {/* 8. Export / reference controls */}
+            <section aria-labelledby={`exports-${report.report_id}`}>
+              <h4 className="text-lg font-bold text-slate-900" id={`exports-${report.report_id}`}>
+                Export Report
+              </h4>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {report.artifacts.map((artifact) => (
+                  <a
+                    className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                    href={reportDeliveryApi.downloadUrl(report.report_id, artifact.format)}
+                    key={artifact.artifact_id}
+                  >
+                    {artifact.format.toUpperCase()}
+                  </a>
+                ))}
+                {[
+                  ["presentation_pdf", "Presentation PDF"],
+                  ["technical_appendix", "Technical Appendix"],
+                  ["page_inventory", "Page Inventory JSON"],
+                ].map(([format, label]) => (
+                  <a
+                    className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                    href={reportDeliveryApi.downloadUrl(report.report_id, format)}
+                    key={format}
+                  >
+                    {label}
+                  </a>
+                ))}
+              </div>
+            </section>
+          </>
+        )}
+
+        {/* ======== TECHNICAL VIEW ======== */}
+        {viewMode === "technical" && (
+          <>
+            {/* 1. All Findings */}
+            <section className="rounded-xl border border-slate-200 p-5" id="all-findings">
+              <h4 className="text-lg font-bold text-slate-900">Findings Explorer</h4>
+              <p className="mt-1 text-xs text-slate-500">
+                Every retained finding. Search, filter, and review exact occurrences.
+              </p>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <label className="text-sm font-medium text-slate-700">
+                  Search
+                  <input
+                    className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    onChange={(event) => setSearch(event.target.value)}
+                    type="search"
+                    value={search}
+                    placeholder="Search findings…"
+                  />
+                </label>
+                <label className="text-sm font-medium text-slate-700">
+                  Page / URL
+                  <input
+                    className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    onChange={(event) => setPageUrl(event.target.value)}
+                    type="search"
+                    value={pageUrl}
+                    placeholder="Filter by URL…"
+                  />
+                </label>
+                <FilterSelect label="Severity" onChange={setSeverity} options={options.severities} value={severity} />
+                <FilterSelect label="Category" onChange={setCategory} options={options.categories} value={category} />
+                <FilterSelect label="Agent" onChange={setAgent} options={options.agents} value={agent} />
+                <FilterSelect label="Scope" onChange={setScope} options={options.scopes} value={scope} />
+                <FilterSelect label="Evidence state" onChange={setEvidenceState} options={["available", "incomplete", "unavailable"]} value={evidenceState} />
+              </div>
+              <p aria-live="polite" className="mt-3 text-sm text-slate-500">
+                {filteredFindings.length ? `${safeFindingsPage * FINDINGS_PAGE_SIZE + 1}–${Math.min(filteredFindings.length, (safeFindingsPage + 1) * FINDINGS_PAGE_SIZE)}` : "0"} of {filteredFindings.length} findings ({findings.length} total)
+              </p>
+              <div className="mt-4 grid gap-4">
+                {filteredFindings.length > 0 ? (
+                  visibleFindings.map((finding) => (
+                    <FindingDetail finding={finding} key={finding.finding_id} />
+                  ))
+                ) : (
+                  <EmptyState
+                    title="No findings match these filters"
+                    description="This filtered state does not prove the site has no issues."
+                  />
+                )}
+              </div>
+              {filteredFindings.length > FINDINGS_PAGE_SIZE && (
+                <nav aria-label="Finding pages" className="mt-4 flex items-center justify-between gap-3">
+                  <button className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium disabled:opacity-40" disabled={safeFindingsPage === 0} onClick={() => setFindingsPage(Math.max(0, safeFindingsPage - 1))} type="button">Previous</button>
+                  <span className="text-sm text-slate-500">Page {safeFindingsPage + 1} of {findingPageCount}</span>
+                  <button className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium disabled:opacity-40" disabled={safeFindingsPage >= findingPageCount - 1} onClick={() => setFindingsPage(Math.min(findingPageCount - 1, safeFindingsPage + 1))} type="button">Next</button>
+                </nav>
+              )}
+            </section>
+
+            {/* 2. Page Inventory */}
+            <section className="rounded-xl border border-slate-200 p-5" id="page-results">
+              <h4 className="text-lg font-bold text-slate-900">Page Inventory</h4>
+              <div className="mt-3 flex flex-wrap gap-2" aria-label="Page Inventory filters">
+                {["", "Analysed", "Not analysed", "Failed", "Not scheduled", "Browser incomplete"].map((filter) => (
                   <button
-                    className="mt-2 inline-block font-semibold underline text-orange-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600"
-                    onClick={() => { setViewMode("technical"); setTimeout(() => document.getElementById(`finding-${finding.finding_id}`)?.scrollIntoView({ behavior: "smooth" }), 100); }}
+                    className={`rounded-md border px-3 py-1.5 text-sm font-medium ${inventoryFilter === filter ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-300 text-slate-600 hover:bg-slate-50"}`}
+                    key={filter || "All"}
+                    onClick={() => setInventoryFilter(filter)}
                     type="button"
                   >
-                    View in Technical View
+                    {filter || "All pages"}
                   </button>
-                </article>
-              ))
-            ) : (
-              <p>
-                No critical or high findings were retained. Review all findings and
-                evidence limitations.
-              </p>
-            )}
-          </div>
-        </section>)}
-
-        <section className="mt-5 rounded-xl border p-5" id="browser-coverage">
-          <ReportSectionHeading
-            conceptId="report_browser_compatibility"
-            number={5}
-            title="Browser Compatibility"
-          />
-          <p className="mt-1 text-sm">
-            Every scheduled browser-eligible HTML page is included independently of
-            page-analysis success. Unavailable engines are not represented as supported.
-          </p>
-          <div className="mt-4 grid gap-3 sm:grid-cols-3">
-            {browserCoverage.map((engine) => {
-              const tested = numberValue(engine.tested_pages);
-              const eligible = numberValue(engine.eligible_pages);
-              const isUnavailable = String(engine.availability_status) === "unavailable";
-              return (
-                <article
-                  className={`rounded-lg p-4 ${isUnavailable ? "border border-slate-300 bg-slate-100" : "bg-slate-50"}`}
-                  key={String(engine.engine)}
-                >
-                  <h5 className="font-bold">
-                    {ENGINE_LABELS[String(engine.engine)] ??
-                      statusLabel(String(engine.engine))}
-                  </h5>
-                  {isUnavailable ? (
-                    <>
-                      <p className="mt-1 text-lg font-semibold text-slate-500">
-                        Unavailable in this environment
-                      </p>
-                      <p className="text-sm text-slate-500">
-                        This engine could not be launched. Results are not represented as
-                        passed or failed.
-                      </p>
-                    </>
-                  ) : (
-                    <>
-                      <p className="mt-1 text-2xl font-black">
-                        {tested} of {eligible}
-                      </p>
-                      <p>
-                        {eligible
-                          ? `${((tested / eligible) * 100).toFixed(1)}% tested`
-                          : "No eligible pages"}
-                      </p>
-                    </>
-                  )}
-                </article>
-              );
-            })}
-          </div>
-        </section>
-
-        {viewMode === "technical" && (<section className="mt-5 rounded-xl border p-5" id="page-results">
-          <ReportSectionHeading
-            conceptId="report_page_inventory"
-            number={6}
-            title="Page-by-Page Results"
-          />
-          <div className="mt-3 flex flex-wrap gap-2" aria-label="Page Inventory filters">
-            {[
-              "",
-              "Analysed",
-              "Not analysed",
-              "Failed",
-              "Not scheduled",
-              "Browser incomplete",
-            ].map((filter) => (
-              <button
-                className="rounded-lg border px-3 py-2 text-sm font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600"
-                key={filter || "All"}
-                onClick={() => setInventoryFilter(filter)}
-                type="button"
-              >
-                {filter || "All pages"}
-              </button>
-            ))}
-          </div>
-          <p aria-live="polite" className="mt-2 text-sm">
-            Showing{" "}
-            {filteredInventory.length > INVENTORY_PAGE_SIZE
-              ? `${safeInventoryPage * INVENTORY_PAGE_SIZE + 1}–${Math.min(
-                  (safeInventoryPage + 1) * INVENTORY_PAGE_SIZE,
-                  filteredInventory.length,
-                )} of `
-              : ""}
-            {filteredInventory.length} of {pageInventory.length} eligible HTML
-            pages. {assetInventory.length} documents or static assets are listed
-            separately.
-          </p>
-          <div className="mt-3 max-w-full overflow-x-auto overscroll-x-contain">
-            <table className="w-full border-collapse text-left text-sm table-fixed">
-              <thead>
-                <tr>
-                  {[
-                    "URL",
-                    "Eligibility",
-                    "Scheduled",
-                    "Visited",
-                    "Analysed",
-                    "Browser engines",
-                    "Result",
-                    "Exclusion/failure reason",
-                  ].map((label) => (
-                    <th className="border bg-slate-100 p-2" key={label} scope="col">
-                      {label}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {visibleInventory.map((page) => (
-                  <tr key={String(page.url)}>
-                    <td className="border p-2">
-                      <TruncatedUrl url={String(page.url)} />
-                    </td>
-                    <td className="border p-2">
-                      {displayStatus(String(page.eligibility ?? "unknown"))}
-                    </td>
-                    <td className="border p-2">
-                      {page.scheduled === true ? "Yes" : "No"}
-                    </td>
-                    <td className="border p-2">
-                      {page.visited === true ? "Yes" : "No"}
-                    </td>
-                    <td className="border p-2">
-                      {page.analysed === true ? "Yes" : "No"}
-                    </td>
-                    <td className="border p-2">
-                      {Array.isArray(page.browser_engines_tested) &&
-                      page.browser_engines_tested.length
-                        ? page.browser_engines_tested
-                            .map(String)
-                            .map((engine) => ENGINE_LABELS[engine] ?? statusLabel(engine))
-                            .join(", ")
-                        : "Not tested"}
-                    </td>
-                    <td className="border p-2">
-                      {displayStatus(String(page.result ?? "unknown"))}
-                    </td>
-                    <td className="border p-2">
-                      {String(
-                        page.failure_reason ?? page.exclusion_reason ?? "None",
-                      )}
-                    </td>
-                  </tr>
                 ))}
-              </tbody>
-            </table>
-          </div>
-          {filteredInventory.length > INVENTORY_PAGE_SIZE && (
-            <div className="mt-3 flex items-center gap-3 text-sm">
-              <button
-                className="rounded border px-3 py-1 disabled:opacity-40"
-                disabled={safeInventoryPage === 0}
-                onClick={() => setInventoryPage(Math.max(0, safeInventoryPage - 1))}
-                type="button"
-              >
-                Previous
-              </button>
-              <span>
-                Page {safeInventoryPage + 1} of {inventoryPageCount}
-              </span>
-              <button
-                className="rounded border px-3 py-1 disabled:opacity-40"
-                disabled={safeInventoryPage >= inventoryPageCount - 1}
-                onClick={() =>
-                  setInventoryPage(
-                    Math.min(inventoryPageCount - 1, safeInventoryPage + 1),
-                  )
-                }
-                type="button"
-              >
-                Next
-              </button>
-            </div>
-          )}
-          {assetInventory.length > 0 && (
-            <details className="mt-4 rounded-lg border p-3">
-              <summary className="cursor-pointer font-bold">
-                Document and Asset Inventory ({assetInventory.length})
-              </summary>
-              <div className="mt-3 max-w-full overflow-x-auto overscroll-x-contain">
-                <table className="w-full border-collapse text-left text-sm table-fixed">
+              </div>
+              <p aria-live="polite" className="mt-2 text-sm text-slate-500">
+                {filteredInventory.length > INVENTORY_PAGE_SIZE
+                  ? `${safeInventoryPage * INVENTORY_PAGE_SIZE + 1}–${Math.min((safeInventoryPage + 1) * INVENTORY_PAGE_SIZE, filteredInventory.length)} of `
+                  : ""}
+                {filteredInventory.length} of {pageInventory.length} eligible pages.
+                {assetInventory.length > 0 && ` ${assetInventory.length} assets listed separately.`}
+              </p>
+              <div className="mt-3 overflow-x-auto">
+                <table className="w-full min-w-[800px] border-collapse text-left text-sm">
                   <thead>
-                    <tr>
-                      {[
-                        "URL",
-                        "Final URL",
-                        "HTTP status",
-                        "Response type",
-                        "Classification",
-                        "Detection",
-                        "Reason",
-                        "Browser handling",
-                      ].map((label) => (
-                        <th className="border bg-slate-100 p-2" key={label} scope="col">
-                          {label}
-                        </th>
+                    <tr className="border-b border-slate-200">
+                      {["URL", "Eligibility", "Scheduled", "Visited", "Analysed", "Browser engines", "Result", "Reason"].map((label) => (
+                        <th className="bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-500" key={label} scope="col">{label}</th>
                       ))}
                     </tr>
                   </thead>
-                  <tbody>
-                    {assetInventory.map((item) => (
-                      <tr key={String(item.url)}>
-                        <td className="border p-2">
-                          <TruncatedUrl url={String(item.url)} />
-                        </td>
-                        <td className="border p-2">
-                          <TruncatedUrl url={String(item.final_url ?? "Not collected")} />
-                        </td>
-                        <td className="border p-2">
-                          {typeof item.http_status === "number"
-                            ? `HTTP ${item.http_status}`
-                            : "Not collected"}
-                        </td>
-                        <td className="border p-2 break-words">
-                          {String(item.response_content_type ?? "Not collected")}
-                        </td>
-                        <td className="border p-2">
-                          {statusLabel(String(item.resource_classification))}
-                        </td>
-                        <td className="border p-2 break-words">
-                          {String(item.content_type_detection)}
-                        </td>
-                        <td className="border p-2 break-words">
-                          {String(item.failure_reason ?? item.exclusion_reason)}
-                        </td>
-                        <td className="border p-2 break-words">
-                          {String(item.browser_navigation)}
-                        </td>
+                  <tbody className="divide-y divide-slate-100">
+                    {visibleInventory.map((page) => (
+                      <tr key={String(page.url)}>
+                        <td className="px-3 py-2"><UrlCell url={String(page.url)} /></td>
+                        <td className="px-3 py-2"><StatusBadge status={String(page.eligibility ?? "unknown")} size="xs" /></td>
+                        <td className="px-3 py-2">{page.scheduled === true ? "Yes" : "No"}</td>
+                        <td className="px-3 py-2">{page.visited === true ? "Yes" : "No"}</td>
+                        <td className="px-3 py-2">{page.analysed === true ? "Yes" : "No"}</td>
+                        <td className="px-3 py-2 text-xs">{Array.isArray(page.browser_engines_tested) && page.browser_engines_tested.length ? page.browser_engines_tested.map(String).map((e) => ENGINE_LABELS[e] ?? statusLabel(e)).join(", ") : "Not tested"}</td>
+                        <td className="px-3 py-2"><StatusBadge status={String(page.result ?? "unknown")} size="xs" /></td>
+                        <td className="max-w-48 px-3 py-2 text-xs text-slate-500">{String(page.failure_reason ?? page.exclusion_reason ?? "None")}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-            </details>
-          )}
-        </section>)}
-
-        {viewMode === "executive" && (<section className="mt-5 rounded-xl border p-5" id="action-plan-summary">
-          <ReportSectionHeading
-            conceptId="report_action_plan"
-            number={7}
-            title="Action Plan"
-          />
-          {String(sections.get("priority_action_plan")?.content.generation_status ?? "") ===
-            "deterministic_from_findings" && (
-            <p className="mt-2 rounded bg-blue-50 px-3 py-2 text-sm text-blue-800">
-              Action plan generated from evidence findings. AI-prioritized plan
-              unavailable for this analysis.
-            </p>
-          )}
-          <ol className="mt-3 grid gap-3">
-            {actions.slice(0, 5).map((action, index) => (
-              <li
-                className="rounded-lg bg-slate-50 p-4"
-                key={`${index}-${String(action.title)}`}
-              >
-                <strong>
-                  {index + 1}. {String(action.title ?? "Recommended action")}
-                </strong>
-                <p className="mt-1">
-                  {String(action.impact ?? "Impact not quantified.")}
-                </p>
-                <p className="text-sm">
-                  Owner: {String(action.responsible_role ?? "Unassigned")} · Effort:{" "}
-                  {String(action.effort ?? "Unestimated")}
-                </p>
-              </li>
-            ))}
-          </ol>
-        </section>)}
-
-        <section className="mt-5 rounded-xl border p-5" id="evidence-limitations">
-          <ReportSectionHeading
-            conceptId="report_limitations"
-            number={8}
-            title="Evidence Limitations"
-          />
-          <p className="mt-2">
-            Report section evidence: {report.evidence_coverage_numerator} of{" "}
-            {report.evidence_coverage_denominator} report sections have available evidence.
-            This is not website page coverage or scoring category coverage.
-          </p>
-          <ul className="mt-3 list-disc pl-5">
-            {limitations.map((limitation) => (
-              <li key={limitation}>{limitation}</li>
-            ))}
-          </ul>
-        </section>
-
-        {viewMode === "technical" && (<details
-          className="mt-5 rounded-xl border border-slate-300 p-4"
-          id="all-findings"
-          open
-        >
-          <summary className="cursor-pointer text-lg font-bold">
-            All Findings
-          </summary>
-          <section aria-labelledby={`finding-explorer-${report.report_id}`}>
-          <h4 className="sr-only" id={`finding-explorer-${report.report_id}`}>
-            Finding explorer
-          </h4>
-          <p className="mt-1 text-sm text-slate-600">
-            Search and filter every retained finding without capping page occurrences.
-          </p>
-          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <label className="text-sm font-semibold">
-              Search findings
-              <input
-                className="mt-1 w-full rounded border border-slate-400 px-3 py-2 font-normal focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600"
-                onChange={(event) => setSearch(event.target.value)}
-                type="search"
-                value={search}
-              />
-            </label>
-            <label className="text-sm font-semibold">
-              Page or URL
-              <input
-                className="mt-1 w-full rounded border border-slate-400 px-3 py-2 font-normal focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600"
-                onChange={(event) => setPageUrl(event.target.value)}
-                type="search"
-                value={pageUrl}
-              />
-            </label>
-            <FilterSelect
-              label="Severity"
-              onChange={setSeverity}
-              options={options.severities}
-              value={severity}
-            />
-            <FilterSelect
-              label="Category"
-              onChange={setCategory}
-              options={options.categories}
-              value={category}
-            />
-            <FilterSelect
-              label="Agent"
-              onChange={setAgent}
-              options={options.agents}
-              value={agent}
-            />
-            <FilterSelect
-              label="Scope"
-              onChange={setScope}
-              options={options.scopes}
-              value={scope}
-            />
-            <FilterSelect
-              label="Evidence state"
-              onChange={setEvidenceState}
-              options={["available", "incomplete", "unavailable"]}
-              value={evidenceState}
-            />
-          </div>
-          <p aria-live="polite" className="mt-3 text-sm font-semibold">
-            Showing{" "}
-            {filteredFindings.length
-              ? safeFindingsPage * FINDINGS_PAGE_SIZE + 1
-              : 0}
-            –
-            {Math.min(
-              filteredFindings.length,
-              (safeFindingsPage + 1) * FINDINGS_PAGE_SIZE,
-            )}{" "}
-            of {filteredFindings.length} filtered findings ({findings.length} total).
-          </p>
-          <div className="mt-4 grid gap-4">
-            {filteredFindings.length > 0 ? (
-              visibleFindings.map((finding) => (
-                <FindingDetail finding={finding} key={finding.finding_id} />
-              ))
-            ) : (
-              <p className="text-sm text-slate-600">
-                No retained findings match these filters. This filtered state does not
-                prove that the site has no issues.
-              </p>
-            )}
-          </div>
-          {filteredFindings.length > FINDINGS_PAGE_SIZE && (
-            <nav
-              aria-label="Finding pages"
-              className="mt-4 flex flex-wrap items-center justify-between gap-3"
-            >
-              <button
-                className="rounded border px-3 py-2 font-semibold disabled:opacity-50"
-                disabled={safeFindingsPage === 0}
-                onClick={() => setFindingsPage(Math.max(0, safeFindingsPage - 1))}
-                type="button"
-              >
-                Previous findings
-              </button>
-              <span>
-                Page {safeFindingsPage + 1} of {findingPageCount}
-              </span>
-              <button
-                className="rounded border px-3 py-2 font-semibold disabled:opacity-50"
-                disabled={safeFindingsPage >= findingPageCount - 1}
-                onClick={() =>
-                  setFindingsPage(
-                    Math.min(findingPageCount - 1, safeFindingsPage + 1),
-                  )
-                }
-                type="button"
-              >
-                Next findings
-              </button>
-            </nav>
-          )}
-          </section>
-        </details>)}
-
-        <section aria-labelledby={`exports-${report.report_id}`} className="mt-5">
-          <h4 className="font-semibold" id={`exports-${report.report_id}`}>
-            Export report
-          </h4>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {report.artifacts.map((artifact) => (
-              <a
-                className="rounded-lg border border-slate-400 px-3 py-2 text-sm font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600"
-                href={reportDeliveryApi.downloadUrl(report.report_id, artifact.format)}
-                key={artifact.artifact_id}
-              >
-                Download {artifact.format.toUpperCase()}{" "}
-                <span className="sr-only">
-                  ({artifact.size_bytes} bytes, checksum {artifact.checksum_sha256})
-                </span>
-              </a>
-            ))}
-            {[
-              ["presentation_pdf", "Presentation PDF"],
-              ["technical_appendix", "Technical Appendix"],
-              ["page_inventory", "Page Inventory JSON"],
-            ].map(([format, label]) => (
-              <a
-                className="rounded-lg border border-slate-400 px-3 py-2 text-sm font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600"
-                href={reportDeliveryApi.downloadUrl(report.report_id, format)}
-                key={format}
-              >
-                Download {label}
-              </a>
-            ))}
-          </div>
-        </section>
-
-        {viewMode === "technical" && (<details className="mt-5 rounded-xl border p-5" id="technical-details" open>
-          <summary className="flex cursor-pointer items-center gap-1 text-xl font-black">
-            Technical Details
-            <ConceptInfoButton
-              conceptId="report_technical_details"
-              title="Technical Details"
-            />
-          </summary>
-          <p className="mt-2">
-            Detailed evidence is separated from the business summary. Internal
-            execution identifiers, provider identifiers, rule identifiers, and raw
-            payloads are intentionally not displayed.
-          </p>
-          <section
-            aria-labelledby={`report-agents-${report.report_id}`}
-            className="mt-4 rounded-lg bg-slate-50 p-4"
-          >
-            <h5 className="font-bold" id={`report-agents-${report.report_id}`}>
-              Agents and evidence production
-            </h5>
-            <ul className="mt-2 grid gap-2 sm:grid-cols-2">
-              {reportAgents.map((agent) => (
-                <li className="rounded border bg-white p-3" key={String(agent.agent_id)}>
-                  <strong>{friendlyAgentName(agent.agent_id)}</strong>
-                  <br />
-                  Status:{" "}
-                  {displayStatus(
-                    String(agent.status ?? "execution status not recorded"),
-                    "historical",
-                  )}
-                  {typeof agent.status_explanation === "string" && (
-                    <span className="mt-1 block text-sm">
-                      {agent.status_explanation}
-                    </span>
-                  )}
-                  <span className="mt-1 block text-sm">
-                    Evidence references:{" "}
-                    {Array.isArray(agent.evidence_produced)
-                      ? agent.evidence_produced.length
-                      : 0}
-                  </span>
-                </li>
-              ))}
-            </ul>
-            <p className="mt-3 text-sm">
-              <strong>Unavailable tools/providers:</strong>{" "}
-              {unavailableCapabilities.length
-                ? unavailableCapabilities.map(statusLabel).join(", ")
-                : "None recorded"}
-            </p>
-          </section>
-          <ul className="mt-3 grid gap-2 sm:grid-cols-2">
-            {report.sections.map((section) => (
-              <li className="rounded-lg bg-slate-50 p-3" key={section.section_id}>
-                <strong>{section.title}</strong> — {displayStatus(section.status, "historical")}
-                <br />
-                <span className="text-sm">
-                  {section.evidence_references.length} retained evidence references
-                </span>
-                {section.unavailable_reason && (
-                  <p className="mt-1 text-sm text-amber-800">
-                    {section.unavailable_reason}
-                  </p>
-                )}
-                {isRecord(section.content.agent_attribution) &&
-                  recordList(
-                    section.content.agent_attribution.agents_involved,
-                  ).length > 0 && (
-                    <details className="mt-2 rounded border bg-white p-2">
-                      <summary className="cursor-pointer font-semibold">
-                        Section agent attribution
-                      </summary>
-                      <ul className="mt-2 list-disc pl-5 text-sm">
-                        {recordList(
-                          section.content.agent_attribution.agents_involved,
-                        ).map((agent) => (
-                          <li key={`${section.section_id}-${String(agent.agent_id)}`}>
-                            {friendlyAgentName(agent.agent_id)}:{" "}
-                            {displayStatus(
-                              String(
-                                agent.execution_status ??
-                                  "execution status not recorded",
-                              ),
-                              "historical",
-                            )}
-                          </li>
+              {filteredInventory.length > INVENTORY_PAGE_SIZE && (
+                <div className="mt-3 flex items-center gap-3 text-sm">
+                  <button className="rounded-md border border-slate-300 px-3 py-1 text-sm disabled:opacity-40" disabled={safeInventoryPage === 0} onClick={() => setInventoryPage(Math.max(0, safeInventoryPage - 1))} type="button">Previous</button>
+                  <span className="text-sm text-slate-500">Page {safeInventoryPage + 1} of {inventoryPageCount}</span>
+                  <button className="rounded-md border border-slate-300 px-3 py-1 text-sm disabled:opacity-40" disabled={safeInventoryPage >= inventoryPageCount - 1} onClick={() => setInventoryPage(Math.min(inventoryPageCount - 1, safeInventoryPage + 1))} type="button">Next</button>
+                </div>
+              )}
+              {assetInventory.length > 0 && (
+                <details className="mt-4 rounded-lg border border-slate-200 p-3">
+                  <summary className="cursor-pointer text-sm font-semibold text-slate-700">
+                    Document and Asset Inventory ({assetInventory.length})
+                  </summary>
+                  <div className="mt-3 overflow-x-auto">
+                    <table className="w-full min-w-[700px] border-collapse text-left text-sm">
+                      <thead>
+                        <tr className="border-b border-slate-200">
+                          {["URL", "Final URL", "HTTP status", "Type", "Classification", "Detection", "Reason", "Browser handling"].map((label) => (
+                            <th className="bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-500" key={label} scope="col">{label}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {assetInventory.map((item) => (
+                          <tr key={String(item.url)}>
+                            <td className="px-3 py-2"><UrlCell url={String(item.url)} /></td>
+                            <td className="px-3 py-2"><UrlCell url={String(item.final_url ?? "Not collected")} /></td>
+                            <td className="px-3 py-2">{typeof item.http_status === "number" ? `HTTP ${item.http_status}` : "N/A"}</td>
+                            <td className="max-w-32 break-words px-3 py-2 text-xs">{String(item.response_content_type ?? "N/A")}</td>
+                            <td className="px-3 py-2 text-xs">{statusLabel(String(item.resource_classification))}</td>
+                            <td className="max-w-32 break-words px-3 py-2 text-xs">{String(item.content_type_detection)}</td>
+                            <td className="max-w-32 break-words px-3 py-2 text-xs">{String(item.failure_reason ?? item.exclusion_reason)}</td>
+                            <td className="px-3 py-2 text-xs">{String(item.browser_navigation)}</td>
+                          </tr>
                         ))}
-                      </ul>
-                    </details>
-                  )}
-              </li>
-            ))}
-          </ul>
-        </details>)}
+                      </tbody>
+                    </table>
+                  </div>
+                </details>
+              )}
+            </section>
+
+            {/* 3. Browser Matrix */}
+            <section className="rounded-xl border border-slate-200 p-5" id="browser-coverage">
+              <h4 className="text-lg font-bold text-slate-900">Browser Compatibility</h4>
+              {browserCoverage.length > 0 ? (
+                <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                  {browserCoverage.map((engine) => {
+                    const tested = numberValue(engine.tested_pages);
+                    const eligible = numberValue(engine.eligible_pages);
+                    const isUnavailable = String(engine.availability_status) === "unavailable";
+                    const passed = numberValue(engine.passed_pages);
+                    const partial = numberValue(engine.partial_pages);
+                    const failed = numberValue(engine.failed_pages);
+                    return (
+                      <div className={`rounded-lg border p-4 ${isUnavailable ? "border-slate-200 bg-slate-50" : "border-slate-200"}`} key={String(engine.engine)}>
+                        <p className="text-sm font-semibold text-slate-700">
+                          {ENGINE_LABELS[String(engine.engine)] ?? statusLabel(String(engine.engine))}
+                        </p>
+                        {isUnavailable ? (
+                          <p className="mt-1 text-sm text-slate-500">Unavailable in this environment</p>
+                        ) : (
+                          <>
+                            <p className="mt-1 text-xl font-bold">{tested}/{eligible} tested</p>
+                            <div className="mt-2 grid grid-cols-3 gap-1 text-xs text-slate-500">
+                              <span>Passed: {passed}</span>
+                              <span>Partial: {partial}</span>
+                              <span>Failed: {failed}</span>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <EmptyState title="No browser compatibility data available." />
+              )}
+            </section>
+
+            {/* 4. Agent Execution */}
+            <section className="rounded-xl border border-slate-200 p-5" id="technical-details">
+              <h4 className="text-lg font-bold text-slate-900">Agent Execution</h4>
+              <p className="mt-1 text-xs text-slate-500">
+                Multi-agent orchestration details. Results above are derived from evidence produced by these agents.
+              </p>
+              <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                {reportAgents.map((reportAgent) => (
+                  <div className="rounded-lg border border-slate-200 p-3" key={String(reportAgent.agent_id)}>
+                    <p className="font-medium text-slate-900">{friendlyAgentName(reportAgent.agent_id)}</p>
+                    <div className="mt-1 flex items-center gap-2">
+                      <StatusBadge status={String(reportAgent.status ?? "not_recorded")} size="xs" />
+                      {typeof reportAgent.status_explanation === "string" && (
+                        <span className="text-xs text-slate-500">{reportAgent.status_explanation}</span>
+                      )}
+                    </div>
+                    <p className="mt-1 text-xs text-slate-500">
+                      Evidence: {Array.isArray(reportAgent.evidence_produced) ? reportAgent.evidence_produced.length : 0} references
+                    </p>
+                  </div>
+                ))}
+              </div>
+              {unavailableCapabilities.length > 0 && (
+                <p className="mt-3 text-xs text-slate-500">
+                  Unavailable tools/providers: {unavailableCapabilities.map(statusLabel).join(", ")}
+                </p>
+              )}
+            </section>
+
+            {/* 5. Report Sections */}
+            <section className="rounded-xl border border-slate-200 p-5">
+              <h4 className="text-lg font-bold text-slate-900">Report Sections</h4>
+              <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                {report.sections.map((section) => (
+                  <div className="rounded-lg border border-slate-200 p-3" key={section.section_id}>
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="font-medium text-slate-900">{section.title}</p>
+                      <StatusBadge status={section.status ?? "unknown"} size="xs" />
+                    </div>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {section.evidence_references.length} evidence references
+                    </p>
+                    {section.unavailable_reason && (
+                      <p className="mt-1 text-xs text-amber-700">{section.unavailable_reason}</p>
+                    )}
+                    {isRecord(section.content.agent_attribution) &&
+                      recordList(section.content.agent_attribution.agents_involved).length > 0 && (
+                        <details className="mt-2 text-xs">
+                          <summary className="cursor-pointer font-medium text-slate-600">Agent attribution</summary>
+                          <ul className="mt-1 space-y-1 pl-3">
+                            {recordList(section.content.agent_attribution.agents_involved).map((sectionAgent) => (
+                              <li key={`${section.section_id}-${String(sectionAgent.agent_id)}`} className="text-slate-500">
+                                {friendlyAgentName(sectionAgent.agent_id)}: {displayStatus(String(sectionAgent.execution_status ?? "not recorded"), "historical")}
+                              </li>
+                            ))}
+                          </ul>
+                        </details>
+                      )}
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            {/* 6. Methodology / Versions */}
+            <section className="rounded-xl border border-slate-200 p-5" id="methodology">
+              <h4 className="text-lg font-bold text-slate-900">Methodology</h4>
+              <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
+                <div>
+                  <dt className="text-slate-500">Report ID</dt>
+                  <dd className="mt-0.5 break-all font-mono text-xs">{report.report_id}</dd>
+                </div>
+                <div>
+                  <dt className="text-slate-500">Report status</dt>
+                  <dd className="mt-0.5">{reportStatus}</dd>
+                </div>
+                <div>
+                  <dt className="text-slate-500">Evidence coverage</dt>
+                  <dd className="mt-0.5">{report.evidence_coverage_numerator}/{report.evidence_coverage_denominator}</dd>
+                </div>
+                <div>
+                  <dt className="text-slate-500">Confidence</dt>
+                  <dd className="mt-0.5">{report.confidence_percent === null ? "Not available" : `${report.confidence_percent}%`}</dd>
+                </div>
+              </dl>
+            </section>
+
+            {/* 7. All Limitations */}
+            {limitations.length > 0 && (
+              <section className="rounded-xl border border-slate-200 p-5" id="all-limitations">
+                <h4 className="text-lg font-bold text-slate-900">All Limitations</h4>
+                <ul className="mt-3 space-y-2">
+                  {limitations.map((limitation) => (
+                    <li key={limitation} className="flex gap-2 text-sm text-slate-600">
+                      <span className="mt-0.5 text-slate-400">•</span>
+                      {limitation}
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+
+            {/* Export (also in technical view) */}
+            <section aria-labelledby={`exports-tech-${report.report_id}`}>
+              <h4 className="text-lg font-bold text-slate-900" id={`exports-tech-${report.report_id}`}>
+                Export Report
+              </h4>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {report.artifacts.map((artifact) => (
+                  <a
+                    className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                    href={reportDeliveryApi.downloadUrl(report.report_id, artifact.format)}
+                    key={artifact.artifact_id}
+                  >
+                    {artifact.format.toUpperCase()}
+                  </a>
+                ))}
+                {[
+                  ["presentation_pdf", "Presentation PDF"],
+                  ["technical_appendix", "Technical Appendix"],
+                  ["page_inventory", "Page Inventory JSON"],
+                ].map(([format, label]) => (
+                  <a
+                    className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                    href={reportDeliveryApi.downloadUrl(report.report_id, format)}
+                    key={format}
+                  >
+                    {label}
+                  </a>
+                ))}
+              </div>
+            </section>
+          </>
+        )}
       </div>
     </article>
   );
@@ -1625,9 +1239,6 @@ export function ReportDeliveryPanel({
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [progressInterrupted, setProgressInterrupted] = useState(false);
   const [historyInterrupted, setHistoryInterrupted] = useState(false);
-  const [lastSuccessfulPollAt, setLastSuccessfulPollAt] = useState<string | null>(
-    null,
-  );
   const [notice, setNotice] = useState<string | null>(null);
 
   const resolvedAnalysisId = analysisRunId ?? analysisId;
@@ -1696,7 +1307,6 @@ export function ReportDeliveryPanel({
       setProgress(current);
       if (current.analysis_run_id) setAnalysisId(current.analysis_run_id);
       setProgressInterrupted(false);
-      setLastSuccessfulPollAt(new Date().toISOString());
       onProgressChange?.(current);
       return true;
     } catch (requestError) {
@@ -1747,6 +1357,8 @@ export function ReportDeliveryPanel({
     setActing(true);
     setError(null);
     setNotice(null);
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 30_000);
     try {
       const started = await reportDeliveryApi.startAnalysis(
         projectId,
@@ -1766,12 +1378,17 @@ export function ReportDeliveryPanel({
       );
       await loadProgress();
     } catch (requestError) {
-      setError(
-        requestError instanceof Error
-          ? requestError.message
-          : "Unable to start the full analysis.",
-      );
+      if (requestError instanceof DOMException && requestError.name === "AbortError") {
+        setError("Starting the analysis timed out. The server may be busy — try again.");
+      } else {
+        setError(
+          requestError instanceof Error
+            ? requestError.message
+            : "Unable to start the full analysis.",
+        );
+      }
     } finally {
+      window.clearTimeout(timeout);
       setActing(false);
     }
   }
@@ -1832,21 +1449,6 @@ export function ReportDeliveryPanel({
     }
   }
 
-  const progressDescription = useMemo(() => {
-    if (!progress) return "Workflow progress is unavailable.";
-    if (
-      progress.progress_percentage === 100 &&
-      progress.report_generation_available
-    ) {
-      return progress.status === "partial"
-        ? "Analysis completed with limitations. The final report is available."
-        : "Analysis completed. The final report is available.";
-    }
-    const stage = progress.stages.find(
-      (item) => item.stage_id === progress.current_stage,
-    );
-    return `${progress.progress_percentage.toFixed(0)} percent complete. Current stage ${stage?.label ?? statusLabel(progress.current_stage)}.`;
-  }, [progress]);
   const canGenerate =
     Boolean(resolvedAnalysisId) &&
     Boolean(progress && ["completed", "partial"].includes(progress.status)) &&
@@ -1897,312 +1499,13 @@ export function ReportDeliveryPanel({
         </p>
       )}
 
-      <div aria-live="polite" className="mt-4" role="status">
+      <div className="mt-4">
         {progress ? (
-          <>
-            {progress.submitted_website && (
-              <p className="mb-3 break-all text-sm">
-                <strong>Submitted website:</strong> {progress.submitted_website}
-              </p>
-            )}
-            <div
-              aria-label={progressDescription}
-              aria-valuemax={100}
-              aria-valuemin={0}
-              aria-valuenow={progress.progress_percentage}
-              className="h-3 overflow-hidden rounded-full bg-slate-200"
-              role="progressbar"
-            >
-              <div
-                className="h-full bg-blue-700 transition-[width]"
-                style={{ width: `${progress.progress_percentage}%` }}
-              />
-            </div>
-            <p className="mt-2 text-sm font-semibold">
-              {progress.status === "partial" && progress.report_generation_available
-                ? "Completed with limitations"
-                : displayStatus(progress.status)}{" "}
-              · {progressDescription}
-            </p>
-            {progress.page_coverage.discovery_completeness != null &&
-              progress.page_coverage.discovery_completeness !== "complete" && (
-              <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
-                <p className="font-semibold">
-                  Website discovery was{" "}
-                  {progress.page_coverage.discovery_completeness}. Full-site coverage
-                  is not established.
-                </p>
-                <p className="mt-1">
-                  {progress.page_coverage.discovery_failure_message ??
-                    "The retained discovered pages remain usable, but they may not represent the full website."}
-                </p>
-              </div>
-            )}
-            <p className="mt-1 text-sm">
-              Last progress update:{" "}
-              {new Date(progress.last_progress_update).toLocaleString()}.
-            </p>
-            {lastSuccessfulPollAt && (
-              <p className="mt-1 text-sm">
-                Latest successful status check:{" "}
-                {new Date(lastSuccessfulPollAt).toLocaleString()}.
-              </p>
-            )}
-            {progress.business_error_message && (
-              <p
-                className="mt-3 rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-900"
-                role="alert"
-              >
-                <strong>
-                  {progress.failed_stage_id
-                    ? `Failed stage: ${
-                        progress.stages.find(
-                          (item) => item.stage_id === progress.failed_stage_id,
-                        )?.label ?? statusLabel(progress.failed_stage_id)
-                      }. `
-                    : ""}
-                </strong>
-                {progress.business_error_message}
-              </p>
-            )}
-            <section
-              aria-labelledby={`stage-progress-${websiteId}`}
-              className="mt-4"
-            >
-              <h3 className="font-bold" id={`stage-progress-${websiteId}`}>
-                Analysis stages
-              </h3>
-              <ol className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-                {progress.stages.map((stage) => (
-                  <li className="rounded-lg border p-3 text-sm" key={stage.stage_id}>
-                    <strong>{stage.label}</strong>
-                    <br />
-                    {displayStatus(stage.status)}
-                  </li>
-                ))}
-              </ol>
-            </section>
-            <dl className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              {[
-                [
-                  "Discovery completeness",
-                  displayStatus(progress.page_coverage.discovery_completeness),
-                ],
-                ["Discovered", progress.page_coverage.discovered_pages],
-                ["Normalized", progress.page_coverage.normalized_pages],
-                ["Eligible", progress.page_coverage.eligible_pages],
-                ["Scheduled", progress.page_coverage.scheduled_pages],
-                [
-                  "Not scheduled",
-                  `${progress.page_coverage.not_scheduled_pages} (non-HTML assets or scope exclusions)`,
-                ],
-                ["Visited", progress.page_coverage.visited_pages],
-                ["Successfully analysed", progress.page_coverage.successfully_analysed_pages],
-                ["Failed", progress.page_coverage.failed_pages],
-                ["Document assets", progress.page_coverage.document_assets],
-                ["Media/static assets", progress.page_coverage.media_static_assets],
-                ["Skipped", progress.page_coverage.skipped_pages],
-                ["Incomplete", progress.page_coverage.incomplete_pages],
-                [
-                  "Analysed-page coverage",
-                  progress.page_coverage.coverage_percentage === null
-                    ? "Unavailable"
-                    : `${progress.page_coverage.coverage_numerator}/${progress.page_coverage.coverage_denominator} discovered eligible pages (${progress.page_coverage.coverage_percentage}%)`,
-                ],
-                [
-                  "Full-site coverage",
-                  progress.page_coverage.full_site_coverage_percentage === null
-                    ? "Not established"
-                    : `${progress.page_coverage.full_site_coverage_percentage}%`,
-                ],
-              ].map(([label, value]) => (
-                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3" key={label}>
-                  <dt className="text-xs font-bold uppercase text-slate-500">{label}</dt>
-                  <dd className="mt-1 text-lg font-black">{value}</dd>
-                </div>
-              ))}
-            </dl>
-            {selected ? (
-              <a
-                className="mt-3 inline-flex text-sm font-semibold underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600"
-                href={reportDeliveryApi.downloadUrl(
-                  selected.report_id,
-                  "page_inventory",
-                )}
-              >
-                Download Page Inventory
-              </a>
-            ) : (
-              <p className="mt-3 text-sm text-slate-600">
-                Page Inventory becomes available with the immutable report.
-              </p>
-            )}
-            {progress.page_coverage.failed_page_details.length > 0 && (
-              <details className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3">
-                <summary className="cursor-pointer font-semibold text-red-900">
-                  Failed page URLs and reasons (
-                  {progress.page_coverage.failed_page_details.length})
-                </summary>
-                <ul className="mt-3 grid gap-2 text-sm">
-                  {progress.page_coverage.failed_page_details.map((item) => (
-                    <li
-                      className="rounded bg-white p-3"
-                      key={`${item.url}-${item.reason_code}`}
-                    >
-                      <p className="break-all font-semibold">{item.url}</p>
-                      <p className="mt-1 text-red-900">{item.reason}</p>
-                    </li>
-                  ))}
-                </ul>
-              </details>
-            )}
-            {progress.page_coverage.resource_inventory.length > 0 && (
-              <details className="mt-3 rounded-lg border border-slate-300 bg-slate-50 p-3">
-                <summary className="cursor-pointer font-semibold">
-                  Documents and static assets (
-                  {progress.page_coverage.resource_inventory.length})
-                </summary>
-                <ul className="mt-3 grid gap-2 text-sm">
-                  {progress.page_coverage.resource_inventory.map((item) => (
-                    <li className="min-w-0 rounded bg-white p-3" key={item.url}>
-                      <p className="font-semibold"><TruncatedUrl url={item.url} maxLen={80} /></p>
-                      <p className="mt-1">
-                        Final URL: <TruncatedUrl url={item.final_url ?? "Not collected"} maxLen={70} />
-                      </p>
-                      <p>
-                        {item.http_status === null
-                          ? "HTTP status not collected"
-                          : `HTTP ${item.http_status}`}{" "}
-                        · {item.response_content_type ?? "Response type not collected"} ·{" "}
-                        {statusLabel(item.classification)}
-                      </p>
-                      <p className="mt-1">{item.failure_reason ?? "No failure reason"}</p>
-                      <p className="mt-1 text-slate-600">
-                        {item.content_type_detection} {item.browser_navigation}
-                      </p>
-                    </li>
-                  ))}
-                </ul>
-              </details>
-            )}
-            <section className="mt-4" aria-labelledby={`browser-progress-${websiteId}`}>
-              <h3 className="font-bold" id={`browser-progress-${websiteId}`}>
-                Browser-engine progress
-                <ConceptInfoButton
-                  conceptId="browser_coverage"
-                  title="Browser coverage"
-                />
-              </h3>
-              <p className="mt-1 text-sm capitalize">
-                {displayStatus(progress.browser_engine_progress.status, "optional_tool")}
-              </p>
-              <ul className="mt-2 grid gap-2 sm:grid-cols-3">
-                {progress.browser_engine_progress.engines.map((engine) => {
-                  const engineUnavailable =
-                    String(engine.availability_status) === "unavailable";
-                  return (
-                    <li
-                      className={`rounded-lg border p-3 text-sm ${engineUnavailable ? "border-slate-300 bg-slate-100 text-slate-500" : ""}`}
-                      key={engine.engine}
-                    >
-                      <strong>
-                        {ENGINE_LABELS[engine.engine] ?? statusLabel(engine.engine)}
-                      </strong>
-                      {engineUnavailable ? (
-                        <p className="mt-1">
-                          Unavailable in this environment
-                        </p>
-                      ) : (
-                        <>
-                          <br />
-                          Browser coverage {engine.tested_pages} of{" "}
-                          {engine.eligible_pages}
-                          <br />
-                          Queued {engine.queued_pages} · attempted{" "}
-                          {engine.attempted_pages}
-                          <br />
-                          Passed {engine.passed_pages} · partial{" "}
-                          {engine.partial_pages}
-                          <ConceptInfoButton
-                            conceptId="partial_browser_result"
-                            title="Partial browser result"
-                          />{" "}
-                          · failed {engine.failed_pages}
-                          <br />
-                          Inconclusive {engine.inconclusive_pages} ·
-                          unavailable {engine.unavailable_pages}
-                          {Boolean(engine.timed_out_pages) && (
-                            <>
-                              <br />
-                              Timed out {engine.timed_out_pages}
-                            </>
-                          )}
-                        </>
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
-            </section>
-            <section className="mt-4" aria-labelledby={`agent-progress-${websiteId}`}>
-              <h3 className="font-bold" id={`agent-progress-${websiteId}`}>
-                Eight-agent execution
-              </h3>
-              <ul className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-                {progress.agent_states.map((agent) => (
-                  <li className="rounded-lg border p-3 text-sm" key={agent.agent_id}>
-                    <strong>{AGENT_LABELS[agent.agent_id] ?? statusLabel(agent.agent_id)}</strong>
-                    <br />
-                    <span>{displayStatus(agent.status)}</span>
-                  </li>
-                ))}
-              </ul>
-            </section>
-            <Coverage
-              denominator={progress.evidence_coverage.denominator}
-              numerator={progress.evidence_coverage.numerator}
-              percentage={progress.evidence_coverage.percentage}
-            />
-            <p className="text-sm">
-              Attempt {progress.attempt} · elapsed {progress.elapsed_seconds.toFixed(1)}s
-            </p>
-            {(progress.unavailable_tools.length > 0 ||
-              progress.unavailable_providers.length > 0) && (
-              <p className="mt-1 text-sm text-amber-800">
-                Some advanced data sources were unavailable. Core page analysis may
-                still be complete.
-              </p>
-            )}
-            {progress.safe_error_summaries.map((item) => (
-              <p className="mt-1 text-sm text-red-700" key={`${item.code}-${item.message}`}>
-                {item.message}
-              </p>
-            ))}
-            <div className="mt-4 flex flex-wrap gap-2">
-              {!TERMINAL_STATUSES.includes(progress.status) && (
-                <button
-                  className="rounded border border-red-700 px-3 py-2 text-sm font-bold text-red-800 disabled:opacity-50"
-                  disabled={acting}
-                  onClick={() => void performWorkflowAction("cancel")}
-                  type="button"
-                >
-                  Cancel analysis
-                </button>
-              )}
-              {progress.retry_available && (
-                <button
-                  className="rounded border border-slate-700 px-3 py-2 text-sm font-bold disabled:opacity-50"
-                  disabled={acting || !progress.resume_available}
-                  onClick={() => void performWorkflowAction("resume")}
-                  type="button"
-                >
-                  {progress.page_coverage.discovery_retry_available
-                    ? "Retry incomplete discovery"
-                    : "Retry or resume analysis"}
-                </button>
-              )}
-            </div>
-          </>
+          <AnalysisProgressTimeline
+            progress={progress}
+            acting={acting}
+            onPerformAction={performWorkflowAction}
+          />
         ) : (
           <p className="text-sm text-slate-600">
             No active workflow is retained in this browser. Report history remains available

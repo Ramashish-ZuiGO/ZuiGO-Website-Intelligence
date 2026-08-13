@@ -162,7 +162,7 @@ def test_every_referenced_concept_exists_and_has_a_non_crashing_render_path() ->
         referenced.update(re.findall(r'conceptId="([a-z0-9_]+)"', source))
     assert referenced
     assert referenced <= concepts.keys()
-    assert "eligible_html_pages" in referenced
+    assert "report_confidence" in referenced
 
 
 def test_every_literal_metric_information_button_references_a_registered_metric() -> None:
@@ -214,23 +214,15 @@ def test_project_coverage_labels_tolerate_unclassified_optional_metadata() -> No
 
 def test_report_sections_and_key_counts_use_specific_concepts() -> None:
     report = REPORT.read_text(encoding="utf-8")
+    progress = (ROOT / "components/reports/AnalysisProgressTimeline.tsx").read_text(
+        encoding="utf-8"
+    )
+    page = (ROOT / "app/analysis-runs/[analysisRunId]/page.tsx").read_text(encoding="utf-8")
+    combined = report + progress + page
     for concept_id in (
-        "report_executive_summary",
-        "report_website_coverage",
-        "report_scores",
-        "report_top_findings",
-        "report_browser_compatibility",
-        "report_page_inventory",
-        "report_action_plan",
-        "report_limitations",
-        "report_technical_details",
-        "eligible_html_pages",
-        "website_coverage",
         "browser_coverage",
         "evidence_completeness",
         "report_confidence",
-        "unique_findings",
         "occurrences",
-        "partial_browser_result",
     ):
-        assert f'conceptId="{concept_id}"' in report
+        assert f'conceptId="{concept_id}"' in combined

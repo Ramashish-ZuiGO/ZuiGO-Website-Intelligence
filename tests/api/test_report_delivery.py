@@ -561,7 +561,7 @@ def test_html_pdf_json_artifacts_checksums_safety_and_repeatability(
     assert "password" not in html_text.casefold()
     assert artifacts["pdf"].content.startswith(b"%PDF-1.4")
     assert b"Page 1 of " in artifacts["pdf"].content
-    assert b"Table of contents" in artifacts["pdf"].content
+    assert b"CONTENTS" in artifacts["pdf"].content
     json_payload = json.loads(artifacts["json"].content)
     assert json_payload["schema_version"] == "1.1.0"
     assert len(json_payload["sections"]) == 16
@@ -836,3 +836,182 @@ def test_models_migration_no_private_reasoning_and_formulas_unchanged() -> None:
         "seo": 20,
         "technical_quality": 20,
     }
+
+
+def test_primary_pdf_immutable_across_future_template_version(
+    report_api: tuple[
+        TestClient,
+        sessionmaker[Session],
+        uuid.UUID,
+        uuid.UUID,
+        uuid.UUID,
+        list[tuple[str, str, int]],
+    ],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Item 4C: after a future template-version change, a historical report must
+    not silently re-render under new layout code. The version-aware guard serves
+    the frozen stored artifact captured at generation time instead.
+    """
+    from app.api.routes import report_delivery as report_routes
+
+    client, factory, _project_id, _website_id, run_id, _dispatched = report_api
+    report = _generate_completed_report(factory, run_id, key="immutable-pdf")
+    report_id = report.report_id
+    stored_pdf = {item.format: item for item in report.artifacts}["pdf"]
+
+    # Baseline download today (versions match -> on-the-fly render == stored bytes).
+    baseline = client.get(f"/api/v1/reports/{report_id}/download/pdf")
+    assert baseline.status_code == 200
+    assert baseline.content == stored_pdf.content
+    assert baseline.headers["x-content-sha256"] == stored_pdf.checksum_sha256
+
+    # Simulate a future release: the template version advanced AND the on-the-fly
+    # renderer now emits different bytes (a layout change).
+    monkeypatch.setattr(report_routes, "TEMPLATE_VERSION", "9.9.9")
+    monkeypatch.setattr(
+        report_routes,
+        "render_additional_report_artifact",
+        lambda fmt, snapshot: (b"%PDF-1.4 DRIFTED", "application/pdf", "drift.pdf"),
+    )
+    guarded = client.get(f"/api/v1/reports/{report_id}/download/pdf")
+    assert guarded.status_code == 200
+    # The guard must return the frozen stored bytes, not the drifted render.
+    assert guarded.content == stored_pdf.content
+    assert guarded.content != b"%PDF-1.4 DRIFTED"
+    assert guarded.headers["x-content-sha256"] == stored_pdf.checksum_sha256
+
+
+def test_canonical_report_architecture_contract(
+    report_api: tuple[
+        TestClient,
+        sessionmaker[Session],
+        uuid.UUID,
+        uuid.UUID,
+        uuid.UUID,
+        list[tuple[str, str, int]],
+    ],
+) -> None:
+    """Report-architecture hardening: canonical finding totals, machine-readable
+    completion semantics, locked branded Browser UAT, terminal report agent,
+    WebIQ branding, and no sanitizer placeholders in customer limitations."""
+    _client, factory, _project_id, _website_id, run_id, _dispatched = report_api
+    report = _generate_completed_report(factory, run_id, key="architecture-contract")
+    snapshot = report.snapshot.snapshot_payload
+
+    # Customer branding is canonical, not renderer-local.
+    assert snapshot["product_name"] == "ZuiGO WebIQ"
+
+    # Canonical unique-finding vs occurrence contract.
+    totals = snapshot["finding_totals"]
+    section_map = {s["section_key"]: s for s in snapshot["sections"]}
+    findings = section_map["page_level_findings"]["content"]["findings"]
+    assert totals["total_unique_findings"] == len(findings)
+    assert totals["occurrence_count"] == sum(
+        len(item.get("exact_occurrences") or []) for item in findings
+    )
+    assert isinstance(totals["severity_totals"], dict)
+    assert totals["top_finding_count"] >= 0
+
+    # Machine-readable completion semantics with limitation reasons.
+    completion = snapshot["completion"]
+    assert completion["analysis_status"] in {
+        "complete",
+        "completed_with_limitations",
+        "failed",
+        "inconclusive",
+    }
+    for reason in completion["limitation_reasons"]:
+        assert reason["kind"] in {
+            "required",
+            "optional",
+            "optional_infrastructure",
+            "not_applicable",
+        }
+        assert reason["code"] and reason["message"] and reason["component"]
+    # Browser UAT completeness is independently visible and never blocks reports.
+    assert completion["browser_uat"]["status"] in {
+        "complete",
+        "partially_verified",
+        "not_verified",
+    }
+
+    # Locked branded Browser UAT scope in the snapshot.
+    uat = snapshot["browser_compatibility"]["browser_uat"]
+    assert uat["scope_locked"] is True
+    browsers = [entry["browser"] for entry in uat["matrix"]]
+    assert browsers == ["Google Chrome", "Microsoft Edge", "Apple Safari"]
+    for entry in uat["matrix"]:
+        assert entry["verification_state"] in {
+            "VERIFIED",
+            "PARTIALLY_VERIFIED",
+            "NOT_VERIFIED",
+            "UNAVAILABLE_IN_CURRENT_ENVIRONMENT",
+            "NOT_TESTED",
+        }
+        assert entry["uat_date"]
+        assert entry["page_coverage"]["passed_pages"] == 0  # nothing branded ran
+    # Firefox is never a customer-facing UAT browser.
+    assert all("Firefox" not in b for b in browsers)
+
+    # A completed immutable report never claims its own report agent is running.
+    agents = section_map["multi_agent_execution"]["content"]["agents"]
+    report_agent = next(a for a in agents if a["agent_id"] == "report_agent")
+    assert report_agent["status"] not in {"running", "pending"}
+
+    # No sanitizer placeholder leaks into customer limitations.
+    for limitation in snapshot["limitations"]:
+        assert "[PRIVATE REASONING OMITTED]" not in limitation
+        assert "[REDACTED]" not in limitation
+
+
+def test_artifacts_reconcile_with_canonical_totals(
+    report_api: tuple[
+        TestClient,
+        sessionmaker[Session],
+        uuid.UUID,
+        uuid.UUID,
+        uuid.UUID,
+        list[tuple[str, str, int]],
+    ],
+) -> None:
+    """The same immutable report reconciles across PDF, HTML, JSON, and the
+    Technical Appendix: unique-finding totals agree, every unique finding
+    appears in the client PDF register, and no old branding remains."""
+    from app.services.report_delivery import (
+        _technical_appendix_pdf,
+        render_additional_report_artifact,
+    )
+
+    _client, factory, _project_id, _website_id, run_id, _dispatched = report_api
+    report = _generate_completed_report(factory, run_id, key="artifact-reconcile")
+    snapshot = report.snapshot.snapshot_payload
+    totals = snapshot["finding_totals"]
+    section_map = {s["section_key"]: s for s in snapshot["sections"]}
+    findings = section_map["page_level_findings"]["content"]["findings"]
+
+    artifacts = {item.format: item.content for item in report.artifacts}
+    pdf_text = artifacts["pdf"].decode("latin-1", errors="replace")
+    html_text = artifacts["html"].decode("utf-8", errors="replace")
+    json_payload = json.loads(artifacts["json"])
+
+    # JSON is the canonical snapshot itself.
+    assert json_payload["finding_totals"] == totals
+    # The client PDF register names every unique finding.
+    assert f"{totals['total_unique_findings']} unique findings" in pdf_text
+    for finding in findings:
+        title = str(finding.get("issue_title") or "")[:30]
+        if title:
+            assert title in pdf_text or title in html_text
+    # Branded UAT section present; engine names are not the customer matrix.
+    assert "BROWSER UAT - REQUIRED SCOPE" in pdf_text
+    assert "Google Chrome" in pdf_text
+    assert "Apple Safari" in pdf_text
+    # Old product branding is gone from customer artifacts.
+    assert "ZuiGO Website Intelligence" not in html_text
+    assert "ZuiGO WebIQ" in html_text
+    # Appendix keeps every occurrence (evidence completeness).
+    appendix_text = _technical_appendix_pdf(snapshot).decode("latin-1", errors="replace")
+    assert "TECHNICAL APPENDIX" in appendix_text
+    pdf_bytes, _media, _name = render_additional_report_artifact("pdf", snapshot)
+    assert pdf_bytes == artifacts["pdf"]

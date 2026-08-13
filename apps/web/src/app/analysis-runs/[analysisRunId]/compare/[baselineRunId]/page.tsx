@@ -10,6 +10,7 @@ import type {
 } from "@/components/comparisons/types";
 import { analysisComparisonApi } from "@/lib/analysis-comparison-api";
 import { ApiError } from "@/lib/api";
+import { SectionErrorBoundary } from "@/components/SectionErrorBoundary";
 
 function score(value: number | null): string {
   return value === null ? "Not comparable" : `${value}/100`;
@@ -196,7 +197,7 @@ export default function AnalysisComparisonPage() {
         )}
       </section>
 
-      <section className="mt-6 rounded-2xl border bg-white p-6" id="scores">
+      <SectionErrorBoundary sectionName="Score Comparison"><section className="mt-6 rounded-2xl border bg-white p-6" id="scores">
         <h2 className="text-2xl font-bold">Score comparison</h2>
         <div className="mt-4 grid gap-4 sm:grid-cols-3">
           <div><p className="text-sm">Before</p><p className="text-4xl font-bold">{score(payload.scores.overall_score_before)}</p></div>
@@ -216,12 +217,12 @@ export default function AnalysisComparisonPage() {
         <div className="mt-5 overflow-x-auto">
           <table className="w-full min-w-[42rem] border-collapse text-left">
             <thead><tr>{["Category", "Before", "After", "Change", "Status before / after", "Direction"].map((item) => <th className="border bg-slate-100 p-3" key={item} scope="col">{item}</th>)}</tr></thead>
-            <tbody>{payload.scores.categories.map((item) => <tr key={item.category}><th className="border p-3 capitalize" scope="row">{item.category}</th><td className="border p-3">{score(item.score_before)}</td><td className="border p-3">{score(item.score_after)}</td><td className="border p-3">{delta(item.delta)}</td><td className="border p-3">{item.status_before ?? "Unavailable"} / {item.status_after ?? "Unavailable"}</td><td className="border p-3">{item.direction}</td></tr>)}</tbody>
+            <tbody>{(Array.isArray(payload.scores.categories) ? payload.scores.categories : []).map((item) => <tr key={item.category}><th className="border p-3 capitalize" scope="row">{item.category}</th><td className="border p-3">{score(item.score_before)}</td><td className="border p-3">{score(item.score_after)}</td><td className="border p-3">{delta(item.delta)}</td><td className="border p-3">{item.status_before ?? "Unavailable"} / {item.status_after ?? "Unavailable"}</td><td className="border p-3">{item.direction}</td></tr>)}</tbody>
           </table>
         </div>
-      </section>
+      </section></SectionErrorBoundary>
 
-      <section className="mt-6 rounded-2xl border bg-white p-6" id="coverage">
+      <SectionErrorBoundary sectionName="Coverage Comparison"><section className="mt-6 rounded-2xl border bg-white p-6" id="coverage">
         <h2 className="text-2xl font-bold">Page coverage comparison</h2>
         <p className="mt-2 font-semibold">{payload.coverage.direction}</p>
         <dl className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
@@ -231,30 +232,30 @@ export default function AnalysisComparisonPage() {
           })}
         </dl>
         {payload.coverage.limitation && <p className="mt-4 text-amber-900">{payload.coverage.limitation}</p>}
-      </section>
+      </section></SectionErrorBoundary>
 
-      <section className="mt-6 rounded-2xl border bg-white p-6" id="browsers">
+      <SectionErrorBoundary sectionName="Browser Compatibility Comparison"><section className="mt-6 rounded-2xl border bg-white p-6" id="browsers">
         <h2 className="text-2xl font-bold">Browser compatibility comparison</h2>
         <div className="mt-4 overflow-x-auto">
           <table className="w-full min-w-[58rem] border-collapse text-left">
             <thead><tr>{["Browser", "Tested before / after", "Passed before / after", "Partial before / after", "Failed before / after", "Unavailable or inconclusive before / after", "Result"].map((item) => <th className="border bg-slate-100 p-3" key={item} scope="col">{item}</th>)}</tr></thead>
-            <tbody>{payload.browser_compatibility.engines.map((engine) => <tr key={engine.engine}><th className="border p-3 capitalize" scope="row">{engine.engine}</th><td className="border p-3">{engine.before.tested} / {engine.after.tested}</td><td className="border p-3">{engine.before.passed} / {engine.after.passed}</td><td className="border p-3">{engine.before.partial} / {engine.after.partial}</td><td className="border p-3">{engine.before.failed} / {engine.after.failed}</td><td className="border p-3">{(engine.before.unavailable ?? 0) + (engine.before.inconclusive ?? 0)} / {(engine.after.unavailable ?? 0) + (engine.after.inconclusive ?? 0)}</td><td className="border p-3">{engine.direction}{engine.limitation && <span className="mt-1 block text-xs text-amber-900">{engine.limitation}</span>}</td></tr>)}</tbody>
+            <tbody>{(Array.isArray(payload.browser_compatibility?.engines) ? payload.browser_compatibility.engines : []).map((engine) => <tr key={engine.engine}><th className="border p-3 capitalize" scope="row">{engine.engine}</th><td className="border p-3">{engine.before.tested} / {engine.after.tested}</td><td className="border p-3">{engine.before.passed} / {engine.after.passed}</td><td className="border p-3">{engine.before.partial} / {engine.after.partial}</td><td className="border p-3">{engine.before.failed} / {engine.after.failed}</td><td className="border p-3">{(engine.before.unavailable ?? 0) + (engine.before.inconclusive ?? 0)} / {(engine.after.unavailable ?? 0) + (engine.after.inconclusive ?? 0)}</td><td className="border p-3">{engine.direction}{engine.limitation && <span className="mt-1 block text-xs text-amber-900">{engine.limitation}</span>}</td></tr>)}</tbody>
           </table>
         </div>
-      </section>
+      </section></SectionErrorBoundary>
 
-      <div className="mt-6 grid gap-6" id="findings">
+      <SectionErrorBoundary sectionName="Finding Changes"><div className="mt-6 grid gap-6" id="findings">
         <FindingGroup empty="No finding was safely classified as resolved." findings={payload.findings.resolved} title="Resolved findings" />
         <FindingGroup empty="No persistent findings were retained." findings={payload.findings.persistent} title="Persistent findings" />
         <FindingGroup empty="No new findings were supported by comparable evidence." findings={payload.findings.new} title="New findings" />
         <FindingGroup empty="No evidence-backed regression was retained." findings={payload.findings.regressions} title="Regressions" />
         <FindingGroup empty="No inconclusive finding changes were retained." findings={payload.findings.inconclusive} title="Inconclusive changes" />
-      </div>
+      </div></SectionErrorBoundary>
 
-      <section className="mt-6 rounded-2xl border bg-white p-6" id="action-plan">
+      <SectionErrorBoundary sectionName="Action Plan Progress"><section className="mt-6 rounded-2xl border bg-white p-6" id="action-plan">
         <h2 className="text-2xl font-bold">Action Plan progress</h2>
         <ul className="mt-4 grid gap-3">
-          {payload.action_plan.map((action, index) => (
+          {(Array.isArray(payload.action_plan) ? payload.action_plan : []).map((action, index) => (
             <li className="rounded-xl bg-slate-50 p-4" key={`${action.title}-${index}`}>
               <h3 className="font-bold">{action.title}</h3>
               <p className="mt-1">{action.classification}</p>
@@ -263,23 +264,23 @@ export default function AnalysisComparisonPage() {
             </li>
           ))}
         </ul>
-      </section>
+      </section></SectionErrorBoundary>
 
-      <section className="mt-6 rounded-2xl border bg-amber-50 p-6" id="limitations">
+      <SectionErrorBoundary sectionName="Evidence Limitations"><section className="mt-6 rounded-2xl border bg-amber-50 p-6" id="limitations">
         <h2 className="text-2xl font-bold">Evidence limitations</h2>
-        <ul className="mt-3 list-disc space-y-2 pl-6">{payload.limitations.map((item) => <li key={item}>{item}</li>)}</ul>
-      </section>
+        <ul className="mt-3 list-disc space-y-2 pl-6">{(Array.isArray(payload.limitations) ? payload.limitations : []).map((item) => <li key={item}>{item}</li>)}</ul>
+      </section></SectionErrorBoundary>
 
-      <section className="mt-6 rounded-2xl border bg-white p-6" id="exports">
+      <SectionErrorBoundary sectionName="Export Comparison"><section className="mt-6 rounded-2xl border bg-white p-6" id="exports">
         <h2 className="text-2xl font-bold">Export comparison</h2>
         <div className="mt-4 flex flex-wrap gap-3">
-          {comparison.artifacts.map((artifact) => (
+          {(Array.isArray(comparison.artifacts) ? comparison.artifacts : []).map((artifact) => (
             <a className="rounded-lg border border-slate-800 px-4 py-2 font-semibold focus-visible:outline-4" href={analysisComparisonApi.downloadUrl(comparison.comparison_id, artifact.format)} key={artifact.format}>
               Comparison {artifact.format.toUpperCase()}
             </a>
           ))}
         </div>
-      </section>
+      </section></SectionErrorBoundary>
     </main>
   );
 }

@@ -518,7 +518,12 @@ def run_analysis(analysis_run_id: str) -> dict[str, str]:
                             analysis_run_id=run_id,
                         )
                         process_lighthouse_accessibility(
-                            db_session, run_id, context["website_id"], lighthouse_data
+                            db_session,
+                            run_id,
+                            context["website_id"],
+                            str(playwright_data["final_url"]),
+                            lighthouse_data,
+                            analysis_run_id=run_id,
                         )
                 except Exception as e:
                     logger.error(f"Failed to collect lighthouse evidence: {e}")

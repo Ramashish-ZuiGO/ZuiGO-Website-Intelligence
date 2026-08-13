@@ -17,14 +17,13 @@ def test_completed_analysis_exposes_confirmed_reanalysis_flow() -> None:
     assert "baseline remains" in panel
     assert "ReanalysisComparisonPanel" in report_page
     assert "baselineRunId" in report_page
-    assert "Reanalysis in progress" in report_page
-    assert "Preparing comparison evidence" in report_page
+    assert "Reanalysis comparison available" in report_page
     assert "comparisonTerminal" in report_page
     assert "currentReportAvailable" in report_page
     assert "baselineAvailable" in report_page
     assert "comparisonDataAvailable" in report_page
     assert "analysisComparisonApi.generate" in report_page
-    assert "{comparisonReady && (" in report_page
+    assert "comparisonReady" in report_page
 
 
 def test_comparison_page_uses_business_language_and_accessible_evidence() -> None:

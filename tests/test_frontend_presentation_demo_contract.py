@@ -23,7 +23,7 @@ def test_presentation_entry_actions_and_api_contract() -> None:
     component = PRESENTATION.read_text(encoding="utf-8")
     client = API_CLIENT.read_text(encoding="utf-8")
     home = HOME.read_text(encoding="utf-8")
-    assert "Open presentation mode" in home
+    assert "Open Prepared Demo" in home
     assert 'href="/presentation"' in home
     for label in (
         "Run Demo Analysis",

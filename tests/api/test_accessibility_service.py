@@ -86,6 +86,60 @@ def test_process_axe_results_idempotency_and_normalization(db_session):
     assert audit1.created_at == audit2.created_at
 
 
+def test_process_axe_results_handles_nested_iframe_target_selectors(db_session):
+    """Regression: axe-core `target` entries are `str | list[str]`; nested lists
+    occur for elements inside iframes/shadow DOM and previously crashed the
+    evidence collector with 'sequence item 0: expected str instance, list found'.
+    """
+    from app.models.accessibility import AccessibilityNode
+    from app.models.project import Project
+
+    website_id = uuid.uuid4()
+    p = Project(id=uuid.uuid4(), name="Test Project")
+    db_session.add(p)
+    w = Website(id=website_id, project_id=p.id, name="Test", url="https://example.com")
+    db_session.add(w)
+    db_session.flush()
+
+    execution_id = uuid.uuid4()
+    axe_data = {
+        "violations": [
+            {
+                "id": "color-contrast",
+                "description": "Elements must have sufficient contrast",
+                "help": "Fix contrast",
+                "helpUrl": "https://example.com/help",
+                "impact": "serious",
+                "tags": ["wcag2aa", "wcag143"],
+                "nodes": [
+                    {
+                        "html": "<a>link</a>",
+                        "failureSummary": "Fix any of the following",
+                        # Nested target: element inside an iframe.
+                        "target": [["#payment-frame", "a.cta"]],
+                    },
+                    {
+                        "html": "<button>ok</button>",
+                        "failureSummary": "Fix any of the following",
+                        # Plain string target (non-nested) still works.
+                        "target": ["button.ok"],
+                    },
+                ],
+            }
+        ],
+        "passes": [],
+        "incomplete": [],
+        "inapplicable": [],
+    }
+
+    process_axe_results(db_session, execution_id, website_id, "https://example.com", axe_data)
+
+    nodes = db_session.execute(select(AccessibilityNode)).scalars().all()
+    selectors = {n.normalized_selector for n in nodes}
+    assert "#payment-frame a.cta" in selectors
+    assert "button.ok" in selectors
+
+
 def test_process_lighthouse_accessibility(db_session):
     website_id = uuid.uuid4()
     from app.models.project import Project

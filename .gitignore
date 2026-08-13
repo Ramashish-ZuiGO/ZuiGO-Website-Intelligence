@@ -34,3 +34,10 @@ htmlcov/
 .local-reports/
 
 *.tsbuildinfo
+
+# Local AI tooling
+.claude/
+
+# Python generated cache
+__pycache__/
+*.pyc

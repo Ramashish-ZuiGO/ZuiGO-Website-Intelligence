@@ -22,6 +22,44 @@ def register_error_handlers(application: FastAPI) -> None:
     application.add_exception_handler(Exception, unexpected_error_handler)
 
 
+class UnexpectedErrorEnvelopeMiddleware:
+    """Convert unhandled exceptions to the sanitized 500 inside the stack.
+
+    Starlette's catch-all ``Exception`` handler runs in the outermost
+    ``ServerErrorMiddleware`` — outside ``CORSMiddleware`` — so its responses
+    reach browsers without CORS headers and allowed origins misreport backend
+    500s as CORS failures. This pure-ASGI middleware is registered inside the
+    CORS layer: it produces the SAME sanitized response (same logging, same
+    request-id correlation, no stack details) so CORS headers are applied for
+    allowed origins. The framework-level handler remains as the final net.
+    """
+
+    def __init__(self, app) -> None:  # noqa: ANN001 - ASGI app callable
+        self.app = app
+
+    async def __call__(self, scope, receive, send) -> None:  # noqa: ANN001
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        response_started = False
+
+        async def tracking_send(message) -> None:  # noqa: ANN001
+            nonlocal response_started
+            if message["type"] == "http.response.start":
+                response_started = True
+            await send(message)
+
+        try:
+            await self.app(scope, receive, tracking_send)
+        except Exception as exception:
+            # A partially sent response cannot be replaced; let the outer
+            # framework layer terminate the connection.
+            if response_started:
+                raise
+            response = await unexpected_error_handler(Request(scope, receive), exception)
+            await response(scope, receive, send)
+
+
 def error_response(
     request: Request,
     *,

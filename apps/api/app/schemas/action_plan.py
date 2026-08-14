@@ -137,7 +137,10 @@ class ActionPlanSummary(BaseModel):
     grouped_issues: int
     average_priority: float | None
     generation_status: str | None
-    generation_coverage: int | None
+    # Percentage rounded to one decimal (e.g. 97.8). A partially generated
+    # action plan legitimately yields a fractional value; typing this as int
+    # made every non-whole coverage fail response validation with a 500.
+    generation_coverage: float | None
 
 
 class PaginatedResponse(BaseModel):

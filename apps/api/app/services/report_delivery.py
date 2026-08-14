@@ -771,9 +771,17 @@ def _real_evidence_summary(
             AgentArtifact.artifact_type == "browser_compatibility_evidence",
         )
     )
+    # Completed stages persist a full evidence artifact. While the stage is
+    # still running (or was interrupted) only the journey's incremental
+    # progress block exists — use it so live counters are truthful instead of
+    # reporting a false unavailable/0-tested state (Fluid Controls liveness
+    # regression).
+    live_browser_progress = workflow.structured_output.get("browser_compatibility")
     browser = (
         dict(browser_artifact.artifact_metadata)
         if browser_artifact
+        else dict(live_browser_progress)
+        if isinstance(live_browser_progress, dict) and live_browser_progress.get("engines")
         else {
             "status": "unavailable",
             "engines": [],
@@ -947,7 +955,15 @@ def _real_evidence_summary(
     browser_engines = []
     for engine in workflow.structured_input.get("browser_engines", []):
         row = engine_rows.get(engine, {})
-        tested_pages = len(tested_urls_by_engine.get(engine, set()))
+        # Live/interrupted browser stages persist incremental per-engine
+        # counters via the progress callback, while full observation lists are
+        # only written at stage completion. Use whichever evidence is larger so
+        # an in-flight (or interrupted) stage never truthlessly reports 0
+        # tested pages when work demonstrably happened.
+        tested_pages = max(
+            len(tested_urls_by_engine.get(engine, set())),
+            int(row.get("tested_pages") or 0),
+        )
         browser_stage_unavailable = browser.get("status") == "unavailable"
         all_unavailable = browser_stage_unavailable or (
             engine in unavailable_engines and tested_pages == 0

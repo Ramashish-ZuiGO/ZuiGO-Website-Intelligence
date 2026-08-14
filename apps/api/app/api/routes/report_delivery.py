@@ -863,7 +863,14 @@ def workflow_progress(
                     )
                 ),
                 "attempted_pages": min(engine_eligible_count, attempted_pages),
-                "tested_pages": min(engine_eligible_count, len(tested_urls)),
+                # Live stages persist incremental per-engine counters while full
+                # observation lists arrive only at stage completion; report the
+                # larger truthful value so an in-flight stage never shows a
+                # false 0-tested state (Fluid Controls liveness regression).
+                "tested_pages": min(
+                    engine_eligible_count,
+                    max(len(tested_urls), int(row.get("tested_pages") or 0)),
+                ),
                 "passed_pages": int(row.get("passed_pages", states.count("compatible"))),
                 "partial_pages": int(
                     row.get(

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type {
   DeliveredReport,
@@ -1235,6 +1235,8 @@ export function ReportDeliveryPanel({
   const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState(false);
+  const [pendingAction, setPendingAction] = useState<"cancel" | "resume" | null>(null);
+  const [pollEpoch, setPollEpoch] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [progressInterrupted, setProgressInterrupted] = useState(false);
@@ -1300,10 +1302,12 @@ export function ReportDeliveryPanel({
     };
   }, [loadReports]);
 
+  const latestProgressRef = useRef<WorkflowProgress | null>(null);
   const loadProgress = useCallback(async (): Promise<boolean> => {
     if (!resolvedExecutionId) return true;
     try {
       const current = await reportDeliveryApi.progress(resolvedExecutionId);
+      latestProgressRef.current = current;
       setProgress(current);
       if (current.analysis_run_id) setAnalysisId(current.analysis_run_id);
       setProgressInterrupted(false);
@@ -1333,8 +1337,24 @@ export function ReportDeliveryPanel({
       const succeeded = await loadProgress();
       if (cancelled) return;
       failureCount = succeeded ? 0 : failureCount + 1;
+      const latest = latestProgressRef.current;
+      // Fully final success: nothing can change anymore, stop polling entirely.
+      if (
+        succeeded &&
+        latest &&
+        ["completed", "partial"].includes(latest.status) &&
+        latest.progress_percentage === 100
+      ) {
+        return;
+      }
+      // Terminal-but-recoverable states (failed/cancelled/stale) poll slowly so
+      // an out-of-band recovery still surfaces without loading the API.
+      const terminalButRecoverable =
+        succeeded && latest && TERMINAL_STATUSES.includes(latest.status);
       const delay = succeeded
-        ? 2_000
+        ? terminalButRecoverable
+          ? 15_000
+          : 2_000
         : Math.min(15_000, 2_000 * 2 ** Math.min(failureCount - 1, 3));
       timer = window.setTimeout(() => void poll(), delay);
     }
@@ -1344,7 +1364,7 @@ export function ReportDeliveryPanel({
       cancelled = true;
       if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [loadProgress, resolvedExecutionId]);
+  }, [loadProgress, resolvedExecutionId, pollEpoch]);
 
   useEffect(() => {
     if (!progress || !TERMINAL_STATUSES.includes(progress.status)) return;
@@ -1423,8 +1443,9 @@ export function ReportDeliveryPanel({
   }
 
   async function performWorkflowAction(action: "cancel" | "resume") {
-    if (!resolvedExecutionId) return;
+    if (!resolvedExecutionId || acting) return;
     setActing(true);
+    setPendingAction(action);
     setError(null);
     setNotice(null);
     try {
@@ -1435,9 +1456,12 @@ export function ReportDeliveryPanel({
       setNotice(
         action === "cancel"
           ? "The workflow cancellation was recorded without deleting evidence."
-          : `The workflow was queued for a safe retry from retained state (${statusLabel(result.status)}).`,
+          : `The workflow was queued for a safe retry from retained state (${statusLabel(result.status)}). Completed analysis work is preserved.`,
       );
       await loadProgress();
+      // Recovery can move a terminal execution back to pending/running, so the
+      // polling loop is restarted after any workflow action.
+      setPollEpoch((value) => value + 1);
     } catch (requestError) {
       setError(
         requestError instanceof Error
@@ -1446,6 +1470,7 @@ export function ReportDeliveryPanel({
       );
     } finally {
       setActing(false);
+      setPendingAction(null);
     }
   }
 
@@ -1504,6 +1529,7 @@ export function ReportDeliveryPanel({
           <AnalysisProgressTimeline
             progress={progress}
             acting={acting}
+            pendingAction={pendingAction}
             onPerformAction={performWorkflowAction}
           />
         ) : (

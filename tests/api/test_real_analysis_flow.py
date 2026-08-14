@@ -631,3 +631,101 @@ def test_progress_counts_use_page_attempts_and_explain_page_limit(
         assert execution is not None
         assert execution.structured_output["journey_status"] == "queued"
         assert execution.provider_version_metadata["dispatch_count"] == 2
+
+
+def test_live_browser_stage_counters_use_persisted_incremental_progress(
+    real_analysis_api: tuple[
+        TestClient,
+        sessionmaker[Session],
+        list[tuple[str, ...]],
+    ],
+) -> None:
+    """Liveness regression (Fluid Controls stall): during a live or interrupted
+    browser stage, full observation lists are not yet persisted but the
+    per-engine incremental counters are. The progress endpoint must report
+    those counters instead of a false 0-tested state."""
+    client, factory, _dispatched = real_analysis_api
+    started = client.post(
+        "/api/v1/analysis/start",
+        json={
+            "website_url": "example.com",
+            "idempotency_key": "liveness-counters",
+            "browser_engines": ["chromium", "webkit"],
+        },
+    ).json()
+    now = datetime.now(UTC)
+    with factory() as db:
+        discovery = db.get(DiscoveryRun, uuid.UUID(started["discovery_run_id"]))
+        execution = db.scalar(
+            select(AgentExecution).where(
+                AgentExecution.execution_id == uuid.UUID(started["workflow_execution_id"])
+            )
+        )
+        assert discovery is not None and execution is not None
+        discovery.status = "completed"
+        discovery.progress_percent = 100
+        discovery.completed_at = now
+        pages = []
+        for index in range(5):
+            page = WebsitePage(
+                website_id=uuid.UUID(started["website_id"]),
+                normalized_url=f"https://example.com/live-{index}",
+                original_url=f"https://example.com/live-{index}",
+                page_type="content",
+                discovery_source="crawl",
+                discovery_evidence=[],
+                crawl_depth=0 if index == 0 else 1,
+                origin_relation="same_origin",
+                eligibility_status="eligible",
+                last_discovery_run_id=discovery.id,
+                first_discovered_at=now,
+                last_discovered_at=now,
+            )
+            db.add(page)
+            pages.append(page)
+        db.flush()
+        for page in pages:
+            db.add(
+                PageAnalysisRun(
+                    website_page_id=page.id,
+                    discovery_run_id=discovery.id,
+                    page_analysis_execution_id=uuid.UUID(started["page_analysis_execution_id"]),
+                    analysis_level=1,
+                    status="completed",
+                    analysis_started_at=now,
+                    analysis_completed_at=now,
+                    requested_url=page.normalized_url,
+                    final_url=page.normalized_url,
+                    http_status_code=200,
+                )
+            )
+        output = dict(execution.structured_output)
+        output.update(
+            {
+                "journey_stage": "browser_compatibility",
+                "journey_status": "running",
+                "journey_updated_at": now.isoformat(),
+                "completed_stage_ids": ["setup", "website_discovery", "page_analysis"],
+                "browser_compatibility": {
+                    "status": "running",
+                    "eligible_page_count": 5,
+                    # Incremental counters persisted by the stage progress
+                    # callback; no observations yet (stage still running).
+                    "engines": [
+                        {"engine": "chromium", "attempted_pages": 3, "tested_pages": 3},
+                        {"engine": "webkit", "attempted_pages": 2, "tested_pages": 2},
+                    ],
+                },
+            }
+        )
+        execution.structured_output = output
+        execution.status = "running"
+        db.commit()
+
+    payload = client.get(
+        f"/api/v1/workflow-executions/{started['workflow_execution_id']}/progress"
+    ).json()
+    engines = {item["engine"]: item for item in payload["browser_engine_progress"]["engines"]}
+    assert engines["chromium"]["tested_pages"] == 3
+    assert engines["webkit"]["tested_pages"] == 2
+    assert engines["chromium"]["availability_status"] == "available"

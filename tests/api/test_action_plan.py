@@ -1123,3 +1123,89 @@ class TestModelDefinitions:
         assert "affected_page_count" in ag_table.columns
         assert "evidence_summary" in ag_table.columns
         assert "priority_components" in ag_table.columns
+
+
+class TestActionPlanLifecycleSafety:
+    """Generic lifecycle-safety regression: the summary endpoint must return
+    valid typed data for every analysis lifecycle state and never 500 merely
+    because action-plan data is partial or not ready."""
+
+    def test_summary_with_fractional_generation_coverage(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        """Regression: a partially generated action plan yields fractional
+        coverage (e.g. 44/45 -> 97.8%), which previously failed response-model
+        validation (`generation_coverage: int`) and surfaced as HTTP 500."""
+        website = create_website(db_session)[1]
+        gen_exec = ActionGenerationExecution(
+            id=uuid.uuid4(),
+            website_id=website.id,
+            page_analysis_execution_id=uuid.uuid4(),
+            status="partial",
+            total_findings_processed=45,
+            total_actions_generated=44,
+        )
+        db_session.add(gen_exec)
+        db_session.commit()
+
+        response = client.get(f"/api/v1/websites/{website.id}/action-plan/summary")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["generation_status"] == "partial"
+        assert data["generation_coverage"] == 97.8
+        assert data["total_actions"] == 0
+
+    def test_summary_running_analysis_without_generation_is_typed_not_ready(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        """While an analysis is still running and no action generation exists,
+        the summary is a valid typed empty/not-ready payload, never a 500."""
+        website = create_website(db_session)[1]
+        create_discovery_run(db_session, website)
+        response = client.get(f"/api/v1/websites/{website.id}/action-plan/summary")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["generation_execution_id"] is None
+        assert data["generation_status"] is None
+        assert data["generation_coverage"] is None
+        assert data["total_actions"] == 0
+
+    def test_summary_whole_number_coverage_still_valid(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        website = create_website(db_session)[1]
+        gen_exec = ActionGenerationExecution(
+            id=uuid.uuid4(),
+            website_id=website.id,
+            page_analysis_execution_id=uuid.uuid4(),
+            status="completed",
+            total_findings_processed=40,
+            total_actions_generated=40,
+        )
+        db_session.add(gen_exec)
+        db_session.commit()
+
+        response = client.get(f"/api/v1/websites/{website.id}/action-plan/summary")
+        assert response.status_code == 200
+        assert response.json()["generation_coverage"] == 100.0
+
+    def test_summary_zero_findings_processed_reports_null_coverage(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        """A generation that processed no findings cannot claim coverage —
+        the value stays a typed null rather than a fabricated percentage."""
+        website = create_website(db_session)[1]
+        gen_exec = ActionGenerationExecution(
+            id=uuid.uuid4(),
+            website_id=website.id,
+            page_analysis_execution_id=uuid.uuid4(),
+            status="completed",
+            total_findings_processed=0,
+            total_actions_generated=0,
+        )
+        db_session.add(gen_exec)
+        db_session.commit()
+
+        response = client.get(f"/api/v1/websites/{website.id}/action-plan/summary")
+        assert response.status_code == 200
+        assert response.json()["generation_coverage"] is None

@@ -763,6 +763,26 @@ def build_comparison_payload(
     return payload, limitations
 
 
+def _new_and_regressed(findings: dict[str, Any]) -> list[dict[str, Any]]:
+    """Aggregate section list without within-section duplicates.
+
+    ``regressions`` intentionally aggregates severity-worsened persistents and
+    comparable new findings; its entries are the same objects already present
+    in ``new`` or ``persistent``. Rendering a section titled "New findings and
+    regressions" must therefore list each entry once: all ``new`` entries plus
+    only the regression entries that are not already in ``new``.
+    """
+
+    def _identity(item: dict[str, Any]) -> str:
+        return json.dumps(item, sort_keys=True, default=str)
+
+    new_items = list(findings.get("new") or [])
+    seen = {_identity(item) for item in new_items}
+    return new_items + [
+        item for item in (findings.get("regressions") or []) if _identity(item) not in seen
+    ]
+
+
 def _html_document(payload: dict[str, Any]) -> bytes:
     def finding_list(title: str, values: list[dict[str, Any]]) -> str:
         rows = "".join(
@@ -828,7 +848,7 @@ a:focus,summary:focus{{outline:3px solid #c2410c;outline-offset:3px}}section{{ma
 <section><h2>Browser compatibility</h2><table><thead><tr><th>Engine</th><th>Tested before</th><th>Tested after</th><th>Direction</th></tr></thead><tbody>{browser_rows}</tbody></table></section>
 {finding_list("Resolved findings", payload["findings"]["resolved"])}
 {finding_list("Persistent findings", payload["findings"]["persistent"])}
-{finding_list("New findings and regressions", [*payload["findings"]["new"], *payload["findings"]["regressions"]])}
+{finding_list("New findings and regressions", _new_and_regressed(payload["findings"]))}
 <section><h2>Action Plan progress</h2><ul>{actions or "<li>No comparable actions.</li>"}</ul></section>
 <section><h2>Evidence limitations</h2><ul>{"".join(f"<li>{html.escape(item)}</li>" for item in payload["limitations"])}</ul></section>
 </main></body></html>"""
@@ -948,10 +968,13 @@ def _pdf_document(payload: dict[str, Any]) -> bytes:
     if not payload["findings"]["resolved"]:
         story.append(Paragraph("No finding was safely classified as resolved.", body))
     new_page("6. Persistent, new, and regressed findings")
+    # ``regressions`` is an aggregate view whose entries are always members of
+    # ``persistent`` or ``new``; concatenating it here would render the same
+    # finding twice in this section. Regressed persistents keep their severity
+    # change in ``observed_change``.
     combined = [
         *payload["findings"]["persistent"],
         *payload["findings"]["new"],
-        *payload["findings"]["regressions"],
     ]
     for item in combined[:25]:
         story.append(
@@ -1022,6 +1045,19 @@ def generate_comparison(
             "COMPARISON_ANALYSIS_INCOMPLETE",
             "Both analysis runs must be completed before comparison.",
             409,
+        )
+    # Chronological direction safety: the baseline must be the earlier run so a
+    # comparison can never silently run backward (previous -> current). IDs are
+    # not auto-swapped; the caller receives a typed error instead.
+    if (
+        baseline_run.completed_at is not None
+        and current_run.completed_at is not None
+        and baseline_run.completed_at > current_run.completed_at
+    ):
+        raise AnalysisComparisonError(
+            "COMPARISON_CHRONOLOGY_INVALID",
+            "The baseline analysis must be older than the current analysis.",
+            422,
         )
     normalized_key = idempotency_key.strip()
     if not normalized_key:

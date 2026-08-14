@@ -21,6 +21,18 @@ function delta(value: number | null): string {
   return `${value > 0 ? "+" : ""}${value}`;
 }
 
+function ScoreDelta({ value, direction }: { value: number | null; direction?: string }) {
+  if (value === null) return <span className="text-slate-500 font-normal text-base">Not comparable</span>;
+  const str = `${value > 0 ? "+" : ""}${value}`;
+  if (!direction) return <span>{str}</span>;
+
+  const isPositive = direction === "Improved";
+  const isNegative = direction === "Regressed";
+  const colorClass = isPositive ? "text-emerald-700" : isNegative ? "text-red-700" : "text-slate-700";
+
+  return <span className={colorClass}>{str}</span>;
+}
+
 function FindingGroup({
   title,
   findings,
@@ -202,7 +214,7 @@ export default function AnalysisComparisonPage() {
         <div className="mt-4 grid gap-4 sm:grid-cols-3">
           <div><p className="text-sm">Before</p><p className="text-4xl font-bold">{score(payload.scores.overall_score_before)}</p></div>
           <div><p className="text-sm">After</p><p className="text-4xl font-bold">{score(payload.scores.overall_score_after)}</p></div>
-          <div><p className="text-sm">Change</p><p className="text-4xl font-bold">{delta(payload.scores.overall_delta)}</p><p>{payload.scores.direction}</p></div>
+          <div><p className="text-sm">Change</p><p className="text-4xl font-bold"><ScoreDelta value={payload.scores.overall_delta} direction={payload.scores.direction} /></p><p className="font-medium text-slate-700">{payload.scores.direction}</p></div>
         </div>
         <p className="mt-3 text-sm">
           Formula before: {payload.scores.formula_version_before ?? "Unavailable"}; after:
@@ -217,7 +229,13 @@ export default function AnalysisComparisonPage() {
         <div className="mt-5 overflow-x-auto">
           <table className="w-full min-w-[42rem] border-collapse text-left">
             <thead><tr>{["Category", "Before", "After", "Change", "Status before / after", "Direction"].map((item) => <th className="border bg-slate-100 p-3" key={item} scope="col">{item}</th>)}</tr></thead>
-            <tbody>{(Array.isArray(payload.scores.categories) ? payload.scores.categories : []).map((item) => <tr key={item.category}><th className="border p-3 capitalize" scope="row">{item.category}</th><td className="border p-3">{score(item.score_before)}</td><td className="border p-3">{score(item.score_after)}</td><td className="border p-3">{delta(item.delta)}</td><td className="border p-3">{item.status_before ?? "Unavailable"} / {item.status_after ?? "Unavailable"}</td><td className="border p-3">{item.direction}</td></tr>)}</tbody>
+            <tbody>
+              {Array.isArray(payload.scores.categories) && payload.scores.categories.length > 0 ? (
+                payload.scores.categories.map((item) => <tr key={item.category}><th className="border p-3 capitalize" scope="row">{item.category}</th><td className="border p-3">{score(item.score_before)}</td><td className="border p-3">{score(item.score_after)}</td><td className="border p-3 font-bold"><ScoreDelta value={item.delta} direction={item.direction} /></td><td className="border p-3">{item.status_before ?? "Unavailable"} / {item.status_after ?? "Unavailable"}</td><td className="border p-3 font-medium">{item.direction}</td></tr>)
+              ) : (
+                <tr><td colSpan={6} className="border p-3 text-center text-slate-500">Category scores are not comparable.</td></tr>
+              )}
+            </tbody>
           </table>
         </div>
       </section></SectionErrorBoundary>
@@ -239,17 +257,23 @@ export default function AnalysisComparisonPage() {
         <div className="mt-4 overflow-x-auto">
           <table className="w-full min-w-[58rem] border-collapse text-left">
             <thead><tr>{["Browser", "Tested before / after", "Passed before / after", "Partial before / after", "Failed before / after", "Unavailable or inconclusive before / after", "Result"].map((item) => <th className="border bg-slate-100 p-3" key={item} scope="col">{item}</th>)}</tr></thead>
-            <tbody>{(Array.isArray(payload.browser_compatibility?.engines) ? payload.browser_compatibility.engines : []).map((engine) => <tr key={engine.engine}><th className="border p-3 capitalize" scope="row">{engine.engine}</th><td className="border p-3">{engine.before.tested} / {engine.after.tested}</td><td className="border p-3">{engine.before.passed} / {engine.after.passed}</td><td className="border p-3">{engine.before.partial} / {engine.after.partial}</td><td className="border p-3">{engine.before.failed} / {engine.after.failed}</td><td className="border p-3">{(engine.before.unavailable ?? 0) + (engine.before.inconclusive ?? 0)} / {(engine.after.unavailable ?? 0) + (engine.after.inconclusive ?? 0)}</td><td className="border p-3">{engine.direction}{engine.limitation && <span className="mt-1 block text-xs text-amber-900">{engine.limitation}</span>}</td></tr>)}</tbody>
+            <tbody>
+              {Array.isArray(payload.browser_compatibility?.engines) && payload.browser_compatibility.engines.length > 0 ? (
+                payload.browser_compatibility.engines.map((engine) => <tr key={engine.engine}><th className="border p-3 capitalize" scope="row">{engine.engine}</th><td className="border p-3">{engine.before.tested} / {engine.after.tested}</td><td className="border p-3">{engine.before.passed} / {engine.after.passed}</td><td className="border p-3">{engine.before.partial} / {engine.after.partial}</td><td className="border p-3">{engine.before.failed} / {engine.after.failed}</td><td className="border p-3">{(engine.before.unavailable ?? 0) + (engine.before.inconclusive ?? 0)} / {(engine.after.unavailable ?? 0) + (engine.after.inconclusive ?? 0)}</td><td className="border p-3 font-medium">{engine.direction}{engine.limitation && <span className="mt-1 block text-xs text-amber-900 font-normal">{engine.limitation}</span>}</td></tr>)
+              ) : (
+                <tr><td colSpan={7} className="border p-3 text-center text-slate-500">Browser compatibility data is unavailable or not comparable.</td></tr>
+              )}
+            </tbody>
           </table>
         </div>
       </section></SectionErrorBoundary>
 
       <SectionErrorBoundary sectionName="Finding Changes"><div className="mt-6 grid gap-6" id="findings">
-        <FindingGroup empty="No finding was safely classified as resolved." findings={payload.findings.resolved} title="Resolved findings" />
-        <FindingGroup empty="No persistent findings were retained." findings={payload.findings.persistent} title="Persistent findings" />
-        <FindingGroup empty="No new findings were supported by comparable evidence." findings={payload.findings.new} title="New findings" />
-        <FindingGroup empty="No evidence-backed regression was retained." findings={payload.findings.regressions} title="Regressions" />
-        <FindingGroup empty="No inconclusive finding changes were retained." findings={payload.findings.inconclusive} title="Inconclusive changes" />
+        <FindingGroup empty="No new findings were supported by comparable evidence." findings={payload.findings.new} title="New" />
+        <FindingGroup empty="No finding severity changed." findings={payload.findings.changed_severity || []} title="Severity changed" />
+        <FindingGroup empty="No finding was safely classified as resolved." findings={payload.findings.resolved} title="Resolved" />
+        <FindingGroup empty="No persistent findings were retained unchanged." findings={(payload.findings.persistent || []).filter((f: ComparisonFinding) => f.direction === "Unchanged")} title="Persistent (Unchanged)" />
+        <FindingGroup empty="No inconclusive finding changes were retained." findings={payload.findings.inconclusive} title="Inconclusive" />
       </div></SectionErrorBoundary>
 
       <SectionErrorBoundary sectionName="Action Plan Progress"><section className="mt-6 rounded-2xl border bg-white p-6" id="action-plan">

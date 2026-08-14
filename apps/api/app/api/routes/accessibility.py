@@ -2,7 +2,7 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -24,6 +24,36 @@ def get_website_or_raise(db: Session, website_id: uuid.UUID) -> Website:
     if not website:
         raise HTTPException(status_code=404, detail="Website not found")
     return website
+
+
+def _findings_with_nodes(
+    db: Session,
+    findings: list[AccessibilityFinding],
+) -> list[dict]:
+    """Serialize findings with their nodes using one batched node query.
+
+    Replaces a per-finding node lookup (an N+1 pattern on audits with
+    hundreds of rule x page findings). Node order stays deterministic.
+    """
+    nodes_by_finding: dict[uuid.UUID, list[AccessibilityNode]] = {}
+    finding_ids = [f.id for f in findings]
+    if finding_ids:
+        node_rows = db.scalars(
+            select(AccessibilityNode)
+            .where(AccessibilityNode.finding_id.in_(finding_ids))
+            .order_by(AccessibilityNode.finding_id, AccessibilityNode.id)
+        )
+        for node in node_rows:
+            nodes_by_finding.setdefault(node.finding_id, []).append(node)
+    findings_data = []
+    for f in findings:
+        f_dict = {c.name: getattr(f, c.name) for c in f.__table__.columns}
+        f_dict["nodes"] = [
+            {c.name: getattr(n, c.name) for c in n.__table__.columns}
+            for n in nodes_by_finding.get(f.id, [])
+        ]
+        findings_data.append(f_dict)
+    return findings_data
 
 
 def get_analysis_run_or_raise(db: Session, run_id: uuid.UUID) -> AnalysisRun:
@@ -64,14 +94,7 @@ def get_website_accessibility(website_id: uuid.UUID, db: DatabaseSession) -> dic
     findings = db.scalars(
         select(AccessibilityFinding).where(AccessibilityFinding.audit_id == audit.id)
     ).all()
-    findings_data = []
-    for f in findings:
-        nodes = db.scalars(
-            select(AccessibilityNode).where(AccessibilityNode.finding_id == f.id)
-        ).all()
-        f_dict = {c.name: getattr(f, c.name) for c in f.__table__.columns}
-        f_dict["nodes"] = [{c.name: getattr(n, c.name) for c in n.__table__.columns} for n in nodes]
-        findings_data.append(f_dict)
+    findings_data = _findings_with_nodes(db, findings)
 
     checklist = db.scalar(
         select(ManualReviewChecklist).where(ManualReviewChecklist.audit_id == audit.id)
@@ -132,20 +155,13 @@ def get_website_accessibility_findings(
 
     findings = db.scalars(query.offset(offset).limit(limit)).all()
 
-    db.scalar(
-        select(AccessibilityFinding.id).where(AccessibilityFinding.audit_id == audit.id)
-    )  # Naive total for now
+    # Truthful pagination total: count over the same filtered query (the old
+    # response hardcoded total=100 and discarded its count query).
+    total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
 
-    findings_data = []
-    for f in findings:
-        nodes = db.scalars(
-            select(AccessibilityNode).where(AccessibilityNode.finding_id == f.id)
-        ).all()
-        f_dict = {c.name: getattr(f, c.name) for c in f.__table__.columns}
-        f_dict["nodes"] = [{c.name: getattr(n, c.name) for c in n.__table__.columns} for n in nodes]
-        findings_data.append(f_dict)
+    findings_data = _findings_with_nodes(db, findings)
 
-    return {"findings": findings_data, "total": 100}  # Replace total with a proper count if needed
+    return {"findings": findings_data, "total": total}
 
 
 @router.get("/accessibility/findings/{finding_id}")

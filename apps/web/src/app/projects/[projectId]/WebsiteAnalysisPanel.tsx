@@ -353,16 +353,19 @@ export function WebsiteAnalysisPanel({
                 </span>
               </li>
             ))}
-            {comparisonHref && (
-              <li>
-                <a
-                  className="inline-block rounded-lg bg-slate-950 px-4 py-2 font-semibold text-white"
-                  href={comparisonHref}
-                >
-                  Compare selected analyses
-                </a>
-              </li>
-            )}
+            {comparisonHref && (() => {
+              const selected = history.filter((run) => selectedComparisonRuns.includes(run.id)).sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime());
+              return (
+                <li>
+                  <a
+                    className="inline-block rounded-lg bg-slate-950 px-4 py-2 font-semibold text-white"
+                    href={comparisonHref}
+                  >
+                    Compare Current ({new Date(selected[0].created_at).toLocaleDateString()}) vs Baseline ({new Date(selected[1].created_at).toLocaleDateString()})
+                  </a>
+                </li>
+              );
+            })()}
           </ul>
         )}
       </details>

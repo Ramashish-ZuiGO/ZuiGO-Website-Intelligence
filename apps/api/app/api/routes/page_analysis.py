@@ -29,6 +29,29 @@ router = APIRouter(prefix="/websites/{website_id}/page-analysis", tags=["page-an
 DatabaseSession = Annotated[Session, Depends(get_db)]
 
 
+def _page_runs_by_id(
+    db: Session,
+    pages: list[WebsitePage],
+) -> dict[uuid.UUID, PageAnalysisRun]:
+    """Batch-load the level-1/level-2 runs referenced by a page list.
+
+    Replaces per-page point lookups (an N+1 pattern that issued up to two
+    queries per row on multi-hundred-page sites) with one IN query.
+    """
+    run_ids = {
+        run_id
+        for wp in pages
+        for run_id in (wp.page_analysis_level_1_run_id, wp.page_analysis_level_2_run_id)
+        if run_id is not None
+    }
+    if not run_ids:
+        return {}
+    return {
+        run.id: run
+        for run in db.scalars(select(PageAnalysisRun).where(PageAnalysisRun.id.in_(run_ids)))
+    }
+
+
 def website_or_raise(db: Session, website_id: uuid.UUID) -> Website:
     website = db.get(Website, website_id)
     if website is None:
@@ -230,6 +253,7 @@ def list_page_analysis_runs(
         )
     )
 
+    runs_by_id = _page_runs_by_id(db, rows)
     items = []
     for wp in rows:
         run_id = (
@@ -237,11 +261,11 @@ def list_page_analysis_runs(
             if analysis_level == 1 or analysis_level is None
             else wp.page_analysis_level_2_run_id
         )
-        run = db.get(PageAnalysisRun, run_id) if run_id else None
+        run = runs_by_id.get(run_id) if run_id else None
         if run:
             items.append(PageAnalysisRunRead.model_validate(run))
         elif analysis_level is None and wp.page_analysis_level_2_run_id:
-            run = db.get(PageAnalysisRun, wp.page_analysis_level_2_run_id)
+            run = runs_by_id.get(wp.page_analysis_level_2_run_id)
             if run:
                 items.append(PageAnalysisRunRead.model_validate(run))
 
@@ -378,18 +402,11 @@ def get_pages_with_issues(
         or 0
     )
 
+    runs_by_id = _page_runs_by_id(db, failed_pages)
     items = []
     for wp in failed_pages:
-        l1_run = (
-            db.get(PageAnalysisRun, wp.page_analysis_level_1_run_id)
-            if wp.page_analysis_level_1_run_id
-            else None
-        )
-        l2_run = (
-            db.get(PageAnalysisRun, wp.page_analysis_level_2_run_id)
-            if wp.page_analysis_level_2_run_id
-            else None
-        )
+        l1_run = runs_by_id.get(wp.page_analysis_level_1_run_id)
+        l2_run = runs_by_id.get(wp.page_analysis_level_2_run_id)
         issues = []
         if l1_run and l1_run.status in ("failed", "skipped"):
             issues.append(
@@ -448,18 +465,11 @@ def get_page_level_scores(
             .limit(page_size)
         )
     )
+    runs_by_id = _page_runs_by_id(db, rows)
     results = []
     for wp in rows:
-        l1_run = (
-            db.get(PageAnalysisRun, wp.page_analysis_level_1_run_id)
-            if wp.page_analysis_level_1_run_id
-            else None
-        )
-        l2_run = (
-            db.get(PageAnalysisRun, wp.page_analysis_level_2_run_id)
-            if wp.page_analysis_level_2_run_id
-            else None
-        )
+        l1_run = runs_by_id.get(wp.page_analysis_level_1_run_id)
+        l2_run = runs_by_id.get(wp.page_analysis_level_2_run_id)
 
         if l2_run and l2_run.status == "completed":
             from app.models.analysis_score import AnalysisScore
@@ -526,12 +536,9 @@ def get_page_analysis_recommendations(
     )
     recommendations: list[PageAnalysisActionRecommendation] = []
 
+    runs_by_id = _page_runs_by_id(db, pages)
     for wp in pages:
-        l1_run = (
-            db.get(PageAnalysisRun, wp.page_analysis_level_1_run_id)
-            if wp.page_analysis_level_1_run_id
-            else None
-        )
+        l1_run = runs_by_id.get(wp.page_analysis_level_1_run_id)
         if l1_run and l1_run.status == "completed":
             signals = l1_run.basic_seo_signals
             if signals.get("no_h1"):
@@ -790,18 +797,11 @@ def get_failed_skipped_pages(
             .order_by(WebsitePage.normalized_url.asc())
         )
     )
+    runs_by_id = _page_runs_by_id(db, rows)
     result = []
     for wp in rows:
-        l1_run = (
-            db.get(PageAnalysisRun, wp.page_analysis_level_1_run_id)
-            if wp.page_analysis_level_1_run_id
-            else None
-        )
-        l2_run = (
-            db.get(PageAnalysisRun, wp.page_analysis_level_2_run_id)
-            if wp.page_analysis_level_2_run_id
-            else None
-        )
+        l1_run = runs_by_id.get(wp.page_analysis_level_1_run_id)
+        l2_run = runs_by_id.get(wp.page_analysis_level_2_run_id)
         statuses = {}
         if l1_run and l1_run.status in ("failed", "skipped"):
             statuses["level_1"] = {

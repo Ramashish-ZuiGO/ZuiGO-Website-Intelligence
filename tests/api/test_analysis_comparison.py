@@ -534,3 +534,110 @@ def test_comparison_models_constraints_and_formula_versions_are_unchanged() -> N
     assert FORMULA_VERSION == "1.0.0"
     assert PRIORITY_FORMULA_VERSION == "1.0.0"
     engine.dispose()
+
+
+# --- Audit edge cases: chronology, self-comparison, execution status, legacy ---
+
+
+def test_reversed_chronological_comparison_is_rejected(comparison_api) -> None:
+    """A comparison must never silently run backward: passing the earlier run
+    as `current` and the later run as `baseline` returns a typed 422 instead of
+    reversed results. IDs are not auto-swapped."""
+    client, _factory, baseline_id, current_id, _website_id, _ = comparison_api
+    response = client.post(
+        f"/api/v1/analysis-runs/{baseline_id}/comparisons/{current_id}/generate",
+        json={"idempotency_key": "reversed-chronology"},
+    )
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "COMPARISON_CHRONOLOGY_INVALID"
+
+
+def test_same_run_comparison_is_rejected(comparison_api) -> None:
+    client, _factory, _baseline_id, current_id, _website_id, _ = comparison_api
+    response = client.post(
+        f"/api/v1/analysis-runs/{current_id}/comparisons/{current_id}/generate",
+        json={"idempotency_key": "self-comparison"},
+    )
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "INVALID_COMPARISON_PAIR"
+
+
+def test_failed_run_cannot_generate_comparison(comparison_api) -> None:
+    client, factory, baseline_id, current_id, _website_id, _ = comparison_api
+    with factory() as db:
+        run = db.get(AnalysisRun, current_id)
+        run.status = "failed"
+        db.commit()
+    response = client.post(
+        f"/api/v1/analysis-runs/{current_id}/comparisons/{baseline_id}/generate",
+        json={"idempotency_key": "failed-current"},
+    )
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "COMPARISON_ANALYSIS_INCOMPLETE"
+
+
+def test_legacy_snapshot_with_missing_fields_is_typed_not_comparable() -> None:
+    """Old immutable snapshots missing optional/newer keys (sections, page
+    inventory, browser data, coverage, finding totals) must not crash and must
+    yield typed not-comparable/unavailable values — never fabricated results.
+    Snapshots are not mutated."""
+    legacy_baseline: dict = {"generated_at": "2025-01-01T00:00:00+00:00"}
+    legacy_current: dict = {"generated_at": "2025-06-01T00:00:00+00:00"}
+    frozen_baseline = copy.deepcopy(legacy_baseline)
+    frozen_current = copy.deepcopy(legacy_current)
+
+    payload, limitations = build_comparison_payload(legacy_baseline, legacy_current)
+
+    assert legacy_baseline == frozen_baseline
+    assert legacy_current == frozen_current
+    assert payload["scores"]["direction"] == "Not comparable"
+    assert payload["scores"]["overall_delta"] is None
+    for bucket in ("resolved", "persistent", "new", "regressions", "inconclusive"):
+        assert payload["findings"][bucket] == []
+    assert isinstance(payload["coverage"]["comparable"], bool)
+    # Engines with no historical evidence are typed Not comparable, never
+    # fabricated as tested/passed.
+    for engine in payload["browser_compatibility"]["engines"]:
+        assert engine["direction"] == "Not comparable"
+        assert engine["before"]["tested"] == 0
+        assert engine["after"]["tested"] == 0
+        assert engine["before"]["passed"] == 0
+    assert limitations
+    # Deterministic: identical inputs produce identical results.
+    repeated, _ = build_comparison_payload(
+        copy.deepcopy(legacy_baseline), copy.deepcopy(legacy_current)
+    )
+    assert repeated == payload
+    # Artifact renderers accept the legacy payload without crashing.
+    from app.services.analysis_comparison import _artifact_content
+
+    for artifact_format in ("json", "html", "pdf"):
+        assert _artifact_content(artifact_format, payload)
+
+
+def test_artifact_sections_do_not_duplicate_regressed_findings() -> None:
+    """`regressions` is an intentional aggregate whose entries also live in
+    `new` or `persistent`; artifact sections must still render each finding
+    exactly once."""
+    from app.services.analysis_comparison import _new_and_regressed
+
+    new_finding = {
+        "title": "New issue",
+        "category": "seo",
+        "classification": "New",
+        "affected_urls": ["https://x.test/a"],
+    }
+    regressed_persistent = {
+        "title": "Worsened issue",
+        "category": "performance",
+        "classification": "Persistent",
+        "affected_urls": ["https://x.test/b"],
+    }
+    findings = {
+        "new": [new_finding],
+        "regressions": [dict(new_finding), regressed_persistent],
+    }
+    merged = _new_and_regressed(findings)
+    titles = [item["title"] for item in merged]
+    assert titles.count("New issue") == 1
+    assert titles.count("Worsened issue") == 1

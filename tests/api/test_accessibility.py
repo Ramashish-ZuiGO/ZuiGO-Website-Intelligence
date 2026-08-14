@@ -139,6 +139,23 @@ async def test_get_website_accessibility(async_client: AsyncClient, seeded_db):
 
 
 @pytest.mark.anyio
+async def test_findings_total_reflects_filtered_count(async_client: AsyncClient, seeded_db):
+    """Regression: the paginated findings endpoint previously returned a
+    hardcoded total of 100; the total must be the real filtered count."""
+    website_id = seeded_db["website_id"]
+    matching = await async_client.get(
+        f"/api/v1/websites/{website_id}/accessibility/findings?result_type=violation"
+    )
+    assert matching.status_code == 200
+    assert matching.json()["total"] == len(matching.json()["findings"]) == 1
+    none_matching = await async_client.get(
+        f"/api/v1/websites/{website_id}/accessibility/findings?result_type=pass"
+    )
+    assert none_matching.status_code == 200
+    assert none_matching.json()["total"] == 0
+
+
+@pytest.mark.anyio
 async def test_get_website_accessibility_findings(async_client: AsyncClient, seeded_db):
     website_id = seeded_db["website_id"]
     response = await async_client.get(

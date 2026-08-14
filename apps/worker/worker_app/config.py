@@ -34,6 +34,17 @@ class WorkerSettings(BaseSettings):
     postgres_db: str = "website_intelligence"
     postgres_host: str = "postgres"
     postgres_port: int = 5432
+    # Max simultaneously executing analysis stages on this worker host. Stages
+    # run as a chain (one active task per run), so this caps concurrent
+    # browser-heavy analyses. Raise only on a dedicated worker host.
+    celery_worker_concurrency: int = Field(default=2, ge=1, le=32)
+    # Redis redelivers any message left unacknowledged for this long. Analysis
+    # stages are acks_late, so they ack only on completion: if a stage runs
+    # longer than this, the broker redelivers it WHILE IT IS STILL RUNNING and
+    # a second worker slot executes the same stage concurrently. The floor of
+    # 3600 is the Celery default and must never be lowered -- this value has to
+    # stay above the longest possible stage runtime, not below it.
+    celery_broker_visibility_timeout_seconds: int = Field(default=21_600, ge=3_600, le=86_400)
     ai_provider: AIProviderName = AIProviderName.DISABLED
     ai_model: str = Field(default="not-configured", min_length=1, max_length=200)
     ai_base_url: AnyHttpUrl = "http://host.docker.internal:11434"

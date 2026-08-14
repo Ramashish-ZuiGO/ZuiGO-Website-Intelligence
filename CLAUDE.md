@@ -124,6 +124,20 @@ Single source of truth for every artifact. Key blocks added at template 2.1.0:
   executions are skipped via `_skip_terminal_stage`. Task ids are deterministic
   (`real-analysis:{exec_id}:attempt:{n}[:stage]`) — target these for surgical
   revocation.
+- **Stage exclusivity (locked)**: for one `(execution_id, attempt, stage)` at
+  most one delivery may perform side effects. Every stage enters via
+  `_enter_stage` → `_claim_stage`, which claims ownership in the execution row
+  under `SELECT ... FOR UPDATE` (Postgres is the authority, never Redis). A
+  losing delivery raises Celery `Ignore`: acked, no work, no progress write, and
+  the chain is NOT advanced (Celery dispatches chain continuations only on the
+  success path). Ownership is attempt-scoped and released only by the
+  `prepare_resume` attempt bump — no timers, no manual lock deletion.
+- Broker `visibility_timeout` is 21600s with a validated 3600s floor. This is
+  defence in depth only, NOT the exclusivity guarantee — never claim otherwise.
+  At the Redis default a browser stage outliving 3600s was redelivered mid-flight
+  and ran twice concurrently. Keep it ABOVE the longest stage runtime; never
+  lower it. Broker redelivery is not the recovery mechanism; stale detection
+  (900s) + explicit resume is.
 - Stale detection: `real_execution_is_stale` (900s of no `journey_updated_at`
   progress on a running real execution). Resume via
   `POST /workflow-executions/{id}/resume` reuses the same execution/run
@@ -132,9 +146,16 @@ Single source of truth for every artifact. Key blocks added at template 2.1.0:
   conflict detection; artifact ids are `uuid5(report_id, ...)` so retries can't
   duplicate artifacts.
 - Local capacity: one worker host saturates (and starves the API/DB) at ~4+
-  concurrent browser-heavy runs. Don't launch parallel same-site acceptance
+  concurrent browser-heavy runs. Now capped by `CELERY_WORKER_CONCURRENCY`
+  (default 2) — stages are a strict `chain`, so worker concurrency IS the max
+  concurrent analyses. `worker_prefetch_multiplier=1` keeps a busy worker from
+  reserving stages it cannot start. Don't launch parallel same-site acceptance
   runs; recover by stopping only the worker, cancelling extras via the product
   `/cancel` lifecycle, then restarting (terminal-skip prevents re-deadlock).
+- Planned worker restarts: Compose sets `stop_grace_period` (default 1800s) so
+  Celery's warm shutdown can drain in-flight browser stages instead of being
+  SIGKILLed at Docker's 10s default. Restart when `inspect active` is empty.
+  Operational contract: `docs/PRODUCTION_OPERATIONS.md`.
 - Firefox engine cannot launch in the worker container
   (`CanCreateUserNamespace EPERM`) — environmental, reported as
   "unavailable", not a bug to fix.

@@ -1,4 +1,17 @@
-export const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
+const configuredApiUrl = process.env.NEXT_PUBLIC_API_URL;
+
+// NEXT_PUBLIC_* values are inlined at build time. A production build with the
+// variable unset would ship a bundle pointing every customer's browser at their
+// own machine, so fail the build instead of falling back silently. The
+// localhost default remains for local development only.
+if (!configuredApiUrl && process.env.NODE_ENV === "production") {
+  throw new Error(
+    "NEXT_PUBLIC_API_URL must be set for production builds. " +
+      "Refusing to fall back to a localhost API URL.",
+  );
+}
+
+export const apiUrl = configuredApiUrl ?? "http://127.0.0.1:8000";
 
 interface ApiErrorEnvelope {
   error?: {

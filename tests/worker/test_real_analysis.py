@@ -129,6 +129,13 @@ def test_resume_reuses_retained_primary_failure_when_page_evidence_exists(
         "_skip_terminal_stage",
         lambda *_args, **_kwargs: None,
     )
+    # This delivery owns the stage; ownership itself is covered by
+    # tests/worker/test_stage_execution_ownership.py.
+    monkeypatch.setattr(
+        real_analysis,
+        "_claim_stage",
+        lambda *_args, **_kwargs: None,
+    )
     monkeypatch.setattr(
         real_analysis,
         "_execution",
@@ -179,6 +186,13 @@ def test_real_analysis_never_substitutes_demo_after_discovery_failure(
     monkeypatch.setattr(
         real_analysis,
         "_skip_terminal_stage",
+        lambda *_args, **_kwargs: None,
+    )
+    # This delivery owns the stage; ownership itself is covered by
+    # tests/worker/test_stage_execution_ownership.py.
+    monkeypatch.setattr(
+        real_analysis,
+        "_claim_stage",
         lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(

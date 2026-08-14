@@ -4,7 +4,7 @@ from functools import lru_cache
 from typing import Annotated, Any
 from urllib.parse import quote
 
-from pydantic import AnyHttpUrl, SecretStr, TypeAdapter, field_validator
+from pydantic import AnyHttpUrl, Field, SecretStr, TypeAdapter, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 http_url_adapter = TypeAdapter(AnyHttpUrl)
@@ -35,6 +35,22 @@ class Settings(BaseSettings):
     redis_url: str
     backend_cors_origins: Annotated[list[str], NoDecode] = ["http://localhost:3000"]
     allowed_repository_roots: list[str] = ["C:\\Users", "/home", "/app"]
+
+    # Readiness probing. Bounded so /ready can never become a slow or hanging
+    # endpoint when a dependency is degraded.
+    readiness_timeout_seconds: float = Field(default=3.0, ge=0.1, le=15.0)
+    # Without an explicit connect timeout, a request that needs a new pooled
+    # connection while Postgres is unreachable blocks indefinitely.
+    db_connect_timeout_seconds: int = Field(default=10, ge=1, le=60)
+    # Pool sizing is environment-configurable rather than hard-coded; the
+    # defaults reproduce SQLAlchemy's own defaults so behaviour is unchanged
+    # unless an operator opts into different sizing.
+    db_pool_size: int = Field(default=5, ge=1, le=100)
+    db_max_overflow: int = Field(default=10, ge=0, le=100)
+    # -1 disables recycling (SQLAlchemy default); pool_pre_ping already guards
+    # against stale connections.
+    db_pool_recycle_seconds: int = Field(default=-1, ge=-1, le=86_400)
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @property

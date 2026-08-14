@@ -24,6 +24,7 @@ from app.services.resource_classification import (
     classify_resource,
 )
 from celery import chain
+from celery.exceptions import Ignore
 from sqlalchemy import func, select
 
 from worker_app.celery_app import celery_app
@@ -48,6 +49,8 @@ REAL_BROWSER_NAVIGATION_TIMEOUT_MS: int = 15_000
 TERMINAL_REAL_EXECUTION_STATUSES = frozenset(
     {"completed", "partial", "failed", "cancelled", "unavailable"}
 )
+# Where per-stage execution ownership is recorded inside structured_output.
+STAGE_OWNERSHIP_KEY = "stage_ownership"
 
 
 def real_stage_task_ids(execution_id: str, attempt: int) -> dict[str, str]:
@@ -77,6 +80,81 @@ def _skip_terminal_stage(execution_id: str, stage: str) -> dict[str, Any] | None
         "stage": stage,
         "skipped": True,
     }
+
+
+class DuplicateStageDelivery(Exception):
+    """Raised when a stage delivery is not the owner of (execution, attempt, stage)."""
+
+
+def _claim_stage(execution_id: str, stage: str) -> dict[str, Any] | None:
+    """Atomically take exclusive ownership of one (execution, attempt, stage).
+
+    Celery task ids do not guarantee single execution: a broker redelivery, a
+    worker reconnect or a prefetch race can deliver the identical stage message
+    while the first delivery is still running, and both copies would then
+    perform side effects. Ownership is recorded in the execution row itself and
+    claimed under ``SELECT ... FOR UPDATE``, so Postgres — not Redis — is the
+    coordination authority and concurrent claimants are serialised.
+
+    Returns a skip payload when the execution is already terminal (existing
+    behaviour), ``None`` when this delivery owns the stage, and raises
+    ``DuplicateStageDelivery`` when another delivery already owns it.
+
+    Ownership is scoped to ``attempt`` and is released by the attempt bump that
+    ``prepare_resume`` performs, never by a timer and never by hand: a stale
+    claim from a crashed worker cannot block attempt N+1, and no expiry window
+    exists during which two deliveries could both consider themselves owner.
+    """
+    parsed_id = uuid.UUID(execution_id)
+    with SessionLocal() as db:
+        execution = db.scalar(
+            select(AgentExecution).where(AgentExecution.execution_id == parsed_id).with_for_update()
+        )
+        if execution is None:
+            raise RuntimeError("Workflow execution is unavailable.")
+        if execution.status in TERMINAL_REAL_EXECUTION_STATUSES:
+            return {
+                "status": execution.status,
+                "stage": stage,
+                "skipped": True,
+            }
+        output = dict(execution.structured_output)
+        ownership = dict(output.get(STAGE_OWNERSHIP_KEY, {}))
+        existing = ownership.get(stage)
+        if existing is not None and int(existing.get("attempt", 0)) >= execution.attempt:
+            raise DuplicateStageDelivery(
+                f"Stage {stage} of attempt {execution.attempt} is already owned."
+            )
+        ownership[stage] = {
+            "owner_token": uuid.uuid4().hex,
+            "attempt": execution.attempt,
+            "claimed_at": _utc_now().isoformat(),
+        }
+        output[STAGE_OWNERSHIP_KEY] = ownership
+        execution.structured_output = output
+        db.commit()
+    return None
+
+
+def _enter_stage(execution_id: str, stage: str) -> dict[str, Any] | None:
+    """Stage entry guard shared by every real-analysis stage.
+
+    Terminal executions skip exactly as before. Otherwise this delivery must
+    win the ownership claim to proceed.
+
+    A duplicate delivery raises ``Ignore`` rather than returning: Celery
+    dispatches chain continuations only on the success path, so returning
+    normally would advance the chain and let the next stage start while the
+    genuine owner is still working. ``Ignore`` acks the message, records no
+    fabricated completion, and leaves chain progression to the real owner.
+    """
+    skipped = _skip_terminal_stage(execution_id, stage)
+    if skipped is not None:
+        return skipped
+    try:
+        return _claim_stage(execution_id, stage)
+    except DuplicateStageDelivery:
+        raise Ignore() from None
 
 
 def _update_journey_stage(
@@ -560,7 +638,7 @@ def run_real_discovery_stage(
     discovery_run_id: str,
     workflow_execution_id: str,
 ) -> dict[str, Any]:
-    skipped = _skip_terminal_stage(workflow_execution_id, "website_discovery")
+    skipped = _enter_stage(workflow_execution_id, "website_discovery")
     if skipped is not None:
         return skipped
     _update_journey_stage(workflow_execution_id, "website_discovery")
@@ -590,7 +668,7 @@ def run_real_page_analysis_stage(
     page_analysis_execution_id: str,
     workflow_execution_id: str,
 ) -> dict[str, Any]:
-    skipped = _skip_terminal_stage(workflow_execution_id, "page_analysis")
+    skipped = _enter_stage(workflow_execution_id, "page_analysis")
     if skipped is not None:
         return skipped
     _update_journey_stage(workflow_execution_id, "page_analysis")
@@ -625,7 +703,7 @@ def run_real_primary_analysis_stage(
     discovery_run_id: str,
     workflow_execution_id: str,
 ) -> dict[str, Any]:
-    skipped = _skip_terminal_stage(workflow_execution_id, "primary_page_analysis")
+    skipped = _enter_stage(workflow_execution_id, "primary_page_analysis")
     if skipped is not None:
         return skipped
     execution = _execution(workflow_execution_id)
@@ -700,7 +778,7 @@ def run_real_browser_stage(
     discovery_run_id: str,
     workflow_execution_id: str,
 ) -> dict[str, Any]:
-    skipped = _skip_terminal_stage(workflow_execution_id, "browser_compatibility")
+    skipped = _enter_stage(workflow_execution_id, "browser_compatibility")
     if skipped is not None:
         return skipped
     _update_journey_stage(workflow_execution_id, "browser_compatibility")
@@ -750,7 +828,7 @@ def run_real_browser_stage(
 
 @celery_app.task(name="worker.run_real_agent_stage", acks_late=True)
 def run_real_agent_stage(workflow_execution_id: str) -> dict[str, Any]:
-    skipped = _skip_terminal_stage(workflow_execution_id, "multi_agent_analysis")
+    skipped = _enter_stage(workflow_execution_id, "multi_agent_analysis")
     if skipped is not None:
         return skipped
     _update_journey_stage(

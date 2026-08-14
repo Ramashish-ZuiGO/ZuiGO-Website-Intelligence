@@ -45,15 +45,17 @@ services:
     ports:
       - "8000:8000"
     healthcheck:
+      # Readiness, not liveness: an API whose Postgres or Redis is unusable must
+      # not advertise itself as healthy to deploy gates or load balancers.
       test:
         [
           "CMD",
           "python",
           "-c",
-          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).read()",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=5).read()",
         ]
       interval: 10s
-      timeout: 5s
+      timeout: 8s
       retries: 5
       start_period: 10s
     depends_on:
@@ -68,9 +70,16 @@ services:
       context: .
       dockerfile: apps/worker/Dockerfile
     command: celery --app worker_app.celery_app:celery_app worker --loglevel=${LOG_LEVEL:-INFO}
+    # Celery performs a warm shutdown on SIGTERM: it stops accepting new work
+    # and lets running tasks finish. Docker's 10s default would SIGKILL a
+    # browser stage mid-flight on every planned restart, stranding its acks_late
+    # message until the broker visibility timeout. This is an upper bound only —
+    # the worker exits as soon as its running tasks complete.
+    stop_grace_period: ${WORKER_STOP_GRACE_PERIOD:-1800s}
     environment:
       APP_ENV: ${APP_ENV:-development}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      CELERY_WORKER_CONCURRENCY: ${CELERY_WORKER_CONCURRENCY:-2}
       REDIS_URL: ${REDIS_URL:?Set REDIS_URL in .env}
       POSTGRES_USER: ${POSTGRES_USER:-website_intelligence}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}

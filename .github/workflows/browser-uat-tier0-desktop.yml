@@ -212,11 +212,52 @@ jobs:
           echo "Appium server did not become ready in time." >&2
           exit 1
 
+      - name: Boot a real ${{ matrix.device_type }} Simulator
+        # Real, live-verified finding (2026-08-15): Appium's Safari driver
+        # does NOT auto-boot a simulator when safari:deviceName is omitted
+        # -- it only looks for Safari inside an ALREADY-RUNNING one and
+        # times out otherwise (SessionNotCreatedError: "...waiting for its
+        # RWIApplication to appear"). Fixed by explicitly discovering and
+        # booting a real available simulator here, rather than by
+        # hardcoding a specific device/iOS version (which would go stale
+        # as Xcode's bundled runtimes change on the runner image -- see
+        # this workflow's other comments on that same principle). The
+        # chosen device's exact name is exported for the check step below.
+        run: |
+          python3 - <<'PYEOF'
+          import json
+          import os
+          import subprocess
+
+          listing = json.loads(
+              subprocess.check_output(["xcrun", "simctl", "list", "devices", "available", "-j"])
+          )
+          device_type = "${{ matrix.device_type }}"
+          candidates = [
+              device
+              for runtime, devices in listing["devices"].items()
+              if "iOS" in runtime
+              for device in devices
+              if device["name"].startswith(device_type)
+          ]
+          if not candidates:
+              raise SystemExit(f"No available {device_type} simulator found.")
+          chosen = candidates[0]
+
+          subprocess.check_call(["xcrun", "simctl", "boot", chosen["udid"]])
+          subprocess.check_call(["xcrun", "simctl", "bootstatus", chosen["udid"], "-b"])
+
+          with open(os.environ["GITHUB_ENV"], "a") as env_file:
+              env_file.write(f"IOS_DEVICE_NAME={chosen['name']}\n")
+          print(f"Booted {chosen['name']} ({chosen['udid']})")
+          PYEOF
+
       - name: Run Tier 0 check (safari, ${{ matrix.device_type }} Simulator)
         env:
           IOS_DEVICE_TYPE: ${{ matrix.device_type }}
           TARGET_PAGES: ${{ inputs.pages }}
           RESULTS_PATH: tier0-results-safari-${{ matrix.device_type }}.json
+          # IOS_DEVICE_NAME is set by the boot step above via GITHUB_ENV.
         run: node .github/scripts/browser_uat_tier0_check_ios.mjs
 
       - uses: actions/upload-artifact@v4

@@ -164,10 +164,13 @@ def test_ios_job_enables_safaridriver_and_starts_appium_before_the_check_step() 
     appium_start_index = next(
         i for i, command in enumerate(run_commands) if "appium --log" in command
     )
+    boot_index = next(
+        i for i, command in enumerate(run_commands) if "xcrun" in command and "simctl" in command
+    )
     check_index = next(
         i for i, command in enumerate(run_commands) if "browser_uat_tier0_check_ios.mjs" in command
     )
-    assert enable_index < appium_start_index < check_index
+    assert enable_index < appium_start_index < boot_index < check_index
 
 
 def test_ios_job_waits_for_appium_to_become_ready_before_the_check_step() -> None:
@@ -176,6 +179,56 @@ def test_ios_job_waits_for_appium_to_become_ready_before_the_check_step() -> Non
     run_commands = [step.get("run", "") for step in ios_job["steps"] if isinstance(step, dict)]
 
     assert any("localhost:4723/status" in command for command in run_commands)
+
+
+def test_ios_job_boots_a_real_simulator_and_exports_its_name() -> None:
+    # Real regression, found only via a live dispatch (2026-08-15): Appium's
+    # Safari driver does not auto-boot a simulator when safari:deviceName is
+    # omitted -- it only finds Safari inside an ALREADY-RUNNING one and
+    # times out otherwise (SessionNotCreatedError, "...waiting for its
+    # RWIApplication to appear"). A real device must be booted explicitly.
+    workflow = _load_workflow()
+    ios_job = workflow["jobs"]["ios-safari-simulator"]
+    run_commands = [step.get("run", "") for step in ios_job["steps"] if isinstance(step, dict)]
+    boot_command = next(command for command in run_commands if "simctl" in command)
+
+    # Discovers a real device dynamically -- never hardcodes a specific
+    # iPhone/iPad model or iOS version, which would go stale as Xcode's
+    # bundled runtimes change on the runner image (same principle as
+    # IOS_PLATFORM_VERSION being left optional in the check script).
+    assert '"simctl", "list", "devices", "available"' in boot_command
+    assert '"simctl", "boot"' in boot_command
+    assert '"simctl", "bootstatus"' in boot_command
+    assert "IOS_DEVICE_NAME" in boot_command
+    assert "GITHUB_ENV" in boot_command
+    # Must never accidentally pick a watchOS/tvOS device just because its
+    # runtime identifier string could contain a misleading substring.
+    assert '"iOS" in runtime' in boot_command
+
+
+def test_ios_job_boot_step_syntax_is_valid_python() -> None:
+    import subprocess
+
+    workflow = _load_workflow()
+    ios_job = workflow["jobs"]["ios-safari-simulator"]
+    boot_step = next(
+        step
+        for step in ios_job["steps"]
+        if isinstance(step, dict) and "simctl" in step.get("run", "")
+    )
+    # Strip the heredoc wrapper (`python3 - <<'PYEOF' ... PYEOF`) to check
+    # just the embedded Python body compiles.
+    lines = boot_step["run"].splitlines()
+    body = "\n".join(lines[1:-1])
+
+    result = subprocess.run(
+        ["python", "-c", "import ast; ast.parse(open(0).read())"],
+        input=body,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_ios_job_sets_a_distinct_device_type_env_per_matrix_entry() -> None:

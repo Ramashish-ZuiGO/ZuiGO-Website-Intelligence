@@ -15,9 +15,13 @@ configured 2026-08-15/16 and used to run 5 live dispatches against
 work end-to-end for real (found and fixed 2 unrelated real bugs along the
 way). iPad Simulator Safari is marked a known, pending limitation after 4
 consecutive real failures and 3 targeted fixes that didn't resolve it — see
-its own entry under the iOS lane section. See §7 decision log for what's
-still open: Lane C's own real-device run (Android hardware still needed),
-and eventually revisiting the iPad Simulator gap.** This document is the
+its own entry under the iOS lane section. Lane C's two manual steps
+(check + report) were combined into one CLI command 2026-08-16
+(`scripts/run_manual_tier0_android_check.py`) — the frontend "one-click"
+piece is deliberately deferred pending an `apps/web` handoff. See §7
+decision log for what's still open: Lane C's own real-device run (Android
+hardware still needed), and eventually revisiting the iPad Simulator gap.**
+This document is the
 single source of truth for this initiative and is written to be portable —
 any competent engineer or any LLM (not just Claude) should be able to resume
 work from this file alone, combined with the existing repo docs it references.
@@ -464,6 +468,49 @@ this.
   happened. This is the same category of gap as Lane A's un-PAT-verified
   GitHub client and Lane B's un-macOS-verified safaridriver step — documented
   as the next thing to confirm, not silently assumed working.
+
+##### One-click Android CLI — shipped 2026-08-16
+
+Lane C originally needed two separate manual commands (drive Chrome, then
+report the result). Combined into one: `scripts/run_manual_tier0_android_check.py
+--analysis-run-id <uuid>`.
+
+- **Design decision (discussed before building):** the eventual goal is a
+  one-click button in the actual product UI, but the web frontend cannot
+  reach a locally-plugged-in phone at all — browsers are sandboxed from
+  local hardware/shell access by design, and Chrome's "Local Network
+  Access" restriction (shipped Chrome 142, expanded 147) specifically
+  blocks a public website from silently reaching `localhost`/a local
+  agent, showing a permission prompt that fails silently if unapproved.
+  Weighed three real options: (1) a persistent local helper agent the web
+  UI calls over `localhost` — works, but fights that exact browser
+  restriction on every use; (2) a desktop/Electron wrapper — real access,
+  but heavier to build/maintain for one narrow feature; (3) a
+  self-reporting CLI that POSTs its own result to the backend, with the
+  web UI only ever polling and displaying status, never reaching into the
+  operator's machine. Chose (3) — no browser security fight, reuses ~90%
+  of what Lane C already had, and the web UI's role stays the simplest
+  possible thing a webpage can do (read and display). The actual frontend
+  polling/status piece is deliberately NOT built yet — `apps/web` is
+  flagged in `CLAUDE.md` as often owned by a separate parallel agent
+  ("Antigravity"), and touching it without an explicit handoff risks
+  colliding with unseen in-progress work; this CLI stands alone as a real,
+  usable tool in the meantime.
+- **What it does:** looks up the target website's URL from
+  `--analysis-run-id` directly (same DB access `ingest_manual_tier0_result`
+  already had — no new API call needed), runs
+  `browser_uat_tier0_check_android.mjs` as a subprocess with the right env
+  vars, and — only if that subprocess succeeds — calls
+  `ingest_manual_tier0_result()` directly as a normal Python function call
+  (not a second subprocess hop) to record the result. A failed check is
+  never ingested, so a broken run can't silently write bad/partial data
+  into a report.
+- **Tests:** 6 new (URL lookup + missing-analysis-run error; successful
+  check gets ingested with the right env vars; a failed check is never
+  ingested; device-serial passthrough present/absent) — all via
+  monkeypatched `subprocess.run`/`ingest_manual_tier0_result`, no real
+  Node process or device touched. Full suite: 1081 passed, 1 skipped
+  (1075 baseline + 6 new).
 
 #### iOS/iPadOS Simulator Safari lane — shipped 2026-08-15, fully automated
 

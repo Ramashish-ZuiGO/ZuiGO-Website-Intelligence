@@ -60,6 +60,14 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: "24"
+          # No package.json/lockfile exists anywhere these jobs run (each
+          # does an ad-hoc npm install for a pinned package version) --
+          # v6 changed to auto-enable npm caching by default when it
+          # detects npm usage, which then hard-fails with "Dependencies
+          # lock file is not found" instead of just skipping the cache.
+          # Confirmed live: every job in this workflow failed at this
+          # exact step on the first real dispatch, 2026-08-15.
+          package-manager-cache: false
 
       - name: Install Playwright
         run: npm install playwright@1.60.0
@@ -87,6 +95,14 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: "24"
+          # No package.json/lockfile exists anywhere these jobs run (each
+          # does an ad-hoc npm install for a pinned package version) --
+          # v6 changed to auto-enable npm caching by default when it
+          # detects npm usage, which then hard-fails with "Dependencies
+          # lock file is not found" instead of just skipping the cache.
+          # Confirmed live: every job in this workflow failed at this
+          # exact step on the first real dispatch, 2026-08-15.
+          package-manager-cache: false
 
       - name: Install Playwright
         run: npm install playwright@1.60.0
@@ -114,6 +130,14 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: "24"
+          # No package.json/lockfile exists anywhere these jobs run (each
+          # does an ad-hoc npm install for a pinned package version) --
+          # v6 changed to auto-enable npm caching by default when it
+          # detects npm usage, which then hard-fails with "Dependencies
+          # lock file is not found" instead of just skipping the cache.
+          # Confirmed live: every job in this workflow failed at this
+          # exact step on the first real dispatch, 2026-08-15.
+          package-manager-cache: false
 
       - name: Install Selenium WebDriver
         run: npm install selenium-webdriver@4.47.0
@@ -152,6 +176,14 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: "24"
+          # No package.json/lockfile exists anywhere these jobs run (each
+          # does an ad-hoc npm install for a pinned package version) --
+          # v6 changed to auto-enable npm caching by default when it
+          # detects npm usage, which then hard-fails with "Dependencies
+          # lock file is not found" instead of just skipping the cache.
+          # Confirmed live: every job in this workflow failed at this
+          # exact step on the first real dispatch, 2026-08-15.
+          package-manager-cache: false
 
       - name: Install Selenium WebDriver and Appium
         run: |

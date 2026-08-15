@@ -22,6 +22,26 @@ def _load_workflow() -> dict:
     return yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
 
 
+def test_every_setup_node_step_disables_npm_cache() -> None:
+    # Real regression, found only via a live GitHub Actions run
+    # (2026-08-15): actions/setup-node@v6 auto-enables npm caching by
+    # default and hard-fails with "Dependencies lock file is not found"
+    # when none exists -- every job here does an ad-hoc `npm install
+    # <package>@<version>`, never a package.json/lockfile. All 6 jobs in
+    # the first real dispatch failed at this exact step before this fix.
+    workflow = _load_workflow()
+
+    for job_name, job in workflow["jobs"].items():
+        setup_node_steps = [
+            step for step in job["steps"] if step.get("uses", "").startswith("actions/setup-node")
+        ]
+        assert setup_node_steps, f"{job_name} has no actions/setup-node step"
+        for step in setup_node_steps:
+            assert step.get("with", {}).get("package-manager-cache") is False, (
+                f"{job_name}'s setup-node step must set package-manager-cache: false"
+            )
+
+
 def test_workflow_is_valid_yaml_with_expected_jobs() -> None:
     workflow = _load_workflow()
 

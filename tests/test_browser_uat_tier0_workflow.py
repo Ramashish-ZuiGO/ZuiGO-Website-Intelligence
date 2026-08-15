@@ -206,6 +206,28 @@ def test_ios_job_boots_a_real_simulator_and_exports_its_name() -> None:
     assert '"iOS" in runtime' in boot_command
 
 
+def test_ios_job_pre_launches_safari_before_the_check_step() -> None:
+    # 2nd real regression, found only via a live dispatch (2026-08-15): a
+    # freshly-booted simulator (from the previous fix) still isn't enough --
+    # Safari has to have actually run at least once for Apple's Remote Web
+    # Inspector to register it, or Appium's own session-creation budget can
+    # run out first. Reproduced twice on iPad Pro 13-inch (M5) even with a
+    # confirmed-booted simulator; iPhone happened to complete in time
+    # without this. Pre-launching Safari directly via simctl, before Appium
+    # ever tries to create a session, is the fix.
+    workflow = _load_workflow()
+    ios_job = workflow["jobs"]["ios-safari-simulator"]
+    run_commands = [step.get("run", "") for step in ios_job["steps"] if isinstance(step, dict)]
+    boot_command = next(command for command in run_commands if "simctl" in command)
+
+    assert '"simctl", "launch"' in boot_command
+    assert "com.apple.mobilesafari" in boot_command
+    # Ordering: launch must come after boot/bootstatus, not before.
+    boot_index = boot_command.index('"simctl", "bootstatus"')
+    launch_index = boot_command.index('"simctl", "launch"')
+    assert boot_index < launch_index
+
+
 def test_ios_job_boot_step_syntax_is_valid_python() -> None:
     import subprocess
 

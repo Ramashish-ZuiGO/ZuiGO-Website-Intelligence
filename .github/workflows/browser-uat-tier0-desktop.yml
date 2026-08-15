@@ -228,6 +228,7 @@ jobs:
           import json
           import os
           import subprocess
+          import time
 
           listing = json.loads(
               subprocess.check_output(["xcrun", "simctl", "list", "devices", "available", "-j"])
@@ -247,9 +248,26 @@ jobs:
           subprocess.check_call(["xcrun", "simctl", "boot", chosen["udid"]])
           subprocess.check_call(["xcrun", "simctl", "bootstatus", chosen["udid"], "-b"])
 
+          # 2nd real, live-verified finding (2026-08-15): booting the
+          # simulator (above) only gets the OS itself to "Booted" -- it
+          # does NOT mean Safari has ever run, and Apple's Remote Web
+          # Inspector (the "RWIApplication" Appium's error message refers
+          # to) only registers a browser once it has actually launched and
+          # connected to webinspectord. On a freshly-booted simulator with
+          # Safari never opened, Appium's own session-creation budget for
+          # "find or launch a compatible remote Safari" can run out before
+          # that first-launch handshake completes -- confirmed live: this
+          # reproduced on iPad Pro 13-inch (M5) twice in a row while iPhone
+          # 17 Pro happened to complete in time without it. Pre-launching
+          # Safari here, before Appium ever tries to create a session,
+          # turns "launch AND wait for RWI" into just "wait for RWI",
+          # which is faster and far more reliably within budget.
+          subprocess.check_call(["xcrun", "simctl", "launch", chosen["udid"], "com.apple.mobilesafari"])
+          time.sleep(5)
+
           with open(os.environ["GITHUB_ENV"], "a") as env_file:
               env_file.write(f"IOS_DEVICE_NAME={chosen['name']}\n")
-          print(f"Booted {chosen['name']} ({chosen['udid']})")
+          print(f"Booted and pre-launched Safari on {chosen['name']} ({chosen['udid']})")
           PYEOF
 
       - name: Run Tier 0 check (safari, ${{ matrix.device_type }} Simulator)

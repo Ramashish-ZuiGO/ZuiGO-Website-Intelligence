@@ -228,6 +228,25 @@ def test_ios_job_pre_launches_safari_before_the_check_step() -> None:
     assert boot_index < launch_index
 
 
+def test_ios_job_prefers_a_lighter_non_pro_device_and_waits_for_the_system_to_settle() -> None:
+    # 3rd real regression, found only via a live dispatch (2026-08-15): even
+    # with a booted simulator AND pre-launched Safari, iPad Pro 13-inch (M5)
+    # still failed with "Safari Driver server is not listening within
+    # 10000ms timeout." Reading appium-safari-driver's own source
+    # confirmed that timeout is hardcoded, not device-specific (no UDID
+    # argument to the spawned safaridriver process) -- pointing at system
+    # resource contention from a heavier simulator, not a logic bug. Two
+    # mitigations: prefer a lighter non-"Pro" device when available (still
+    # fully dynamic, never a hardcoded model), and a longer settle window.
+    workflow = _load_workflow()
+    ios_job = workflow["jobs"]["ios-safari-simulator"]
+    run_commands = [step.get("run", "") for step in ios_job["steps"] if isinstance(step, dict)]
+    boot_command = next(command for command in run_commands if "simctl" in command)
+
+    assert '"Pro" in device["name"]' in boot_command
+    assert "time.sleep(15)" in boot_command
+
+
 def test_ios_job_boot_step_syntax_is_valid_python() -> None:
     import subprocess
 

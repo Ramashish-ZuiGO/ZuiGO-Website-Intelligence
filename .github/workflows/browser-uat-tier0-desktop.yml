@@ -243,6 +243,12 @@ jobs:
           ]
           if not candidates:
               raise SystemExit(f"No available {device_type} simulator found.")
+          # Prefer a non-"Pro" model when one is available -- still fully
+          # dynamic (never hardcodes a specific device), but a plain
+          # iPhone/iPad is a lighter simulator to boot and run than a Pro
+          # variant, which matters because the failure investigated below
+          # is a resource-contention timing issue, not a logic bug.
+          candidates.sort(key=lambda device: "Pro" in device["name"])
           chosen = candidates[0]
 
           subprocess.check_call(["xcrun", "simctl", "boot", chosen["udid"]])
@@ -263,7 +269,22 @@ jobs:
           # turns "launch AND wait for RWI" into just "wait for RWI",
           # which is faster and far more reliably within budget.
           subprocess.check_call(["xcrun", "simctl", "launch", chosen["udid"], "com.apple.mobilesafari"])
-          time.sleep(5)
+
+          # 3rd real, live-verified finding (2026-08-15): even after the
+          # fix above, a DIFFERENT failure surfaced on iPad specifically --
+          # "Safari Driver server is not listening within 10000ms timeout."
+          # Read appium-safari-driver's own source (SafariDriverServer.start,
+          # lib/safari.ts): that 10-second timeout is hardcoded (not
+          # configurable via any capability) and applies to spawning a
+          # plain local `safaridriver -p <port> --diagnose` process -- it
+          # takes NO device/UDID argument, so it is identical regardless of
+          # iPhone vs iPad. The only thing that differs is system load on
+          # the runner at that moment, pointing to resource contention
+          # (a heavier simulator still settling) rather than a logic bug.
+          # Mitigated two ways: preferring a lighter non-"Pro" device above,
+          # and a longer settle window here before Appium's own session
+          # creation (and this local safaridriver spawn) is attempted.
+          time.sleep(15)
 
           with open(os.environ["GITHUB_ENV"], "a") as env_file:
               env_file.write(f"IOS_DEVICE_NAME={chosen['name']}\n")

@@ -86,6 +86,43 @@ def test_all_three_engines_and_both_viewports_execute_without_network() -> None:
     assert incompatible["result"] == "incompatible"
 
 
+def test_responsive_navigation_adapts_is_computed_per_engine_in_the_matrix() -> None:
+    # The 5th M3 check (docs/DEVICE_OS_BROWSER_QA_PLAN.md M3): wired through
+    # run_compatibility_analysis's real per-page-per-engine matrix, not just
+    # unit-tested in isolation. chromium's nav collapses at Mobile; firefox's
+    # doesn't -- must be tracked independently per engine, matching how
+    # `engines` state already is.
+    def runner(engine, _page, viewport, _profile):
+        adapting = engine == "chromium"
+        if viewport["name"] == "Desktop":
+            nav_count, toggle = 3, False
+        else:
+            nav_count, toggle = (0, True) if adapting else (3, False)
+        return {
+            "state": "tested",
+            "navigation_success": True,
+            "render_success": True,
+            "critical_element_available": True,
+            "interaction_failures": [],
+            "console_errors": [],
+            "javascript_errors": [],
+            "failed_resources": [],
+            "layout_overflow": False,
+            "viewport_problems": [],
+            "nav_visible_item_count": nav_count,
+            "has_navigation_toggle": toggle,
+            "accessibility_differences": [],
+            "duration_ms": 100,
+        }
+
+    result = run_compatibility_analysis(_pages(1), runner=runner)
+
+    adapts = result["matrix"][0]["responsive_navigation_adapts"]
+    assert adapts["chromium"] is True
+    assert adapts["firefox"] is False
+    assert adapts["webkit"] is False
+
+
 def test_default_runner_reuses_one_playwright_lifecycle(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -277,6 +314,29 @@ def test_webkit_never_represented_as_safari_verification() -> None:
     assert safari_entry["actual_verified_environments"] == []
     assert any("WebKit" in s for s in safari_entry["engineering_signals"])
     assert any("real Safari" in lim for lim in safari_entry["limitations"])
+
+
+def test_tablet_form_factors_are_documented_without_growing_the_matrix() -> None:
+    """iPad/Android-tablet are explicitly named (M1 decision, 2026-08-14) but
+    tracked within the existing 3-browser structure, not split into separate
+    verification rows -- that split is deferred to M4/M5 design."""
+    assert [entry["browser"] for entry in BRANDED_BROWSER_SCOPE] == [
+        "Google Chrome",
+        "Microsoft Edge",
+        "Apple Safari",
+    ]
+
+    safari_entry = next(e for e in BRANDED_BROWSER_SCOPE if e["browser"] == "Apple Safari")
+    assert "iPadOS 16+" in safari_entry["required_platforms"]
+    assert any("iPad" in lim for lim in safari_entry["limitations"])
+
+    chrome_entry = next(e for e in BRANDED_BROWSER_SCOPE if e["browser"] == "Google Chrome")
+    assert "tablet" in chrome_entry["platforms"].lower()
+    assert any("tablet" in lim.lower() for lim in chrome_entry["limitations"])
+
+    # Neither entry claims tablet verification just because it's now named.
+    assert safari_entry["verification_state"] == "NOT_VERIFIED"
+    assert chrome_entry["verification_state"] == "NOT_VERIFIED"
 
 
 def test_chromium_does_not_automatically_verify_edge() -> None:

@@ -99,6 +99,13 @@ class WorkerSettings(BaseSettings):
             results.append((name, int(width), int(height)))
         return results
 
+    # Tier 0 desktop browser UAT (device/OS/QA initiative M2, zero-cost lane).
+    # Optional: matches the AI-provider pattern -- absence must never block
+    # startup or the main analysis pipeline, only this on-demand capability.
+    github_actions_token: SecretStr | None = None
+    github_actions_repo: str = "Ramashish-ZuiGO/ZuiGO-Website-Intelligence"
+    github_actions_ref: str = "main"
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @property

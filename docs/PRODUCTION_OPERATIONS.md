@@ -252,6 +252,27 @@ Unexpected exceptions return a sanitized generic 500 with the request id
 preserved; stack traces go to server logs only. Never log secrets, tokens, or
 raw credentials.
 
+**Tier 0 desktop browser UAT** (docs/DEVICE_OS_BROWSER_QA_PLAN.md M2–M6) has
+its own parallel trace path, since it's deliberately decoupled from the main
+analysis pipeline:
+
+`request_id` (API log, `POST /analysis-runs/{id}/browser-uat/tier0`) →
+`execution_id` in the response → `browser-uat-tier0:{execution_id}:dispatch`
+task id → `correlation_id` embedded in the GitHub Actions run-name (the
+workflow_dispatch API returns no run id, so this is the only way to match a
+dispatched run back to its execution) → `browser_uat_tier0_page_results` /
+`browser_uat_tier0_viewport_results` rows → action items with
+`source_audit = "browser_uat_tier0"`.
+
+Only genuine failure/timeout points are logged explicitly (matching this
+codebase's existing convention — most worker tasks, including the main
+real-analysis pipeline, rely on persisted state as the primary trace
+mechanism, not exhaustive log lines): `browser_uat_tier0_dispatch_unavailable`,
+`browser_uat_tier0_poll_unavailable`, and `browser_uat_tier0_poll_timeout`
+each carry `execution_id`. The happy path is traced through the DB rows
+above, not custom success log lines, consistent with how `real_analysis.py`
+itself has no explicit logging either.
+
 ## 11. Security boundaries
 
 - CORS: exact origins only, never `*`.

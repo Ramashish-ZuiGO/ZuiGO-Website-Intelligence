@@ -1,0 +1,194 @@
+name: Browser UAT Tier 0 - Chrome/Edge/Safari (desktop + iOS Simulator)
+
+# M2 of the device/OS/browser QA initiative (docs/DEVICE_OS_BROWSER_QA_PLAN.md).
+# Drives REAL browsers against a target website's pages, on-demand only,
+# never automatic, so it never adds surprise execution volume to routine
+# analyses:
+#   - Chrome and Edge via Playwright's `channel` option (Lane A)
+#   - Desktop Safari via Selenium + Apple's built-in safaridriver (Lane B,
+#     since Playwright only ships its own WebKit build, never real Safari)
+#   - iOS/iPadOS Safari via Appium's Safari driver against the Simulator
+#     (macOS runners ship Xcode with Simulator runtimes preinstalled --
+#     fully automatable here, unlike Lane C's Android real-device lane,
+#     which has no free CI provider offering live adb access and is
+#     therefore manually operated -- see scripts/, not .github/scripts/)
+#
+# All under one workflow file/lane despite covering more than "desktop" now
+# -- same naming-simplicity tradeoff already made for the `lane` value
+# itself ("github_actions_chrome_edge" covers Safari and iOS too), see the
+# plan doc's Lane B/C decision log entries.
+#
+# Triggered by worker_app/integrations/browser_uat_tier0_dispatch.py via the
+# GitHub REST API workflow_dispatch endpoint. That endpoint returns no run id,
+# so `correlation_id` is embedded in `run-name` below and matched back during
+# polling -- the standard workaround for this well-known API gap.
+#
+# Android real-device (Lane C) is NOT covered here -- see scripts/ instead.
+
+on:
+  workflow_dispatch:
+    inputs:
+      correlation_id:
+        description: "Opaque id used to match this run back to its execution row"
+        required: true
+        type: string
+      target_url:
+        description: "Primary URL under test (used for logging/display only)"
+        required: true
+        type: string
+      pages:
+        description: "JSON array of page URLs to check"
+        required: true
+        type: string
+
+run-name: "Tier 0 desktop - ${{ inputs.correlation_id }}"
+
+permissions:
+  contents: read
+
+jobs:
+  chrome-edge-windows:
+    name: Chrome + Edge (Windows)
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        channel: [chrome, msedge]
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Install Playwright
+        run: npm install playwright@1.60.0
+
+      - name: Run Tier 0 check (${{ matrix.channel }})
+        env:
+          BROWSER_CHANNEL: ${{ matrix.channel }}
+          PLATFORM: windows
+          TARGET_PAGES: ${{ inputs.pages }}
+          RESULTS_PATH: tier0-results-${{ matrix.channel }}-windows.json
+        run: node .github/scripts/browser_uat_tier0_check.mjs
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tier0-results-${{ matrix.channel }}-windows
+          path: tier0-results-${{ matrix.channel }}-windows.json
+          retention-days: 30
+
+  chrome-macos:
+    name: Chrome (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Install Playwright
+        run: npm install playwright@1.60.0
+
+      - name: Run Tier 0 check (chrome)
+        env:
+          BROWSER_CHANNEL: chrome
+          PLATFORM: macos
+          TARGET_PAGES: ${{ inputs.pages }}
+          RESULTS_PATH: tier0-results-chrome-macos.json
+        run: node .github/scripts/browser_uat_tier0_check.mjs
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tier0-results-chrome-macos
+          path: tier0-results-chrome-macos.json
+          retention-days: 30
+
+  safari-macos:
+    name: Safari (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Install Selenium WebDriver
+        run: npm install selenium-webdriver@4.47.0
+
+      - name: Enable Safari remote automation
+        # safaridriver ships with macOS; it is not enabled by default. This
+        # must run before Selenium tries to build a Safari session, and
+        # relies on the runner's passwordless sudo (standard on GitHub-hosted
+        # macOS runners). See docs/DEVICE_OS_BROWSER_QA_PLAN.md M2 Lane B for
+        # citations on this step's reliability history.
+        run: sudo safaridriver --enable
+
+      - name: Run Tier 0 check (safari)
+        env:
+          PLATFORM: macos
+          TARGET_PAGES: ${{ inputs.pages }}
+          RESULTS_PATH: tier0-results-safari-macos.json
+        run: node .github/scripts/browser_uat_tier0_check_safari.mjs
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tier0-results-safari-macos
+          path: tier0-results-safari-macos.json
+          retention-days: 30
+
+  ios-safari-simulator:
+    name: Safari (iOS Simulator, ${{ matrix.device_type }})
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        device_type: [iPhone, iPad]
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Install Selenium WebDriver and Appium
+        run: |
+          npm install selenium-webdriver@4.47.0
+          npm install -g appium@3.6.0
+          appium driver install safari
+
+      - name: Enable Safari remote automation
+        # Listed as a top-level prerequisite by Appium's Safari driver docs,
+        # not just the macOS-target example -- see
+        # docs/DEVICE_OS_BROWSER_QA_PLAN.md's iOS lane entry.
+        run: sudo safaridriver --enable
+
+      - name: Start Appium server
+        # Appium 2+ defaults to base path "/" (matches
+        # usingServer("http://localhost:4723") with no suffix in the check
+        # script, no --base-path flag needed). Runs in the background; the
+        # retry loop below waits for its /status health endpoint before the
+        # check script tries to connect.
+        run: |
+          appium --log appium.log &
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:4723/status && exit 0
+            sleep 2
+          done
+          echo "Appium server did not become ready in time." >&2
+          exit 1
+
+      - name: Run Tier 0 check (safari, ${{ matrix.device_type }} Simulator)
+        env:
+          IOS_DEVICE_TYPE: ${{ matrix.device_type }}
+          TARGET_PAGES: ${{ inputs.pages }}
+          RESULTS_PATH: tier0-results-safari-${{ matrix.device_type }}.json
+        run: node .github/scripts/browser_uat_tier0_check_ios.mjs
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tier0-results-safari-${{ matrix.device_type }}
+          path: tier0-results-safari-${{ matrix.device_type }}.json
+          retention-days: 30

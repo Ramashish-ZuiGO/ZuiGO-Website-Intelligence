@@ -70,9 +70,13 @@ not "fix" their lint noise).
    `routes/report_delivery.py`) — bump `TEMPLATE_VERSION` whenever renderer
    output changes meaningfully.
 5. **Browser UAT truth contract (LOCKED)**: customer scope is exactly Google
-   Chrome (latest-2-stable @ UAT date; Win 10/11, macOS 13+, Android 12+),
-   Microsoft Edge (latest-2-stable; Win 10/11), Apple Safari (16.4+; macOS 13+,
-   iOS 16+). Machine states: `VERIFIED / PARTIALLY_VERIFIED / NOT_VERIFIED /
+   Chrome (latest-2-stable @ UAT date; Win 10/11, macOS 13+, Android 12+ phone
+   and tablet), Microsoft Edge (latest-2-stable; Win 10/11), Apple Safari
+   (16.4+; macOS 13+, iOS 16+, iPadOS 16+ — phone and tablet form factors are
+   named but share one verification state until per-form-factor tracking is
+   designed in the device/OS QA initiative's M4/M5, see
+   `docs/DEVICE_OS_BROWSER_QA_PLAN.md`). Machine states: `VERIFIED /
+   PARTIALLY_VERIFIED / NOT_VERIFIED /
    UNAVAILABLE_IN_CURRENT_ENVIRONMENT / NOT_TESTED`. **Chromium is never Chrome
    or Edge proof; WebKit is never Safari proof; Firefox is not customer UAT and
    is not scheduled by the standard workflow** (engines chromium+webkit run as

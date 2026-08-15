@@ -2,8 +2,17 @@ import hashlib
 import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Literal, Protocol
 from urllib.parse import urlsplit
+
+# M3 shared responsive-assertion contract (docs/DEVICE_OS_BROWSER_QA_PLAN.md).
+# Loaded once at import time; the same file is embedded in the M2 GitHub
+# Actions Tier 0 script (.github/scripts/browser_uat_tier0_check.mjs) so both
+# real-browser evidence paths agree on what "broken responsive" means.
+RESPONSIVE_ASSERTIONS_JS = (Path(__file__).parent / "responsive_assertions.js").read_text(
+    encoding="utf-8"
+)
 
 BrowserEngine = Literal["chromium", "firefox", "webkit"]
 CompatibilityState = Literal[
@@ -60,8 +69,8 @@ BRANDED_BROWSER_SCOPE: list[dict[str, Any]] = [
         "browser": "Google Chrome",
         "required_version_policy": "Latest 2 stable versions at the UAT date",
         "required_scope": "Latest 2 stable versions at the UAT date",
-        "required_platforms": ["Windows 10/11", "macOS 13+", "Android 12+"],
-        "platforms": "Windows 10/11, macOS 13+, Android 12+",
+        "required_platforms": ["Windows 10/11", "macOS 13+", "Android 12+ (phone and tablet)"],
+        "platforms": "Windows 10/11, macOS 13+, Android 12+ (phone and tablet)",
         "verification_state": "NOT_VERIFIED",
         "verification_state_label": "Not verified in current environment",
         "actual_tested_browser_version": None,
@@ -74,6 +83,12 @@ BRANDED_BROWSER_SCOPE: list[dict[str, Any]] = [
         "limitations": [
             "Chromium engine evidence is not equivalent to branded Chrome UAT",
             "Desktop Chromium emulation does not equal real Android Chrome verification",
+            (
+                "Android phone and Android tablet form factors are both in scope "
+                "but currently share one verification state; tablet-specific "
+                "layout regressions are not distinguished from phone results "
+                "until per-form-factor verification tracking is implemented"
+            ),
             VERSION_POLICY_LIMITATION,
         ],
         "related_engine": "chromium",
@@ -103,8 +118,8 @@ BRANDED_BROWSER_SCOPE: list[dict[str, Any]] = [
         "browser": "Apple Safari",
         "required_version_policy": "Safari 16.4 and above",
         "required_scope": "Safari 16.4 and above",
-        "required_platforms": ["macOS 13+", "iOS 16+"],
-        "platforms": "macOS 13+, iOS 16+",
+        "required_platforms": ["macOS 13+", "iOS 16+", "iPadOS 16+"],
+        "platforms": "macOS 13+, iOS 16+, iPadOS 16+",
         "verification_state": "NOT_VERIFIED",
         "verification_state_label": "Not verified in current environment",
         "actual_tested_browser_version": None,
@@ -116,11 +131,141 @@ BRANDED_BROWSER_SCOPE: list[dict[str, Any]] = [
         ],
         "limitations": [
             "WebKit engine evidence does not verify real Safari",
-            "Requires real Safari on macOS or iOS for verification",
+            "Requires real Safari on macOS, iOS, or iPadOS for verification",
+            (
+                "iPhone and iPad form factors are both in scope but currently "
+                "share one verification state; tablet-specific layout "
+                "regressions are not distinguished from phone results until "
+                "per-form-factor verification tracking is implemented"
+            ),
         ],
         "related_engine": "webkit",
     },
 ]
+
+# M5 evidence -> UAT-state mapping (docs/DEVICE_OS_BROWSER_QA_PLAN.md M5).
+# Explicit, reviewable mappings -- never fuzzy-matched -- from the M2 Tier 0
+# lane's short codes to BRANDED_BROWSER_SCOPE's identity. A new
+# platform/channel needs an entry here before its evidence can ever count
+# toward a required platform. "android" (Lane C, ChromeDriver over adb to a
+# real device -- manually operated, not GitHub-Actions-dispatched, see
+# scripts/browser_uat_tier0_check_android.mjs) was Chrome's last missing
+# required platform: with clean Windows + macOS + Android evidence all
+# present, Chrome can reach full VERIFIED through this path. "ios"/"ipados"
+# (Appium's Safari driver against the iOS/iPadOS Simulator,
+# .github/scripts/browser_uat_tier0_check_ios.mjs, fully automated inside
+# the same GitHub Actions workflow as Lane A/B) are Safari's last two
+# missing required platforms -- with clean macOS + iOS + iPadOS evidence,
+# Safari can now reach full VERIFIED too.
+TIER0_PLATFORM_LABELS: dict[str, str] = {
+    "windows": "Windows 10/11",
+    "macos": "macOS 13+",
+    "android": "Android 12+ (phone and tablet)",
+    "ios": "iOS 16+",
+    "ipados": "iPadOS 16+",
+}
+TIER0_BROWSER_CHANNELS: dict[str, str] = {
+    "Google Chrome": "chrome",
+    "Microsoft Edge": "msedge",
+    "Apple Safari": "safari",
+}
+
+
+def _summarize_tier0_platform(page_results: list[dict[str, Any]]) -> dict[str, Any]:
+    """Roll up one (browser, platform) pair's real Tier 0 page results."""
+    tested_pages = len(page_results)
+    passed_pages = sum(1 for result in page_results if result.get("status") == "pass")
+    failed_pages = tested_pages - passed_pages
+    browser_version = next(
+        (result.get("browser_version") for result in page_results if result.get("browser_version")),
+        None,
+    )
+    return {
+        "tested_pages": tested_pages,
+        "passed_pages": passed_pages,
+        "failed_pages": failed_pages,
+        "browser_version": browser_version,
+        "clean": failed_pages == 0 and tested_pages > 0,
+    }
+
+
+def apply_tier0_evidence(
+    row: dict[str, Any], tier0_page_results: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Fold real M2 Tier 0 desktop-lane evidence into one built UAT matrix
+    row, producing genuine VERIFIED/PARTIALLY_VERIFIED results instead of the
+    permanent NOT_VERIFIED placeholder -- without ever claiming a platform
+    that was not actually tested (e.g. Android, which has no Tier 0 lane
+    yet, so Chrome can reach at most PARTIALLY_VERIFIED through this path
+    alone, never full VERIFIED).
+
+    ``row`` is one already-built entry from _build_browser_uat_matrix (not a
+    raw BRANDED_BROWSER_SCOPE entry); ``tier0_page_results`` is the FULL set
+    of Tier 0 page results for this report (not pre-filtered by browser) as
+    plain dicts with at least browser_channel/platform/status/browser_version.
+    """
+    channel = TIER0_BROWSER_CHANNELS.get(row["browser"])
+    if channel is None:
+        return row  # no Tier 0 lane for this browser (e.g. Safari)
+
+    relevant = [result for result in tier0_page_results if result.get("browser_channel") == channel]
+    if not relevant:
+        return row  # no evidence at all -- stays exactly as built
+
+    by_platform: dict[str, list[dict[str, Any]]] = {}
+    for result in relevant:
+        by_platform.setdefault(str(result.get("platform")), []).append(result)
+
+    verified_environments = []
+    verified_count = 0
+    for platform_code in sorted(by_platform):
+        platform_label = TIER0_PLATFORM_LABELS.get(platform_code)
+        if platform_label is None:
+            continue  # unrecognized platform code -- never silently counted
+        summary = _summarize_tier0_platform(by_platform[platform_code])
+        environment_state = "VERIFIED" if summary["clean"] else "PARTIALLY_VERIFIED"
+        if environment_state == "VERIFIED":
+            verified_count += 1
+        verified_environments.append(
+            {
+                "platform": platform_label,
+                "browser_version": summary["browser_version"],
+                "verification_state": environment_state,
+                "tested_pages": summary["tested_pages"],
+                "passed_pages": summary["passed_pages"],
+                "failed_pages": summary["failed_pages"],
+                "evidence_source": "github_actions_chrome_edge",
+            }
+        )
+
+    if not verified_environments:
+        return row
+
+    required_count = len(row["required_platforms"])
+    row_state = "VERIFIED" if verified_count == required_count else "PARTIALLY_VERIFIED"
+    tier0_tested_pages = sum(env["tested_pages"] for env in verified_environments)
+    tier0_passed_pages = sum(env["passed_pages"] for env in verified_environments)
+    tier0_failed_pages = sum(env["failed_pages"] for env in verified_environments)
+    eligible = int(row["page_coverage"]["eligible_pages"])
+
+    return {
+        **row,
+        "verification_state": row_state,
+        "verification_state_label": UAT_VERIFICATION_STATE_LABELS.get(row_state, row_state),
+        "actual_verified_environments": verified_environments,
+        "actual_tested_browser_version": next(
+            (env["browser_version"] for env in verified_environments if env["browser_version"]),
+            None,
+        ),
+        "page_coverage": {
+            **row["page_coverage"],
+            "passed_pages": tier0_passed_pages,
+            "failed_pages": tier0_failed_pages,
+            "not_tested_pages": max(0, eligible - tier0_tested_pages),
+        },
+        "evidence_source": "real_browser_tier0",
+    }
+
 
 VERIFICATION_STATE_LABELS: dict[CompatibilityState, str] = {
     "compatible": "Engine compatible",
@@ -290,6 +435,7 @@ def run_compatibility_analysis(
     matrix = []
     for page in selected_pages:
         by_engine: dict[str, str] = {}
+        responsive_navigation_adapts: dict[str, bool | None] = {}
         page_observations = [item for item in observations if item["page_url"] == page["url"]]
         for engine in selected_profile.engines:
             engine_observations = [item for item in page_observations if item["engine"] == engine]
@@ -317,6 +463,9 @@ def run_compatibility_analysis(
             if state == "inconclusive" and deterministic_engine_failure and another_engine_works:
                 state = "incompatible"
             by_engine[engine] = state
+            responsive_navigation_adapts[engine] = compute_responsive_navigation_adapts(
+                engine_observations
+            )
         overall = classify_compatibility(
             page_observations,
             performance_difference_threshold=selected_profile.performance_difference_threshold,
@@ -326,6 +475,7 @@ def run_compatibility_analysis(
                 "page_url": page["url"],
                 "page_title": page.get("title"),
                 "engines": by_engine,
+                "responsive_navigation_adapts": responsive_navigation_adapts,
                 "result": overall,
                 "issue_count": sum(
                     bool(
@@ -423,12 +573,19 @@ def _build_browser_uat_matrix(
     engine_coverage: list[dict[str, Any]],
     *,
     uat_date: str | None = None,
+    tier0_page_results: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Build the customer-facing branded Browser UAT matrix.
 
     Branded page counts stay at zero unless an actual branded browser/platform
     was tested: engine execution is recorded only as an engineering signal and
     is never promoted to branded verification.
+
+    ``tier0_page_results`` (M5, optional -- backward compatible when omitted)
+    is real evidence from the M2 Tier 0 desktop lane; when present, folded in
+    per row via apply_tier0_evidence after the row is built from engine data,
+    so it can turn genuine NOT_VERIFIED placeholders into real VERIFIED/
+    PARTIALLY_VERIFIED results.
     """
     engine_map = {item["engine"]: item for item in engine_coverage}
     result = []
@@ -438,39 +595,40 @@ def _build_browser_uat_matrix(
         has_engine_evidence = bool(eng and eng["tested_pages"] > 0)
         eligible = int(eng["eligible_pages"]) if eng else 0
         state = str(entry["verification_state"])
-        result.append(
-            {
-                "browser": entry["browser"],
-                "required_version_policy": entry["required_version_policy"],
-                "required_scope": entry["required_scope"],
-                "required_platforms": list(entry["required_platforms"]),
-                "platforms": entry["platforms"],
-                "uat_date": uat_date,
-                "actual_tested_browser_version": entry["actual_tested_browser_version"],
-                "actual_tested_platform": entry["actual_tested_platform"],
-                "verification_state": state,
-                "verification_state_label": UAT_VERIFICATION_STATE_LABELS.get(state, state),
-                "actual_verified_environments": list(entry["actual_verified_environments"]),
-                # Branded page accounting: nothing is counted as passed unless a
-                # branded browser actually ran; the required scope stays not-tested.
-                "page_coverage": {
-                    "eligible_pages": eligible,
-                    "passed_pages": 0,
-                    "partial_pages": 0,
-                    "failed_pages": 0,
-                    "unavailable_pages": 0,
-                    "not_tested_pages": eligible,
-                },
-                "evidence_source": ("engineering_engine_signal" if has_engine_evidence else "none"),
-                "engineering_signals": (
-                    list(entry["engineering_signals"]) if has_engine_evidence else []
-                ),
-                "limitations": list(entry["limitations"]),
-                "related_engine": engine,
-                "engine_tested_pages": (eng["tested_pages"] if eng else 0),
-                "engine_eligible_pages": eligible,
-            }
-        )
+        row = {
+            "browser": entry["browser"],
+            "required_version_policy": entry["required_version_policy"],
+            "required_scope": entry["required_scope"],
+            "required_platforms": list(entry["required_platforms"]),
+            "platforms": entry["platforms"],
+            "uat_date": uat_date,
+            "actual_tested_browser_version": entry["actual_tested_browser_version"],
+            "actual_tested_platform": entry["actual_tested_platform"],
+            "verification_state": state,
+            "verification_state_label": UAT_VERIFICATION_STATE_LABELS.get(state, state),
+            "actual_verified_environments": list(entry["actual_verified_environments"]),
+            # Branded page accounting: nothing is counted as passed unless a
+            # branded browser actually ran; the required scope stays not-tested.
+            "page_coverage": {
+                "eligible_pages": eligible,
+                "passed_pages": 0,
+                "partial_pages": 0,
+                "failed_pages": 0,
+                "unavailable_pages": 0,
+                "not_tested_pages": eligible,
+            },
+            "evidence_source": ("engineering_engine_signal" if has_engine_evidence else "none"),
+            "engineering_signals": (
+                list(entry["engineering_signals"]) if has_engine_evidence else []
+            ),
+            "limitations": list(entry["limitations"]),
+            "related_engine": engine,
+            "engine_tested_pages": (eng["tested_pages"] if eng else 0),
+            "engine_eligible_pages": eligible,
+        }
+        if tier0_page_results:
+            row = apply_tier0_evidence(row, tier0_page_results)
+        result.append(row)
     return result
 
 
@@ -568,6 +726,71 @@ class _ReusablePlaywrightPageRunner:
             self._playwright = None
 
 
+def compute_responsive_navigation_adapts(
+    page_observations: list[dict[str, Any]],
+) -> bool | None:
+    """The 5th M3 responsive check (docs/DEVICE_OS_BROWSER_QA_PLAN.md M3):
+    whether navigation genuinely adapts across viewports -- an item count
+    change, or a toggle/hamburger control appearing at mobile -- rather than
+    the existing weaker `responsive_navigation` per-viewport field, which
+    only checks that SOME nav-like element exists at all (true even for a
+    static nav that just overflows or visually shrinks without adapting).
+
+    Compares the raw nav_visible_item_count/has_navigation_toggle fields
+    responsive_assertions.js computes per viewport. That comparison can't
+    live in the shared JS module itself -- it needs BOTH a Desktop and a
+    Mobile result together, which doesn't fit a single page.evaluate() call
+    (see that module's header) -- so it lives here instead, run once per
+    page+engine over that pair's two observations.
+
+    Returns None (inconclusive, never fabricated) when either viewport's
+    data is missing -- e.g. only one viewport was tested, or the assertion
+    script failed at one of them and evaluate_responsive_assertions's
+    failure fallback omitted these fields.
+    """
+    by_viewport = {str(item.get("viewport", {}).get("name")): item for item in page_observations}
+    desktop = by_viewport.get("Desktop")
+    mobile = by_viewport.get("Mobile")
+    if desktop is None or mobile is None:
+        return None
+
+    desktop_count = desktop.get("nav_visible_item_count")
+    mobile_count = mobile.get("nav_visible_item_count")
+    mobile_toggle = mobile.get("has_navigation_toggle")
+    if desktop_count is None or mobile_count is None or mobile_toggle is None:
+        return None
+
+    # Genuine adaptation: a toggle appears at mobile, OR fewer nav items are
+    # directly visible/clickable at mobile (collapsed behind a menu) -- not
+    # just visually smaller or overlapping, which horizontal_overflow/
+    # overlapping_elements already flag separately.
+    return bool(mobile_toggle) or mobile_count < desktop_count
+
+
+def evaluate_responsive_assertions(page: Any, viewport: dict[str, int | str]) -> dict[str, Any]:
+    """Run the M3 shared assertion contract against the current page state.
+
+    Isolated from _run_playwright_observation so the failure-fallback branch
+    is directly unit-testable with a fake page object, without needing a real
+    browser to force page.evaluate() to raise.
+    """
+    from playwright.sync_api import Error, TimeoutError
+
+    viewport_name = str(viewport.get("name") or "viewport")
+    viewport_width = int(viewport["width"])
+    viewport_height = int(viewport["height"])
+    try:
+        return page.evaluate(
+            RESPONSIVE_ASSERTIONS_JS,
+            [viewport_name, viewport_width, viewport_height],
+        )
+    except (Error, TimeoutError):
+        # The page loaded (we got this far) but the assertion script itself
+        # failed -- report no problems found rather than fabricating a false
+        # overflow=True.
+        return {"horizontal_overflow": False, "viewport_problems": []}
+
+
 def _run_playwright_observation(
     browser: Any,
     page_record: dict[str, Any],
@@ -655,12 +878,8 @@ def _run_playwright_observation(
             render_success = bool(page.locator("body").count())
             critical_selector = str(page_record.get("critical_selector") or "main, h1")
             critical_available = bool(page.locator(critical_selector).count())
-            overflow = bool(
-                page.evaluate(
-                    "() => document.documentElement.scrollWidth > "
-                    "document.documentElement.clientWidth"
-                )
-            )
+            responsive_result = evaluate_responsive_assertions(page, viewport)
+            overflow = bool(responsive_result.get("horizontal_overflow"))
             final_url = page.url
             validate_and_normalize_public_url(final_url)
             status = response.status if response else None
@@ -676,7 +895,9 @@ def _run_playwright_observation(
                 "javascript_errors": javascript_errors,
                 "failed_resources": failed_resources,
                 "layout_overflow": overflow,
-                "viewport_problems": [],
+                "viewport_problems": list(responsive_result.get("viewport_problems") or []),
+                "nav_visible_item_count": responsive_result.get("nav_visible_item_count"),
+                "has_navigation_toggle": responsive_result.get("has_navigation_toggle"),
                 "interaction_failures": [],
                 "accessibility_differences": [],
                 "duration_ms": round((time.monotonic() - started) * 1000, 2),

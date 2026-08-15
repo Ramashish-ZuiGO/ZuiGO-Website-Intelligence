@@ -6,6 +6,7 @@ from app.api.routes import (
     agent_platform_router,
     analysis_comparison_router,
     analysis_runs_router,
+    browser_uat_tier0_router,
     discovery_router,
     health_router,
     metadata_router,
@@ -29,6 +30,7 @@ v1_router.include_router(agent_platform_router)
 v1_router.include_router(analysis_comparison_router)
 v1_router.include_router(action_plan_router)
 v1_router.include_router(analysis_runs_router)
+v1_router.include_router(browser_uat_tier0_router)
 v1_router.include_router(discovery_router)
 v1_router.include_router(page_analysis_router)
 v1_router.include_router(projects_router)

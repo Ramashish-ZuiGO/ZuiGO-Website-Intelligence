@@ -177,3 +177,9 @@ class ActionGenerationStartResponse(BaseModel):
     status: str
     generation_execution_id: uuid.UUID
     page_analysis_execution_id: uuid.UUID
+
+
+class Tier0ActionGenerationStartResponse(BaseModel):
+    status: str
+    generation_execution_id: uuid.UUID
+    browser_uat_tier0_execution_id: uuid.UUID

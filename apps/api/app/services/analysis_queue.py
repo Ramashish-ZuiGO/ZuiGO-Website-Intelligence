@@ -7,6 +7,7 @@ DISCOVERY_TASK_NAME = "worker.run_discovery"
 PAGE_ANALYSIS_TASK_NAME = "worker.run_page_analysis"
 WORKFLOW_TASK_NAME = "worker.run_workflow_execution"
 REAL_ANALYSIS_TASK_NAME = "worker.run_real_analysis_journey"
+BROWSER_UAT_TIER0_DISPATCH_TASK_NAME = "worker.dispatch_browser_uat_tier0"
 
 
 def enqueue_analysis(analysis_run_id: str) -> str:
@@ -95,6 +96,21 @@ def enqueue_page_analysis(discovery_run_id: str, page_analysis_execution_id: str
         result = queue_client.send_task(
             PAGE_ANALYSIS_TASK_NAME,
             args=[discovery_run_id, page_analysis_execution_id],
+        )
+        return result.id
+    finally:
+        queue_client.close()
+
+
+def enqueue_browser_uat_tier0(execution_id: str) -> str:
+    redis_url = get_settings().redis_url
+    queue_client = Celery("website_intelligence_api", broker=redis_url)
+    task_id = f"browser-uat-tier0:{execution_id}:dispatch"
+    try:
+        result = queue_client.send_task(
+            BROWSER_UAT_TIER0_DISPATCH_TASK_NAME,
+            args=[execution_id],
+            task_id=task_id,
         )
         return result.id
     finally:

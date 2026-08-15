@@ -19,10 +19,17 @@ from app.models.action_plan import (
     ActionStatusHistory,
 )
 from app.models.analysis_finding import AnalysisFinding
+from app.models.browser_uat_tier0 import (
+    BrowserUatTier0Execution,
+    BrowserUatTier0PageResult,
+    BrowserUatTier0ViewportResult,
+)
 from app.models.page_analysis_run import PageAnalysisRun
+from app.models.website_page import WebsitePage
 from app.services.priority import calculate_priority_score
 
 PAGE_ANALYSIS_SOURCE = "page_analysis"
+TIER0_SOURCE = "browser_uat_tier0"
 
 FINDING_TO_ACTION_MAP: dict[str, dict[str, Any]] = {
     "MISSING_PAGE_TITLE": {
@@ -402,6 +409,81 @@ FINDING_TO_ACTION_MAP: dict[str, dict[str, Any]] = {
         "expected_result": "Clean browser console without JavaScript errors, improved page stability and functionality.",
         "limitations": "This check captures errors from a single page load. Some errors may depend on specific user interactions.",
         "score_impact": 20,
+    },
+    # M6: device/OS/browser QA initiative (docs/DEVICE_OS_BROWSER_QA_PLAN.md).
+    # Sourced from real branded-browser evidence (M2's Tier 0 desktop lane),
+    # not engine emulation -- see source_audit on the resulting action item.
+    "TIER0_HORIZONTAL_OVERFLOW": {
+        "issue_title": "Page overflows the viewport horizontally on a real browser",
+        "category": "responsive_design",
+        "severity": "high",
+        "grouping_key": "tier0_horizontal_overflow",
+        "estimated_effort": "medium",
+        "business_impact": "moderate",
+        "responsible_area": "frontend",
+        "responsible_role": "Developer",
+        "action_location": "Page layout CSS",
+        "why_this_matters": "When page content is wider than the viewport, mobile and narrow-window users must scroll sideways to read content or reach controls. This was observed on a real installed browser at the affected viewport width, not an emulated engine, so it reflects what an actual customer would experience.",
+        "exact_correction": "Find the element(s) exceeding the viewport width (an image, table, fixed-width container, or unwrapped long text/URL) and constrain them with max-width: 100%, word-break, or responsive layout rules.",
+        "implementation_steps": "1. Open the affected page in browser DevTools at the reported viewport width.\n2. Use the DevTools element inspector to find which element's right edge exceeds the viewport.\n3. Apply max-width: 100% (images/media), overflow-wrap/word-break (long text), or restructure fixed-width layout containers to fluid/percentage widths.\n4. Re-check at both the reported viewport and neighbouring breakpoints to avoid regressing them.",
+        "verification_steps": "1. Load the page in a real browser at the reported viewport width.\n2. Confirm no horizontal scrollbar appears and no content is cut off on either edge.\n3. Re-run the Tier 0 browser check for this page.",
+        "expected_result": "The page renders within the viewport width with no horizontal scrolling required, at the tested viewport size.",
+        "limitations": "This check covers the viewport widths actually tested by the Tier 0 lane, not every possible screen size.",
+        "score_impact": 12,
+    },
+    "TIER0_CLIPPED_ELEMENTS": {
+        "issue_title": "Critical page elements extend beyond the visible viewport",
+        "category": "responsive_design",
+        "severity": "high",
+        "grouping_key": "tier0_clipped_elements",
+        "estimated_effort": "medium",
+        "business_impact": "moderate",
+        "responsible_area": "frontend",
+        "responsible_role": "Developer",
+        "action_location": "Page layout CSS",
+        "why_this_matters": "Navigation, headings, and primary controls that extend past the left or right edge of the viewport can become partially or fully unreachable, blocking users from core page functionality. This was observed on a real installed browser, not an emulated engine.",
+        "exact_correction": "Identify the clipped element(s) (nav, main, h1, button, or input) and adjust their positioning, width, or containing layout so they stay within the viewport bounds at the affected width.",
+        "implementation_steps": "1. Open the affected page in browser DevTools at the reported viewport width.\n2. Identify which of the flagged elements (nav/main/h1/button/input) has a bounding box extending past the left or right edge.\n3. Fix the containing layout (remove fixed widths/negative margins/absolute positioning causing the overflow, or add responsive constraints).\n4. Re-check at the reported viewport and neighbouring breakpoints.",
+        "verification_steps": "1. Load the page in a real browser at the reported viewport width.\n2. Confirm navigation, headings, and controls are fully visible and reachable within the viewport.\n3. Re-run the Tier 0 browser check for this page.",
+        "expected_result": "Critical page elements remain fully within the viewport bounds and reachable at the tested viewport size.",
+        "limitations": "This check covers the specific elements (nav, main, h1, button, input) and viewport widths actually tested by the Tier 0 lane.",
+        "score_impact": 12,
+    },
+    "TIER0_OVERLAPPING_ELEMENTS": {
+        "issue_title": "Page elements visually overlap on a real browser",
+        "category": "responsive_design",
+        "severity": "medium",
+        "grouping_key": "tier0_overlapping_elements",
+        "estimated_effort": "medium",
+        "business_impact": "moderate",
+        "responsible_area": "frontend",
+        "responsible_role": "Developer",
+        "action_location": "Page layout CSS",
+        "why_this_matters": "Elements whose bounding boxes collide at a given viewport width typically indicate a layout bug -- text overlapping an image, a button hidden behind another element, or content that fails to reflow. This was observed on a real installed browser at the affected viewport width.",
+        "exact_correction": "Find the colliding elements and fix the layout causing the overlap (spacing, positioning, flex/grid rules, or z-index stacking that hides one element behind another).",
+        "implementation_steps": "1. Open the affected page in browser DevTools at the reported viewport width.\n2. Use the element inspector to identify the overlapping elements from the evidence.\n3. Adjust spacing, flex/grid layout, or positioning so the elements no longer collide.\n4. Re-check at the reported viewport and neighbouring breakpoints.",
+        "verification_steps": "1. Load the page in a real browser at the reported viewport width.\n2. Visually confirm the previously overlapping elements no longer collide and both remain usable.\n3. Re-run the Tier 0 browser check for this page.",
+        "expected_result": "Page elements no longer visually overlap at the tested viewport size.",
+        "limitations": "This check flags bounding-box collisions between visible elements; it does not evaluate whether an overlap is a deliberate design choice (e.g. a decorative background layer).",
+        "score_impact": 8,
+    },
+    "TIER0_SMALL_TAP_TARGETS": {
+        "issue_title": "Interactive elements are smaller than the recommended tap-target size",
+        "category": "accessibility",
+        "severity": "medium",
+        "grouping_key": "tier0_small_tap_targets",
+        "estimated_effort": "low",
+        "business_impact": "moderate",
+        "responsible_area": "frontend",
+        "responsible_role": "Developer",
+        "action_location": "Interactive element styling",
+        "why_this_matters": "WCAG 2.5.5 recommends interactive elements be at least 24x24 CSS pixels, with adequate spacing from neighbouring targets. Undersized, closely-packed controls are hard to tap accurately on touchscreens, and this was measured against real interactive elements in a real installed browser.",
+        "exact_correction": "Increase the affected element's tappable area (padding, min-width/min-height) to at least 24x24 CSS pixels, or increase spacing from adjacent interactive elements.",
+        "implementation_steps": "1. Identify the undersized elements from the evidence (element type and accessible label are included per sample).\n2. Increase padding or set min-width/min-height: 24px on the affected elements.\n3. Where elements are tightly packed, add margin/spacing so adjacent targets do not overlap when the tap area is expanded.\n4. Re-check at the reported viewport width.",
+        "verification_steps": "1. Load the page in a real browser at the reported viewport width.\n2. Confirm the flagged elements now measure at least 24x24 CSS pixels with adequate spacing.\n3. Re-run the Tier 0 browser check for this page.",
+        "expected_result": "Interactive elements meet the WCAG 2.5.5 minimum target size with adequate spacing at the tested viewport size.",
+        "limitations": "This check measures rendered element size and spacing only; it does not evaluate touch-target usability on physical hardware.",
+        "score_impact": 6,
     },
 }
 
@@ -880,6 +962,316 @@ def _create_or_update_action(
         limitations=mapping["limitations"],
         evidence_summary=evidence,
         source_audit=source_audit,
+        status="open",
+    )
+    db.add(item)
+    db.flush()
+
+    history = ActionStatusHistory(
+        action_item_id=item.id,
+        previous_status="",
+        new_status="open",
+        source="system",
+    )
+    db.add(history)
+
+    return item
+
+
+def _resolve_website_page(db: Session, website_id: uuid.UUID, url: str) -> WebsitePage | None:
+    """Match a Tier 0 page result's raw URL to a real discovered WebsitePage.
+
+    Required because ActionItem.website_page_id is a NOT NULL real foreign
+    key -- Tier 0 pages are checked by raw URL (see M2), with no natural
+    WebsitePage relationship of their own. Returns None, never a fabricated
+    row, when no discovered page matches; the caller must then count that
+    page as insufficient evidence rather than invent a page link.
+    """
+    return db.scalar(
+        select(WebsitePage).where(
+            WebsitePage.website_id == website_id,
+            (WebsitePage.normalized_url == url)
+            | (WebsitePage.original_url == url)
+            | (WebsitePage.final_url == url),
+        )
+    )
+
+
+def _tier0_recommendations(
+    page_result: BrowserUatTier0PageResult,
+    viewport_results: list[BrowserUatTier0ViewportResult],
+) -> list[dict[str, Any]]:
+    """Translate real M3 structural findings for one Tier 0 page result into
+    the same {finding_code, evidence, ...} recommendation shape
+    _generate_recommendations_from_run produces -- one recommendation per
+    PROBLEM CATEGORY actually observed, not one per viewport, so a page
+    failing the same check at two viewports becomes one action, not two."""
+    results: list[dict[str, Any]] = []
+    seen_codes: set[str] = set()
+
+    def _add(
+        finding_code: str, viewport: BrowserUatTier0ViewportResult, extra: dict[str, Any]
+    ) -> None:
+        if finding_code in seen_codes:
+            return
+        seen_codes.add(finding_code)
+        results.append(
+            {
+                "finding_code": finding_code,
+                "evidence": {
+                    "page_url": page_result.url,
+                    "browser_channel": page_result.browser_channel,
+                    "platform": page_result.platform,
+                    "browser_version": page_result.browser_version,
+                    "viewport_name": viewport.viewport_name,
+                    "viewport_width": viewport.viewport_width,
+                    "viewport_height": viewport.viewport_height,
+                    "viewport_problems": list(viewport.viewport_problems),
+                    **extra,
+                },
+                "confidence_percent": 100,
+                "source": TIER0_SOURCE,
+            }
+        )
+
+    for viewport in viewport_results:
+        if viewport.horizontal_overflow:
+            _add("TIER0_HORIZONTAL_OVERFLOW", viewport, {})
+        if viewport.critical_elements_outside_viewport > 0:
+            _add(
+                "TIER0_CLIPPED_ELEMENTS",
+                viewport,
+                {"clipped_element_count": viewport.critical_elements_outside_viewport},
+            )
+        if viewport.overlapping_elements > 0:
+            _add(
+                "TIER0_OVERLAPPING_ELEMENTS",
+                viewport,
+                {"overlapping_element_count": viewport.overlapping_elements},
+            )
+        if viewport.small_tap_targets > 0:
+            _add(
+                "TIER0_SMALL_TAP_TARGETS",
+                viewport,
+                {
+                    "small_tap_target_count": viewport.small_tap_targets,
+                    "tap_target_samples": list(viewport.tap_target_samples),
+                },
+            )
+
+    return results
+
+
+def generate_tier0_actions(
+    db: Session,
+    website_id: uuid.UUID,
+    browser_uat_tier0_execution_id: uuid.UUID,
+    generation_execution_id: uuid.UUID | None = None,
+) -> ActionGenerationExecution:
+    """M6: convert real Tier 0 desktop-lane structural problems (M3) into
+    action items, reusing the SAME entity model, status machine, and
+    priority formula as generate_actions above -- a parallel ENTRY POINT,
+    not a parallel system. A dedicated function rather than a branch inside
+    generate_actions because Tier 0's execution shape (decoupled, raw-URL
+    based, no PageAnalysisRun) does not fit that function's per-page-analysis
+    loop -- see docs/DEVICE_OS_BROWSER_QA_PLAN.md M6 decision log.
+
+    ActionGenerationExecution.page_analysis_execution_id is not a real
+    foreign key (see the model) and is reused here to hold the Tier 0
+    execution id, so this generation is idempotent and traceable the same
+    way as the page-analysis path; source_audit on every resulting action
+    item is set to TIER0_SOURCE so it is never confused with page-analysis
+    evidence.
+    """
+    if generation_execution_id is None:
+        generation_execution_id = uuid.uuid4()
+
+    existing = db.get(ActionGenerationExecution, generation_execution_id)
+    if existing is not None:
+        return existing
+
+    tier0_execution = db.get(BrowserUatTier0Execution, browser_uat_tier0_execution_id)
+    if tier0_execution is None:
+        raise ValueError("Browser UAT Tier 0 execution is unavailable.")
+
+    execution = ActionGenerationExecution(
+        id=generation_execution_id,
+        website_id=website_id,
+        page_analysis_execution_id=browser_uat_tier0_execution_id,
+        status="running",
+        started_at=datetime.now(UTC),
+    )
+    db.add(execution)
+    db.flush()
+
+    page_results = list(
+        db.scalars(
+            select(BrowserUatTier0PageResult).where(
+                BrowserUatTier0PageResult.execution_id == browser_uat_tier0_execution_id,
+            )
+        )
+    )
+
+    total_processed = 0
+    total_generated = 0
+    unsupported = 0
+    insufficient = 0
+    groups_cache: dict[str, ActionGroup] = {}
+
+    for page_result in page_results:
+        website_page = _resolve_website_page(db, website_id, page_result.url)
+        viewport_results = list(
+            db.scalars(
+                select(BrowserUatTier0ViewportResult).where(
+                    BrowserUatTier0ViewportResult.page_result_id == page_result.id,
+                )
+            )
+        )
+
+        for recommendation in _tier0_recommendations(page_result, viewport_results):
+            total_processed += 1
+            mapping = FINDING_TO_ACTION_MAP.get(recommendation["finding_code"])
+            if mapping is None:
+                unsupported += 1
+                continue
+            if website_page is None:
+                # No discovered page matches this Tier 0 URL -- cannot create
+                # an action item without a real website_page_id; honestly
+                # counted as insufficient evidence rather than fabricating one.
+                insufficient += 1
+                continue
+
+            _create_or_update_tier0_action(
+                db=db,
+                execution=execution,
+                website_id=website_id,
+                website_page=website_page,
+                page_result=page_result,
+                mapping=mapping,
+                groups_cache=groups_cache,
+                finding_identity=recommendation["finding_code"],
+                evidence=recommendation["evidence"],
+                confidence_percent=recommendation["confidence_percent"],
+            )
+            total_generated += 1
+
+    for group in groups_cache.values():
+        group.affected_page_count = len(group.actions)
+        statuses = {action.status for action in group.actions}
+        group.status = statuses.pop() if len(statuses) == 1 else "mixed"
+
+    execution.status = "completed"
+    execution.completed_at = datetime.now(UTC)
+    execution.total_findings_processed = total_processed
+    execution.total_actions_generated = total_generated
+    execution.unsupported_finding_count = unsupported
+    execution.insufficient_evidence_count = insufficient
+    db.flush()
+
+    return execution
+
+
+def _create_or_update_tier0_action(
+    db: Session,
+    execution: ActionGenerationExecution,
+    website_id: uuid.UUID,
+    website_page: WebsitePage,
+    page_result: BrowserUatTier0PageResult,
+    mapping: dict[str, Any],
+    groups_cache: dict[str, ActionGroup],
+    finding_identity: str,
+    evidence: dict[str, Any],
+    confidence_percent: int = 100,
+) -> ActionItem:
+    """Tier 0 analogue of _create_or_update_action -- same grouping/priority/
+    status-history mechanics, keyed by a resolved WebsitePage instead of a
+    PageAnalysisRun, since Tier 0 has no page-analysis run of its own."""
+    priority_score_val, priority_components = calculate_priority_score(
+        severity=mapping["severity"],
+        affected_page_count=1,
+        estimated_score_impact=mapping["score_impact"],
+        confidence_percent=confidence_percent,
+        implementation_effort=mapping["estimated_effort"],
+        business_impact=mapping["business_impact"],
+    )
+    confidence_label = _classify_confidence(confidence_percent)
+
+    group_key = mapping["grouping_key"]
+    group = groups_cache.get(group_key)
+    if group is None:
+        group = ActionGroup(
+            generation_execution_id=execution.id,
+            website_id=website_id,
+            grouping_key=group_key,
+            issue_title=mapping["issue_title"],
+            category=mapping["category"],
+            severity=mapping["severity"],
+            priority_score=priority_score_val,
+            priority_formula_version="1.0.0",
+            confidence=confidence_label,
+            estimated_effort=mapping["estimated_effort"],
+            business_impact=mapping["business_impact"],
+            responsible_area=mapping["responsible_area"],
+            responsible_role=mapping["responsible_role"],
+            action_location=mapping["action_location"],
+            why_this_matters=mapping["why_this_matters"],
+            exact_correction=mapping["exact_correction"],
+            implementation_steps=mapping["implementation_steps"],
+            verification_steps=mapping["verification_steps"],
+            expected_result=mapping["expected_result"],
+            limitations=mapping["limitations"],
+            evidence_summary=evidence,
+            source_audit=TIER0_SOURCE,
+            priority_components=priority_components,
+            affected_page_count=0,
+            status="open",
+        )
+        db.add(group)
+        db.flush()
+        groups_cache[group_key] = group
+
+    existing_action = db.scalar(
+        select(ActionItem).where(
+            ActionItem.generation_execution_id == execution.id,
+            ActionItem.source_finding_identity == finding_identity,
+            ActionItem.website_page_id == website_page.id,
+        )
+    )
+    if existing_action is not None:
+        return existing_action
+
+    item = ActionItem(
+        generation_execution_id=execution.id,
+        action_group_id=group.id,
+        website_id=website_id,
+        page_analysis_run_id=None,
+        website_page_id=website_page.id,
+        source_finding_identity=finding_identity,
+        source_page_analysis_run_id=None,
+        requested_url=page_result.url,
+        final_url=page_result.url,
+        page_title=None,
+        issue_title=mapping["issue_title"],
+        issue_category=mapping["category"],
+        severity=mapping["severity"],
+        priority_score=priority_score_val,
+        priority_formula_version="1.0.0",
+        priority_components=priority_components,
+        confidence=confidence_label,
+        confidence_percent=confidence_percent,
+        estimated_effort=mapping["estimated_effort"],
+        business_impact=mapping["business_impact"],
+        responsible_area=mapping["responsible_area"],
+        responsible_role=mapping["responsible_role"],
+        action_location=mapping["action_location"],
+        why_this_matters=mapping["why_this_matters"],
+        exact_correction=mapping["exact_correction"],
+        implementation_steps=mapping["implementation_steps"],
+        verification_steps=mapping["verification_steps"],
+        expected_result=mapping["expected_result"],
+        limitations=mapping["limitations"],
+        evidence_summary=evidence,
+        source_audit=TIER0_SOURCE,
         status="open",
     )
     db.add(item)

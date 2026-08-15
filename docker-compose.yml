@@ -118,6 +118,14 @@ services:
       DISCOVERY_DEADLINE_SECONDS: ${DISCOVERY_DEADLINE_SECONDS:-600}
       DISCOVERY_MAX_RESPONSE_BYTES: ${DISCOVERY_MAX_RESPONSE_BYTES:-2000000}
       DISCOVERY_INCLUDE_VERIFIED_SUBDOMAINS: ${DISCOVERY_INCLUDE_VERIFIED_SUBDOMAINS:-false}
+      # Optional -- browser UAT Tier 0 (docs/DEVICE_OS_BROWSER_QA_PLAN.md M2).
+      # Absence never blocks startup or the main analysis pipeline;
+      # _build_dispatch_client treats both "unset" and an empty string as
+      # not-configured (see that function's comment for why the distinction
+      # matters with ${VAR:-} substitution).
+      GITHUB_ACTIONS_TOKEN: ${GITHUB_ACTIONS_TOKEN:-}
+      GITHUB_ACTIONS_REPO: ${GITHUB_ACTIONS_REPO:-Ramashish-ZuiGO/ZuiGO-Website-Intelligence}
+      GITHUB_ACTIONS_REF: ${GITHUB_ACTIONS_REF:-main}
     healthcheck:
       test:
         [

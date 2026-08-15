@@ -16,6 +16,7 @@ celery_app.conf.update(
         "worker_app.tasks.page_analysis",
         "worker_app.tasks.real_analysis",
         "worker_app.tasks.agent_platform",
+        "worker_app.tasks.browser_uat_tier0",
     ],
     task_serializer="json",
     accept_content=["json"],

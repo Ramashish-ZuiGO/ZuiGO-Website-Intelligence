@@ -13,6 +13,7 @@ from app.models import (
     ActionGroup,
     ActionItem,
     ActionStatusHistory,
+    BrowserUatTier0Execution,
     PageAnalysisRun,
     Website,
     validate_action_transition,
@@ -30,8 +31,9 @@ from app.schemas.action_plan import (
     BulkStatusUpdateResult,
     PaginatedResponse,
     StatusUpdateRequest,
+    Tier0ActionGenerationStartResponse,
 )
-from app.services.action_generation import generate_actions
+from app.services.action_generation import generate_actions, generate_tier0_actions
 
 router = APIRouter(prefix="/websites/{website_id}/action-plan", tags=["action-plan"])
 DatabaseSession = Annotated[Session, Depends(get_db)]
@@ -101,6 +103,55 @@ def start_action_generation(
         status=result.status,
         generation_execution_id=result.id,
         page_analysis_execution_id=page_analysis_execution_id,
+    )
+
+
+@router.post(
+    "/generate-tier0",
+    response_model=Tier0ActionGenerationStartResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def start_tier0_action_generation(
+    website_id: uuid.UUID,
+    browser_uat_tier0_execution_id: uuid.UUID,
+    db: DatabaseSession,
+) -> Tier0ActionGenerationStartResponse:
+    """M6: generate action items from a completed Tier 0 desktop-lane
+    execution's real structural findings. A separate endpoint from
+    /generate rather than an overloaded parameter, since the two source
+    pipelines (page-analysis findings vs. Tier 0 browser-UAT results) are
+    structurally different -- see docs/DEVICE_OS_BROWSER_QA_PLAN.md M6.
+    """
+    website_or_raise(db, website_id)
+
+    tier0_execution = db.get(BrowserUatTier0Execution, browser_uat_tier0_execution_id)
+    if tier0_execution is None:
+        raise ApplicationError(
+            code="BROWSER_UAT_TIER0_EXECUTION_NOT_FOUND",
+            message="No browser UAT Tier 0 execution found for the given execution ID.",
+            status_code=status.HTTP_404_NOT_FOUND,
+        )
+
+    generation_execution_id = uuid.uuid4()
+
+    try:
+        result = generate_tier0_actions(
+            db=db,
+            website_id=website_id,
+            browser_uat_tier0_execution_id=browser_uat_tier0_execution_id,
+            generation_execution_id=generation_execution_id,
+        )
+    except Exception as exception:
+        raise ApplicationError(
+            code="TIER0_ACTION_GENERATION_FAILED",
+            message=f"Tier 0 action generation failed: {exception}",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        ) from exception
+
+    return Tier0ActionGenerationStartResponse(
+        status=result.status,
+        generation_execution_id=result.id,
+        browser_uat_tier0_execution_id=browser_uat_tier0_execution_id,
     )
 
 

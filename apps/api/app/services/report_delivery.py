@@ -45,6 +45,7 @@ from app.services.browser_compatibility import (
     _build_browser_uat_matrix,
     browser_uat_completion,
 )
+from app.services.browser_uat_tier0 import fetch_latest_tier0_page_results
 from app.services.canonical_report_metrics import (
     _assign_limitation_id,
     deduplicate_limitations,
@@ -980,6 +981,12 @@ def _real_evidence_summary(
             }
         )
     uat_date = datetime.now(UTC).date().isoformat()
+    # M5: real Tier 0 desktop-lane evidence, if any exists for this analysis
+    # run, folds real VERIFIED/PARTIALLY_VERIFIED results into the matrix
+    # below. Absence is not an error -- Tier 0 is on-demand (see M2), so most
+    # analyses will have none, and the matrix falls back to today's
+    # engine-only NOT_VERIFIED placeholders exactly as before.
+    tier0_page_results = fetch_latest_tier0_page_results(db, analysis_run_id=run.id)
     branded_uat_matrix = _build_browser_uat_matrix(
         [
             {
@@ -990,6 +997,7 @@ def _real_evidence_summary(
             for item in browser_engines
         ],
         uat_date=uat_date,
+        tier0_page_results=tier0_page_results,
     )
     browser = {
         **browser,

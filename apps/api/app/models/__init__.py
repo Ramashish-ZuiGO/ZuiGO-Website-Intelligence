@@ -29,6 +29,14 @@ from app.models.analysis_interpretation import AnalysisInterpretation
 from app.models.analysis_result import AnalysisResult
 from app.models.analysis_run import AnalysisRun, AnalysisStatus
 from app.models.analysis_score import AnalysisScore
+from app.models.browser_uat_tier0 import (
+    TERMINAL_BROWSER_UAT_TIER0_STATUSES,
+    BrowserUatTier0Execution,
+    BrowserUatTier0Lane,
+    BrowserUatTier0PageResult,
+    BrowserUatTier0Status,
+    BrowserUatTier0ViewportResult,
+)
 from app.models.discovery_run import DiscoveryRun, DiscoveryStatus
 from app.models.discovery_run_page import DiscoveryRunPage
 from app.models.page_analysis_run import PageAnalysisRun, PageAnalysisStatus
@@ -100,6 +108,12 @@ __all__ = [
     "AnalysisRun",
     "AnalysisScore",
     "AnalysisStatus",
+    "TERMINAL_BROWSER_UAT_TIER0_STATUSES",
+    "BrowserUatTier0Execution",
+    "BrowserUatTier0Lane",
+    "BrowserUatTier0PageResult",
+    "BrowserUatTier0Status",
+    "BrowserUatTier0ViewportResult",
     "DetectedTechnology",
     "DiagnosticScopeEnum",
     "DiscoveryRun",

@@ -9,9 +9,15 @@ completed run's results into the M4 tables, not a stub), and M3's 5th check
 shipped 2026-08-15 — every `BRANDED_BROWSER_SCOPE` browser now has a Tier 0
 lane covering ALL of its required platforms, a completed CI run's evidence
 actually flows end-to-end into the report, and every M3 responsive check
-named in `PRODUCT_MASTER_SPEC.md` is now implemented. See §7 decision log
-for what's still open: live GitHub PAT verification, and real end-to-end
-runs to confirm Lane C and the iOS lane actually work.** This document is the
+named in `PRODUCT_MASTER_SPEC.md` is now implemented. A real GitHub PAT was
+configured 2026-08-15/16 and used to run 5 live dispatches against
+`fluidcontrols.com`, confirming Lane A/B and iPhone Simulator Safari all
+work end-to-end for real (found and fixed 2 unrelated real bugs along the
+way). iPad Simulator Safari is marked a known, pending limitation after 4
+consecutive real failures and 3 targeted fixes that didn't resolve it — see
+its own entry under the iOS lane section. See §7 decision log for what's
+still open: Lane C's own real-device run (Android hardware still needed),
+and eventually revisiting the iPad Simulator gap.** This document is the
 single source of truth for this initiative and is written to be portable —
 any competent engineer or any LLM (not just Claude) should be able to resume
 work from this file alone, combined with the existing repo docs it references.
@@ -539,6 +545,80 @@ situation.
   cited Appium/iOS JS-execution reliability history above. Treat the first
   real GitHub Actions dispatch as this lane's actual verification, per this
   initiative's established convention.
+
+#### iOS lane real-dispatch verification, 2026-08-15/16 — iPhone works, iPad marked as a known pending limitation
+
+Four real GitHub Actions dispatches were run against `fluidcontrols.com` to
+close the "unverified" gap above (via the same `POST .../browser-uat/tier0`
+route a real customer analysis would use, plus direct GitHub REST API calls
+from inside the worker container to pull real job logs/artifacts for
+diagnosis — all against the token set up for this exact purpose). This also
+verified Lane A/B end-to-end for the first time, and caught two unrelated
+real bugs (`actions/setup-node@v6`'s npm-cache default, and an empty-string
+vs `None` gap in `_build_dispatch_client`'s token check) — see their own
+decision-log entries. This entry is specifically about the iOS Simulator
+lane's own iteration:
+
+- **Dispatch 1**: all 6 jobs failed identically at the `setup-node` step
+  (unrelated cache bug, fixed separately). No iOS-specific signal yet.
+- **Dispatch 2** (after the cache fix): **4/6 succeeded** — both desktop
+  Chrome/Edge jobs and desktop Safari all completed with real branded
+  evidence. Both iOS Simulator jobs failed with `SessionNotCreatedError`:
+  "...waiting for its RWIApplication to appear." Root cause: Appium's
+  Safari driver does not auto-boot a simulator when `safari:deviceName` is
+  omitted — it only finds Safari inside an already-running one.
+  **Fix 1**: dynamically discover and boot a real simulator via `xcrun
+  simctl` before the check step (never hardcoding a device/iOS version).
+- **Dispatch 3** (after fix 1): **5/6 succeeded** — the iPhone Simulator job
+  passed for the first time with a real Safari session and real structural
+  findings (15 small tap targets, 2 clipped elements, real
+  `viewport_problems` on the live site). iPad Simulator still failed with
+  the identical `RWIApplication` timeout despite the simulator confirmed
+  booting correctly this time. Root cause: booting gets the OS to "Booted,"
+  but Apple's Remote Web Inspector only registers a browser once it has
+  actually launched and connected to `webinspectord` — a freshly-booted,
+  never-opened simulator can still exceed Appium's internal session-creation
+  budget. **Fix 2**: explicitly launch Safari via `simctl launch
+  <udid> com.apple.mobilesafari` right after boot, before Appium ever tries
+  to create a session.
+- **Dispatch 4** (after fix 2): **5/6 again** — iPhone succeeded again
+  (3rd consecutive real success). iPad failed with a **different** error
+  this time: `WebDriverError: Safari Driver server is not listening within
+  10000ms timeout`. Read `appium-safari-driver`'s own source
+  (`SafariDriverServer.start`, `lib/safari.ts`) directly: that 10-second
+  timeout is hardcoded, not configurable via any capability, and spawns a
+  plain local `safaridriver -p <port> --diagnose` process with no
+  device/UDID argument — identical regardless of iPhone vs iPad. Pointed at
+  system resource contention (a heavier simulator still settling) rather
+  than a logic bug. **Fix 3**: prefer a lighter non-"Pro" device when
+  available (still fully dynamic) + a longer settle window (5s → 15s).
+- **Dispatch 5** (after fix 3): **5/6 again, identical error.** The log
+  confirmed both mitigations were genuinely applied (booted "iPad Air
+  13-inch (M4)" — the lighter-device preference worked; the full 15s settle
+  elapsed) — the exact same hardcoded-10-second `safaridriver` timeout
+  fired anyway.
+- **Decision, 2026-08-16:** stopped iterating here rather than continue
+  guessing. Searched GitHub's issue tracker directly (`appium-safari-driver`
+  repo and all of GitHub) for the exact error text and for "RWIApplication"
+  + iPad, plus the Appium community forum — **zero hits anywhere.** This
+  isn't a known, previously-diagnosed community bug with an established
+  fix; continuing would mean more first-principles guessing at real cost
+  (~6-8 minutes per round trip) with no external validation to raise
+  confidence. **iPhone Simulator Safari is now proven reliable (3/3 real
+  successes with genuine evidence) and is production-ready. iPad Simulator
+  Safari is marked a known, pending limitation** — the code requires no
+  change for this (missing evidence for one platform already degrades
+  gracefully: `apply_tier0_evidence` simply caps Safari at
+  `PARTIALLY_VERIFIED` when `ipados` evidence is absent, exactly as
+  designed — see the `TestSafariCanReachPartiallyVerifiedFromMacosLaneAlone`
+  tests). The job is left in the workflow as-is (attempting and visibly
+  failing each run, not silently skipped) so it can be revisited — by a
+  future session, or if this becomes a documented Appium issue later.
+  `browser_version` also came back `null` for the iPhone Simulator's own
+  successful runs (confirmed via the raw artifact JSON, not an ingestion
+  bug) — Appium's Safari driver doesn't reliably report a version the way
+  desktop Safari/Chrome do; noted as another honest, non-blocking gap
+  alongside the null `http_status`/zero `console_error_count` pattern.
 
 #### Artifact-fetch wiring — shipped 2026-08-15
 
@@ -1216,10 +1296,33 @@ level.
   trusting the Python-side comparison logic. Wired into
   `run_compatibility_analysis`'s real matrix output, per engine. See the M3
   entry above for full detail.
-- **2026-08-14 — Not yet decided:** the live `GitHubActionsTier0DispatchClient`
-  still needs a real PAT to verify against actual GitHub infrastructure —
-  the MockTransport tests prove the HTTP-client logic is correct, not that
-  GitHub's real API returns what the docs say; interaction_failures/
+- **2026-08-15/16 — Live GitHub PAT configured and used for real
+  verification:** confirmed the token/permissions/repo access all work
+  correctly (`Actions: Read and write`, fine-grained, scoped to this one
+  repo). 5 real dispatches run against `fluidcontrols.com` via the actual
+  product API route. Found and fixed 2 unrelated real bugs this surfaced
+  (`actions/setup-node@v6`'s default npm-cache behavior; an empty-string
+  vs `None` token-check gap in `_build_dispatch_client`, both with their
+  own regression tests). Confirmed Lane A/B (Chrome/Edge/desktop-Safari)
+  and the iOS Simulator lane's iPhone target all work end-to-end for real
+  — genuine branded browser versions, genuine structural findings on a
+  real customer site, correct ingestion into the DB every time.
+- **2026-08-16 — iPad Simulator Safari marked a known, pending limitation:**
+  after 4 consecutive real failures (2 distinct error types) and 3 targeted
+  fixes (boot the simulator explicitly; pre-launch Safari before Appium's
+  session creation; prefer a lighter non-"Pro" device + longer settle
+  window) that did not resolve it, searched GitHub's issue tracker
+  directly for the exact error text and for "RWIApplication" + iPad —
+  zero hits anywhere, meaning this isn't a known community bug with an
+  established fix. Decided to stop iterating rather than keep guessing at
+  real cost with no external validation. No code change needed to "mark"
+  this — missing evidence for one platform already degrades gracefully
+  (Safari caps at `PARTIALLY_VERIFIED` without `ipados` evidence, exactly
+  as designed). The job stays in the workflow, attempting and visibly
+  failing each run rather than being silently skipped, so it can be
+  revisited later. Full findings and all 4 dispatch outcomes are in the
+  iOS lane's own M2 entry above.
+- **2026-08-14 — Not yet decided:** interaction_failures/
   accessibility_differences in the cross-engine runner (confirmed also
   hardcoded empty, deliberately not touched — bigger scope than M3); the
   TRUE per-form-factor (phone vs tablet) verification split — still
@@ -1227,8 +1330,9 @@ level.
   (no Android tablet lane exists); whether Tier 0 findings should also
   surface in the customer-facing Findings register (report_delivery.py),
   not just the Action Plan — explicitly out of scope for M6 as written; a
-  real end-to-end run of Lane C and the iOS lane to confirm both actually
-  work (no macOS/Android hardware available this session for either).
+  real end-to-end run of Lane C specifically (Android hardware still not
+  available); revisiting the iPad Simulator gap if this ever becomes a
+  documented, better-understood Appium issue.
 
 ## 8. Current real-world version snapshot (illustrative, re-derive at
    execution time — do not hardcode)

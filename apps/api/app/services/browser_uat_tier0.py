@@ -245,6 +245,32 @@ def ingest_browser_uat_tier0_job_result(
     return page_results
 
 
+def _latest_usable_tier0_execution(
+    db: Session,
+    *,
+    analysis_run_id: uuid.UUID,
+    lane: str,
+) -> BrowserUatTier0Execution | None:
+    """Shared selection rule for both fetch_latest_tier0_* functions below:
+    the MOST RECENT terminal-with-evidence Tier 0 execution for this
+    analysis run, not a merge across every execution ever run -- an
+    analysis run may have zero, one, or several Tier 0 executions (retries,
+    explicit re-checks, or a manual Lane C run recorded after an automatic
+    Lane A/B one), and merging them could mix stale and fresh evidence or
+    double-count pages. Returns None when no usable execution exists.
+    """
+    return db.scalar(
+        select(BrowserUatTier0Execution)
+        .where(
+            BrowserUatTier0Execution.analysis_run_id == analysis_run_id,
+            BrowserUatTier0Execution.lane == lane,
+            BrowserUatTier0Execution.status.in_(_USABLE_TIER0_STATUSES),
+        )
+        .order_by(BrowserUatTier0Execution.completed_at.desc())
+        .limit(1)
+    )
+
+
 def fetch_latest_tier0_page_results(
     db: Session,
     *,
@@ -254,24 +280,13 @@ def fetch_latest_tier0_page_results(
     """Real evidence for M5's evidence-state mapping, as plain dicts (matches
     browser_compatibility.py's dict-based interface, not ORM objects).
 
-    Uses the MOST RECENT terminal-with-evidence Tier 0 execution for this
-    analysis run, not a merge across every execution ever run -- an
-    analysis run may have zero, one, or several Tier 0 executions (retries,
-    explicit re-checks), and merging them could mix stale and fresh evidence
-    or double-count pages. Returns [] when no usable execution exists, which
-    is the correct, honest input for apply_tier0_evidence (rows stay exactly
-    as built from engine data -- an unavailable Tier 0 lane never blocks or
-    alters the rest of the report).
+    Returns [] when no usable execution exists, which is the correct, honest
+    input for apply_tier0_evidence (rows stay exactly as built from engine
+    data -- an unavailable Tier 0 lane never blocks or alters the rest of
+    the report).
     """
-    latest_execution = db.scalar(
-        select(BrowserUatTier0Execution)
-        .where(
-            BrowserUatTier0Execution.analysis_run_id == analysis_run_id,
-            BrowserUatTier0Execution.lane == lane,
-            BrowserUatTier0Execution.status.in_(_USABLE_TIER0_STATUSES),
-        )
-        .order_by(BrowserUatTier0Execution.completed_at.desc())
-        .limit(1)
+    latest_execution = _latest_usable_tier0_execution(
+        db, analysis_run_id=analysis_run_id, lane=lane
     )
     if latest_execution is None:
         return []
@@ -287,6 +302,75 @@ def fetch_latest_tier0_page_results(
             "platform": page_result.platform,
             "browser_version": page_result.browser_version,
             "status": page_result.status,
+        }
+        for page_result in page_results
+    ]
+
+
+def fetch_latest_tier0_structural_results(
+    db: Session,
+    *,
+    analysis_run_id: uuid.UUID,
+    lane: str = DEFAULT_LANE,
+) -> list[dict[str, Any]]:
+    """Real per-page, per-viewport M3 structural evidence (horizontal
+    overflow, clipped/overlapping elements, small tap targets) for the SAME
+    execution fetch_latest_tier0_page_results would select, as plain dicts.
+
+    Unlike fetch_latest_tier0_page_results' lightweight per-page summary,
+    this carries the viewport-level detail report_delivery.py needs to build
+    Complete Findings Register entries -- kept as a separate function rather
+    than growing that one's return shape, since M5's evidence-state mapping
+    and the Findings Register are different, independently-testable
+    consumers of the same underlying rows.
+    """
+    latest_execution = _latest_usable_tier0_execution(
+        db, analysis_run_id=analysis_run_id, lane=lane
+    )
+    if latest_execution is None:
+        return []
+
+    page_results = db.scalars(
+        select(BrowserUatTier0PageResult).where(
+            BrowserUatTier0PageResult.execution_id == latest_execution.id
+        )
+    ).all()
+    if not page_results:
+        return []
+
+    viewport_results = db.scalars(
+        select(BrowserUatTier0ViewportResult).where(
+            BrowserUatTier0ViewportResult.page_result_id.in_(
+                [page_result.id for page_result in page_results]
+            )
+        )
+    ).all()
+    viewports_by_page: dict[uuid.UUID, list[BrowserUatTier0ViewportResult]] = {}
+    for viewport in viewport_results:
+        viewports_by_page.setdefault(viewport.page_result_id, []).append(viewport)
+
+    return [
+        {
+            "page_result_id": str(page_result.id),
+            "url": page_result.url,
+            "browser_channel": page_result.browser_channel,
+            "platform": page_result.platform,
+            "browser_version": page_result.browser_version,
+            "viewport_results": [
+                {
+                    "viewport_name": viewport.viewport_name,
+                    "viewport_width": viewport.viewport_width,
+                    "viewport_height": viewport.viewport_height,
+                    "horizontal_overflow": viewport.horizontal_overflow,
+                    "critical_elements_outside_viewport": (
+                        viewport.critical_elements_outside_viewport
+                    ),
+                    "overlapping_elements": viewport.overlapping_elements,
+                    "small_tap_targets": viewport.small_tap_targets,
+                    "tap_target_samples": list(viewport.tap_target_samples),
+                }
+                for viewport in viewports_by_page.get(page_result.id, [])
+            ],
         }
         for page_result in page_results
     ]

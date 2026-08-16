@@ -5,6 +5,15 @@
 !apps/web/.env.local.example
 apps/web/.env.local
 
+# Local-only Compose overrides (e.g. publishing postgres's port for a manual
+# host-side script) -- never commit a datastore port publish; see
+# tests/test_production_network_boundary.py.
+docker-compose.override.yml
+
+# scripts/run_manual_tier0_android_check.py's raw results artifact -- a
+# per-run scratch file, not something to track.
+scripts/tier0-results-android-*.json
+
 # Node / Next.js
 node_modules/
 .next/

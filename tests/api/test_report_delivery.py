@@ -16,6 +16,9 @@ from app.models import (
     AnalysisResult,
     AnalysisRun,
     AnalysisScore,
+    BrowserUatTier0Execution,
+    BrowserUatTier0PageResult,
+    BrowserUatTier0ViewportResult,
     DiscoveryRun,
     FindingSeverity,
     FindingSource,
@@ -652,6 +655,99 @@ def test_detailed_finding_contract_occurrences_attribution_and_links(
         for finding_id in category["related_finding_ids"]
     }
     assert finding["finding_id"] in score_links
+
+
+def test_tier0_structural_findings_surface_in_the_complete_findings_register(
+    report_api: tuple[
+        TestClient,
+        sessionmaker[Session],
+        uuid.UUID,
+        uuid.UUID,
+        uuid.UUID,
+        list[tuple[str, str, int]],
+    ],
+) -> None:
+    """Real Tier 0 browser/device evidence (e.g. the Lane C Android CLI's
+    output) must appear in the customer-facing Complete Findings Register,
+    not just the Browser Compatibility matrix and Action Plan -- closes the
+    gap tracked in docs/DEVICE_OS_BROWSER_QA_PLAN.md as "explicitly out of
+    scope for M6 as written"."""
+    _client, factory, _project_id, website_id, run_id, _dispatched = report_api
+    with factory() as db:
+        website = db.get(Website, website_id)
+        website_url = website.url
+        execution = BrowserUatTier0Execution(
+            website_id=website_id,
+            analysis_run_id=run_id,
+            lane="github_actions_chrome_edge",
+            idempotency_key="tier0-register-test",
+            correlation_id="tier0-register-test",
+            status="partial",
+            completed_at=datetime.now(UTC),
+        )
+        db.add(execution)
+        db.flush()
+        page_result = BrowserUatTier0PageResult(
+            execution_id=execution.id,
+            browser_channel="chrome",
+            platform="android",
+            browser_version="151.0.7922.137",
+            url=website.url,
+            status="fail",
+        )
+        db.add(page_result)
+        db.flush()
+        db.add(
+            BrowserUatTier0ViewportResult(
+                page_result_id=page_result.id,
+                viewport_name="Mobile (real device)",
+                viewport_width=360,
+                viewport_height=690,
+                status="failed",
+                horizontal_overflow=False,
+                critical_elements_outside_viewport=2,
+                overlapping_elements=5,
+                small_tap_targets=13,
+                tap_target_samples=[{"element_type": "a", "width": 8.3, "height": 17.3}],
+            )
+        )
+        db.commit()
+
+    report = _generate_completed_report(factory, run_id, key="tier0-register-report")
+    sections = {section.section_key: section.content for section in report.sections}
+    findings = sections["page_level_findings"]["findings"]
+
+    tap_target_finding = next(
+        item for item in findings if item["finding_code"] == "TIER0_SMALL_TAP_TARGETS"
+    )
+    assert tap_target_finding["category"] == "accessibility"
+    assert tap_target_finding["severity"] == "medium"
+    assert tap_target_finding["scope"] == "page"
+    assert tap_target_finding["exact_occurrences"][0]["normalized_url"] == website_url
+    tap_target_observed_value = tap_target_finding["exact_occurrences"][0]["observed_value"]
+    assert "13 interactive element(s)" in tap_target_observed_value
+
+    clipped_finding = next(
+        item for item in findings if item["finding_code"] == "TIER0_CLIPPED_ELEMENTS"
+    )
+    assert clipped_finding["category"] == "responsive_design"
+    assert clipped_finding["severity"] == "high"
+
+    overlap_finding = next(
+        item for item in findings if item["finding_code"] == "TIER0_OVERLAPPING_ELEMENTS"
+    )
+    assert overlap_finding["severity"] == "medium"
+
+    # A clean viewport (horizontal_overflow False) must never fabricate a
+    # TIER0_HORIZONTAL_OVERFLOW finding.
+    assert not any(item["finding_code"] == "TIER0_HORIZONTAL_OVERFLOW" for item in findings)
+
+    # Reconciliation invariant: every unique finding actually renders in the
+    # customer-facing artifacts, same as any other finding source.
+    artifacts = {item.format: item for item in report.artifacts}
+    html_text = artifacts["html"].content.decode()
+    assert tap_target_finding["issue_title"] in html_text
+    assert clipped_finding["issue_title"] in html_text
 
 
 def test_report_apis_filters_download_headers_and_errors(

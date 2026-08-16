@@ -16,6 +16,19 @@ Prerequisites (one-time, on whichever machine the phone is plugged into):
     Confirm it's visible with `adb devices` before running this.
   - `npm install selenium-webdriver@4.47.0` run somewhere Node's module
     resolution can find from scripts/ (typically the repo root).
+  - This script must run directly on the host (not inside a Docker
+    container: Docker cannot pass USB devices through to adb/ChromeDriver).
+    A host process needs a real path to Postgres, which the tracked
+    docker-compose.yml deliberately does NOT publish (see
+    tests/test_production_network_boundary.py). Create a
+    docker-compose.override.yml (gitignored, auto-merged by `docker compose`)
+    publishing the postgres port, e.g.:
+        services:
+          postgres:
+            ports:
+              - "5432:5432"
+    then `docker compose up -d postgres` and run this script with
+    POSTGRES_HOST=localhost set.
 
 Usage (run with the same environment/DATABASE_URL as the API):
     PYTHONPATH=apps/api python scripts/run_manual_tier0_android_check.py \\

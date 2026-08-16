@@ -4,6 +4,7 @@ import json
 import re
 import textwrap
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
 from io import BytesIO
 from typing import Any
@@ -36,6 +37,7 @@ from app.models import (
     SiteDiagnosticOccurrence,
     WebsitePage,
 )
+from app.services.action_generation import FINDING_TO_ACTION_MAP
 from app.services.agent_platform_registry import AgentRegistry
 from app.services.browser_compatibility import (
     ENGINE_LABELS,
@@ -45,7 +47,10 @@ from app.services.browser_compatibility import (
     _build_browser_uat_matrix,
     browser_uat_completion,
 )
-from app.services.browser_uat_tier0 import fetch_latest_tier0_page_results
+from app.services.browser_uat_tier0 import (
+    fetch_latest_tier0_page_results,
+    fetch_latest_tier0_structural_results,
+)
 from app.services.canonical_report_metrics import (
     _assign_limitation_id,
     deduplicate_limitations,
@@ -165,6 +170,20 @@ SEVERITY_ORDER = {
     "informational": 4,
     "info": 4,
 }
+# Finding codes whose per-page observed-value text legitimately differs (a
+# tap-target count, an overlap count) but which represent ONE site-wide rule,
+# not a distinct issue per page -- _group_detailed_findings suppresses
+# observed_signature for these so they merge into one Complete Findings
+# Register entry across every affected page, same as browser_engine_compatibility.
+MERGE_ACROSS_PAGES_FINDING_CODES = frozenset(
+    {
+        "browser_engine_compatibility",
+        "tier0_horizontal_overflow",
+        "tier0_clipped_elements",
+        "tier0_overlapping_elements",
+        "tier0_small_tap_targets",
+    }
+)
 SAFE_FILENAME_PATTERN = re.compile(r"[^a-z0-9._-]+")
 PRIVATE_KEYS = {
     "chain_of_thought",
@@ -1342,8 +1361,8 @@ def _group_detailed_findings(
                 }
             )
         )
-        is_browser_compat = (
-            str(finding.get("finding_code", "")).casefold() == "browser_engine_compatibility"
+        merges_across_pages = (
+            str(finding.get("finding_code", "")).casefold() in MERGE_ACROSS_PAGES_FINDING_CODES
         )
         key = (
             str(
@@ -1351,10 +1370,10 @@ def _group_detailed_findings(
                 or finding.get("finding_code")
                 or finding.get("issue_title", "")
             ).casefold(),
-            "" if is_browser_compat else str(finding.get("issue_title", "")).casefold(),
+            "" if merges_across_pages else str(finding.get("issue_title", "")).casefold(),
             str(finding.get("category", "")).casefold(),
             str(finding.get("scope", "")).casefold(),
-            "" if is_browser_compat else observed_signature,
+            "" if merges_across_pages else observed_signature,
             browser_signature,
             resource_signature,
         )
@@ -1930,6 +1949,139 @@ def _browser_finding_payload(
     }
 
 
+_TIER0_PROBLEM_DETECTORS: tuple[
+    tuple[str, Callable[[dict[str, Any]], bool], Callable[[dict[str, Any]], str]], ...
+] = (
+    (
+        "TIER0_HORIZONTAL_OVERFLOW",
+        lambda viewport: bool(viewport.get("horizontal_overflow")),
+        lambda viewport: (
+            f"Horizontal overflow detected at {viewport['viewport_name']} "
+            f"({viewport['viewport_width']}x{viewport['viewport_height']})."
+        ),
+    ),
+    (
+        "TIER0_CLIPPED_ELEMENTS",
+        lambda viewport: int(viewport.get("critical_elements_outside_viewport") or 0) > 0,
+        lambda viewport: (
+            f"{viewport['critical_elements_outside_viewport']} critical element(s) extend "
+            f"beyond the viewport at {viewport['viewport_name']} "
+            f"({viewport['viewport_width']}x{viewport['viewport_height']})."
+        ),
+    ),
+    (
+        "TIER0_OVERLAPPING_ELEMENTS",
+        lambda viewport: int(viewport.get("overlapping_elements") or 0) > 0,
+        lambda viewport: (
+            f"{viewport['overlapping_elements']} element(s) overlap unexpectedly at "
+            f"{viewport['viewport_name']} "
+            f"({viewport['viewport_width']}x{viewport['viewport_height']})."
+        ),
+    ),
+    (
+        "TIER0_SMALL_TAP_TARGETS",
+        lambda viewport: int(viewport.get("small_tap_targets") or 0) > 0,
+        lambda viewport: (
+            f"{viewport['small_tap_targets']} interactive element(s) smaller than the "
+            f"24x24px minimum tap-target size at {viewport['viewport_name']} "
+            f"({viewport['viewport_width']}x{viewport['viewport_height']})."
+        ),
+    ),
+)
+
+
+def _tier0_finding_payloads(
+    structural_results: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Adapts real M3 structural evidence from
+    fetch_latest_tier0_structural_results into the same finding-dict shape
+    _browser_finding_payload produces, so it flows through the SAME
+    _group_detailed_findings merge/dedup pipeline used by the Complete
+    Findings Register and Technical Appendix -- no separate rendering path,
+    no fabricated AnalysisFinding rows (Tier 0's execution shape doesn't fit
+    that table's per-page-analysis-run contract, see
+    docs/DEVICE_OS_BROWSER_QA_PLAN.md's Lane C/M6 entries).
+
+    One finding dict per (page, problem category) actually observed --
+    mirrors action_generation.py's _tier0_recommendations dedup exactly, so
+    a page failing the same check at two viewports produces one occurrence,
+    not two. MERGE_ACROSS_PAGES_FINDING_CODES then collapses occurrences
+    for the SAME rule across every affected page into one register entry.
+    """
+    payloads: list[dict[str, Any]] = []
+    for page in structural_results:
+        seen_codes: set[str] = set()
+        for viewport in page.get("viewport_results", []):
+            for finding_code, is_triggered, describe in _TIER0_PROBLEM_DETECTORS:
+                if finding_code in seen_codes or not is_triggered(viewport):
+                    continue
+                seen_codes.add(finding_code)
+                mapping = FINDING_TO_ACTION_MAP[finding_code]
+                finding_id = uuid.uuid5(
+                    uuid.UUID(page["page_result_id"]), f"tier0-finding:{finding_code}"
+                )
+                occurrence = {
+                    "normalized_url": page["url"],
+                    "final_url": page["url"],
+                    "status_code": None,
+                    "collection_status": "Real-device/real-browser evidence recorded",
+                    "page_title": None,
+                    "page_type": "unknown",
+                    "section": "browser_uat_tier0",
+                    "selector": None,
+                    "resource_url": None,
+                    "location": viewport["viewport_name"],
+                    "observed_value": describe(viewport),
+                    "expected_value": mapping["expected_result"],
+                    "evidence_timestamp": None,
+                    "analysis_provider": (
+                        f"Tier 0 real-browser check ({page['browser_channel']}/{page['platform']})"
+                    ),
+                    "analysis_provider_version": page.get("browser_version"),
+                    "artifact_reference": f"browser_uat_tier0_page_result:{page['page_result_id']}",
+                    "scope": "page",
+                }
+                payloads.append(
+                    {
+                        "finding_id": str(finding_id),
+                        "finding_code": finding_code,
+                        "finding_type": "browser_uat_tier0",
+                        "issue_title": mapping["issue_title"],
+                        "plain_language_explanation": mapping["why_this_matters"],
+                        "technical_explanation": occurrence["observed_value"],
+                        "category": mapping["category"],
+                        "severity": mapping["severity"],
+                        "confidence": {"classification": "high", "percent": 100},
+                        "affected_pages": [occurrence],
+                        "exact_occurrences": [occurrence],
+                        "affected_page_count": 1,
+                        "occurrence_count": 1,
+                        "evidence_references": [
+                            _evidence("browser_uat_tier0_page_result", page["page_result_id"])
+                        ],
+                        "evidence_source": {
+                            "source": "browser_uat_tier0",
+                            "provider": f"{page['browser_channel']} on {page['platform']}",
+                            "provider_version": page.get("browser_version"),
+                        },
+                        "detecting_agent": "performance_agent",
+                        "validating_agent": "evidence_validation_agent",
+                        "likely_cause": mapping["exact_correction"],
+                        "technical_impact": mapping["why_this_matters"],
+                        "business_impact": mapping["why_this_matters"],
+                        "recommended_remediation": mapping["exact_correction"],
+                        "responsible_role": mapping["responsible_role"],
+                        "estimated_effort_band": mapping["estimated_effort"],
+                        "verification_procedure": mapping["verification_steps"],
+                        "related_finding_ids": [],
+                        "evidence_limitations": mapping["limitations"],
+                        "evidence_state": "available",
+                        "scope": "page",
+                    }
+                )
+    return payloads
+
+
 def _build_sections(
     db: Session,
     run: AnalysisRun,
@@ -2058,6 +2210,12 @@ def _build_sections(
         else []
     )
     browser_refs = browser_artifact.evidence_references if browser_artifact else []
+    tier0_structural_results = fetch_latest_tier0_structural_results(db, analysis_run_id=run.id)
+    tier0_findings = _tier0_finding_payloads(tier0_structural_results)
+    tier0_refs = [
+        _evidence("browser_uat_tier0_page_result", page["page_result_id"])
+        for page in tier0_structural_results
+    ]
     workflow_ref = [_evidence("agent_execution", workflow.execution_id)]
     pages = list(
         db.scalars(
@@ -2156,6 +2314,7 @@ def _build_sections(
             *detailed_diagnostic_findings,
             *detailed_accessibility_findings,
             *browser_findings,
+            *tier0_findings,
         ]
     )
 
@@ -2683,6 +2842,7 @@ def _build_sections(
                 *diagnostic_refs,
                 *accessibility_refs,
                 *browser_refs,
+                *tier0_refs,
             ],
             unavailable_reason=(
                 None

@@ -1,5 +1,7 @@
 """Tests for canonical report metrics — invariants, deduplication, reconciliation."""
 
+import uuid
+
 from app.services.canonical_report_metrics import (
     CategoryEvidence,
     build_canonical_metrics,
@@ -208,6 +210,172 @@ class TestDuplicateFindingPrevention:
         ]
         grouped = _group_detailed_findings(findings)
         assert len(grouped) == 2
+
+
+class TestTier0FindingsInTheCompleteFindingsRegister:
+    """Tier 0 structural evidence (real-browser horizontal overflow, clipped/
+    overlapping elements, small tap targets) adapted by _tier0_finding_payloads
+    into the same _group_detailed_findings pipeline as every other finding
+    source -- no fabricated AnalysisFinding rows, see
+    docs/DEVICE_OS_BROWSER_QA_PLAN.md's Lane C/M6 entries for why Tier 0's
+    execution shape doesn't fit that table."""
+
+    def test_same_finding_code_on_two_pages_merges_into_one_register_entry(self) -> None:
+        from app.services.report_delivery import _group_detailed_findings, _tier0_finding_payloads
+
+        structural_results = [
+            {
+                "page_result_id": str(uuid.uuid4()),
+                "url": "https://example.com/",
+                "browser_channel": "chrome",
+                "platform": "android",
+                "browser_version": "151.0.7922.137",
+                "viewport_results": [
+                    {
+                        "viewport_name": "Mobile (real device)",
+                        "viewport_width": 360,
+                        "viewport_height": 690,
+                        "horizontal_overflow": False,
+                        "critical_elements_outside_viewport": 0,
+                        "overlapping_elements": 0,
+                        "small_tap_targets": 5,
+                        "tap_target_samples": [],
+                    }
+                ],
+            },
+            {
+                "page_result_id": str(uuid.uuid4()),
+                "url": "https://example.com/about",
+                "browser_channel": "chrome",
+                "platform": "android",
+                "browser_version": "151.0.7922.137",
+                "viewport_results": [
+                    {
+                        "viewport_name": "Mobile (real device)",
+                        "viewport_width": 360,
+                        "viewport_height": 690,
+                        "horizontal_overflow": False,
+                        "critical_elements_outside_viewport": 0,
+                        "overlapping_elements": 0,
+                        "small_tap_targets": 3,
+                        "tap_target_samples": [],
+                    }
+                ],
+            },
+        ]
+
+        payloads = _tier0_finding_payloads(structural_results)
+        assert len(payloads) == 2  # one per page, before grouping
+        assert {item["finding_code"] for item in payloads} == {"TIER0_SMALL_TAP_TARGETS"}
+
+        grouped = _group_detailed_findings(payloads)
+
+        # Merges across pages despite differing per-page counts (3 vs 5) --
+        # the same site-wide rule, not two distinct issues.
+        assert len(grouped) == 1
+        assert grouped[0]["occurrence_count"] == 2
+        assert grouped[0]["affected_page_count"] == 2
+        assert grouped[0]["severity"] == "medium"
+
+    def test_different_finding_codes_stay_separate(self) -> None:
+        from app.services.report_delivery import _group_detailed_findings, _tier0_finding_payloads
+
+        structural_results = [
+            {
+                "page_result_id": str(uuid.uuid4()),
+                "url": "https://example.com/",
+                "browser_channel": "chrome",
+                "platform": "android",
+                "browser_version": "151.0.7922.137",
+                "viewport_results": [
+                    {
+                        "viewport_name": "Mobile (real device)",
+                        "viewport_width": 360,
+                        "viewport_height": 690,
+                        "horizontal_overflow": True,
+                        "critical_elements_outside_viewport": 2,
+                        "overlapping_elements": 0,
+                        "small_tap_targets": 0,
+                        "tap_target_samples": [],
+                    }
+                ],
+            },
+        ]
+
+        payloads = _tier0_finding_payloads(structural_results)
+        grouped = _group_detailed_findings(payloads)
+
+        assert len(grouped) == 2
+        codes = {item["finding_code"] for item in grouped}
+        assert codes == {"TIER0_HORIZONTAL_OVERFLOW", "TIER0_CLIPPED_ELEMENTS"}
+        assert all(item["severity"] == "high" for item in grouped)
+
+    def test_a_page_with_no_problems_produces_no_findings(self) -> None:
+        from app.services.report_delivery import _tier0_finding_payloads
+
+        structural_results = [
+            {
+                "page_result_id": str(uuid.uuid4()),
+                "url": "https://example.com/",
+                "browser_channel": "chrome",
+                "platform": "android",
+                "browser_version": "151.0.7922.137",
+                "viewport_results": [
+                    {
+                        "viewport_name": "Mobile (real device)",
+                        "viewport_width": 360,
+                        "viewport_height": 690,
+                        "horizontal_overflow": False,
+                        "critical_elements_outside_viewport": 0,
+                        "overlapping_elements": 0,
+                        "small_tap_targets": 0,
+                        "tap_target_samples": [],
+                    }
+                ],
+            },
+        ]
+
+        assert _tier0_finding_payloads(structural_results) == []
+
+    def test_the_same_problem_across_two_viewports_on_one_page_is_one_occurrence(self) -> None:
+        from app.services.report_delivery import _tier0_finding_payloads
+
+        structural_results = [
+            {
+                "page_result_id": str(uuid.uuid4()),
+                "url": "https://example.com/",
+                "browser_channel": "msedge",
+                "platform": "windows",
+                "browser_version": "151.0.0.0",
+                "viewport_results": [
+                    {
+                        "viewport_name": "Desktop",
+                        "viewport_width": 1440,
+                        "viewport_height": 900,
+                        "horizontal_overflow": True,
+                        "critical_elements_outside_viewport": 0,
+                        "overlapping_elements": 0,
+                        "small_tap_targets": 0,
+                        "tap_target_samples": [],
+                    },
+                    {
+                        "viewport_name": "Mobile",
+                        "viewport_width": 375,
+                        "viewport_height": 812,
+                        "horizontal_overflow": True,
+                        "critical_elements_outside_viewport": 0,
+                        "overlapping_elements": 0,
+                        "small_tap_targets": 0,
+                        "tap_target_samples": [],
+                    },
+                ],
+            },
+        ]
+
+        payloads = _tier0_finding_payloads(structural_results)
+
+        assert len(payloads) == 1
+        assert payloads[0]["exact_occurrences"][0]["location"] == "Desktop"
 
 
 class TestSemanticLimitationDeduplication:

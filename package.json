@@ -11,5 +11,8 @@
   },
   "engines": {
     "node": ">=24 <25"
+  },
+  "dependencies": {
+    "selenium-webdriver": "^4.47.0"
   }
 }

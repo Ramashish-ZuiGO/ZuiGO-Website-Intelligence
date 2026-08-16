@@ -16,6 +16,7 @@ from app.models import (
     AnalysisRun,
     BrowserUatTier0Execution,
     BrowserUatTier0PageResult,
+    BrowserUatTier0ViewportResult,
     Project,
     Website,
 )
@@ -24,7 +25,10 @@ from app.services.browser_compatibility import (
     _build_browser_uat_matrix,
     apply_tier0_evidence,
 )
-from app.services.browser_uat_tier0 import fetch_latest_tier0_page_results
+from app.services.browser_uat_tier0 import (
+    fetch_latest_tier0_page_results,
+    fetch_latest_tier0_structural_results,
+)
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -439,5 +443,110 @@ class TestFetchLatestTier0PageResults:
         )
 
         results = fetch_latest_tier0_page_results(db_session, analysis_run_id=analysis_run_id)
+
+        assert results == []
+
+
+class TestFetchLatestTier0StructuralResults:
+    def test_returns_empty_list_when_no_execution_exists(self, db_session: Session) -> None:
+        analysis_run_id = _seed_analysis_run(db_session)
+
+        results = fetch_latest_tier0_structural_results(db_session, analysis_run_id=analysis_run_id)
+
+        assert results == []
+
+    def test_returns_viewport_detail_from_the_most_recent_completed_execution(
+        self, db_session: Session
+    ) -> None:
+        analysis_run_id = _seed_analysis_run(db_session)
+        now = datetime.now(UTC)
+
+        older = _seed_execution(
+            db_session,
+            analysis_run_id,
+            idempotency_key="run-1",
+            completed_at=now - timedelta(hours=2),
+            status="completed",
+        )
+        stale_page = BrowserUatTier0PageResult(
+            execution_id=older.id,
+            browser_channel="chrome",
+            platform="android",
+            url="https://stale.test/",
+            status="fail",
+        )
+        db_session.add(stale_page)
+        db_session.flush()
+        db_session.add(
+            BrowserUatTier0ViewportResult(
+                page_result_id=stale_page.id,
+                viewport_name="Mobile (real device)",
+                viewport_width=360,
+                viewport_height=690,
+                status="failed",
+                horizontal_overflow=True,
+            )
+        )
+
+        newer = _seed_execution(
+            db_session,
+            analysis_run_id,
+            idempotency_key="run-2",
+            completed_at=now,
+            status="partial",
+        )
+        fresh_page = BrowserUatTier0PageResult(
+            execution_id=newer.id,
+            browser_channel="chrome",
+            platform="android",
+            url="https://fresh.test/",
+            status="fail",
+            browser_version="151.0.7922.137",
+        )
+        db_session.add(fresh_page)
+        db_session.flush()
+        db_session.add(
+            BrowserUatTier0ViewportResult(
+                page_result_id=fresh_page.id,
+                viewport_name="Mobile (real device)",
+                viewport_width=360,
+                viewport_height=690,
+                status="failed",
+                horizontal_overflow=False,
+                critical_elements_outside_viewport=2,
+                overlapping_elements=5,
+                small_tap_targets=13,
+                tap_target_samples=[{"element_type": "a", "width": 8.3, "height": 17.3}],
+            )
+        )
+        db_session.commit()
+
+        results = fetch_latest_tier0_structural_results(db_session, analysis_run_id=analysis_run_id)
+
+        assert len(results) == 1
+        page = results[0]
+        assert page["url"] == "https://fresh.test/"
+        assert page["browser_version"] == "151.0.7922.137"
+        assert len(page["viewport_results"]) == 1
+        viewport = page["viewport_results"][0]
+        assert viewport["horizontal_overflow"] is False
+        assert viewport["critical_elements_outside_viewport"] == 2
+        assert viewport["overlapping_elements"] == 5
+        assert viewport["small_tap_targets"] == 13
+        assert viewport["tap_target_samples"][0]["element_type"] == "a"
+
+    def test_unavailable_executions_are_not_treated_as_usable_evidence(
+        self, db_session: Session
+    ) -> None:
+        analysis_run_id = _seed_analysis_run(db_session)
+        _seed_execution(
+            db_session,
+            analysis_run_id,
+            idempotency_key="run-unavailable",
+            completed_at=datetime.now(UTC),
+            status="unavailable",
+        )
+
+        results = fetch_latest_tier0_structural_results(db_session, analysis_run_id=analysis_run_id)
 
         assert results == []

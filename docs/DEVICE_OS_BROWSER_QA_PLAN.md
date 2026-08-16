@@ -17,10 +17,22 @@ way). iPad Simulator Safari is marked a known, pending limitation after 4
 consecutive real failures and 3 targeted fixes that didn't resolve it — see
 its own entry under the iOS lane section. Lane C's two manual steps
 (check + report) were combined into one CLI command 2026-08-16
-(`scripts/run_manual_tier0_android_check.py`) — the frontend "one-click"
-piece is deliberately deferred pending an `apps/web` handoff. See §7
-decision log for what's still open: Lane C's own real-device run (Android
-hardware still needed), and eventually revisiting the iPad Simulator gap.**
+(`scripts/run_manual_tier0_android_check.py`), and 2026-08-16 that CLI was
+verified end-to-end on real hardware (a OnePlus Nord 2 5G over USB) —
+Windows ADB driver binding, `selenium-webdriver` install, a Postgres
+host-port gap, and an OxygenOS shell-permission restriction were all real,
+found-and-fixed problems along the way (see the lane's own "Real hardware
+verification" entry). Lane C's real-device gap is now closed. 2026-08-16
+also closed M6's flagged open item — Tier 0 structural findings now surface
+in the customer-facing Complete Findings Register (not just the Browser
+Compatibility matrix and Action Plan), via the same
+`_group_detailed_findings` pipeline every other finding source uses, no
+fabricated `AnalysisFinding` rows (see M6's "Findings Register integration"
+entry). **Everything in this initiative is now shipped and real-verified
+except two deliberately-deferred items: the iPad Simulator timeout (known
+pending limitation, see the iOS lane section) and the `apps/web` frontend
+one-click UI (deferred pending an explicit handoff from the parallel
+"Antigravity" agent).**
 This document is the
 single source of truth for this initiative and is written to be portable —
 any competent engineer or any LLM (not just Claude) should be able to resume
@@ -512,6 +524,76 @@ report the result). Combined into one: `scripts/run_manual_tier0_android_check.p
   Node process or device touched. Full suite: 1081 passed, 1 skipped
   (1075 baseline + 6 new).
 
+##### Real hardware verification — 2026-08-16, OnePlus Nord 2 5G over USB
+
+Closed the "no real device available" gap noted above: ran the CLI end-to-end
+against a real phone connected by USB, against the real `fluidcontrols.com`
+analysis run (`fcfffe83-540b-4875-831c-0f1db426553e`) already used for Lane
+A/B's live verification. Real, non-obvious problems hit and fixed along the
+way (Windows-specific — a Mac/Linux operator would skip most of these):
+
+- **Windows had no ADB driver bound to the phone at all**: `adb devices`
+  returned an empty list even with USB debugging enabled and the "Allow"
+  prompt accepted on-device — not the usual permissions issue. Root cause
+  found via `Get-PnpDevice`: a device named "ADB Interface" was present but
+  `Status: Unknown` — Windows recognized the USB interface but had no driver
+  bound to it. Fixed via Device Manager → ADB Interface → Update driver →
+  "Search automatically for drivers" (pulled from Windows Update's own
+  catalog) → resolved to a "WinUsb Device" driver (this is Google's real ADB
+  driver's actual name in Device Manager, not a generic fallback). Avoided
+  third-party "OnePlus USB driver" mirror sites entirely (none of the search
+  results were oneplus.com — all ad-supported re-upload sites, a real
+  malware-risk vector for driver installers).
+- **`selenium-webdriver@4.47.0` had never actually been installed** at the
+  repo root (only referenced in the script's own docstring) — `npm install`
+  fixed it; `package.json`/`package-lock.json` now exist at the repo root
+  for the first time.
+- **Postgres had no host port published** in `docker-compose.yml` — the CLI
+  must run directly on the Windows host (Docker Desktop cannot pass through
+  USB devices to a Linux container, so adb/ChromeDriver cannot run
+  containerized), but the DB was only reachable from inside the Compose
+  network. First fix attempt added `ports: ["5432:5432"]` directly to
+  `docker-compose.yml`'s `postgres` service — this broke
+  `tests/test_production_network_boundary.py`, a locked invariant test that
+  asserts postgres/redis are NEVER published to the host from that tracked
+  file (a real, deliberate security boundary, not incidental). Corrected:
+  reverted that edit, and instead added a **gitignored**
+  `docker-compose.override.yml` at the repo root (Compose auto-merges an
+  override file of that exact name with no `-f` flag needed) containing just
+  the port publish — the boundary test only parses `docker-compose.yml`
+  literally, so this stays outside its scope by construction while still
+  giving the host-side CLI a real path to the DB. Full suite re-confirmed
+  green (1081 passed, 1 skipped) after the correction.
+  `POSTGRES_HOST=localhost` overrides the container-default
+  `postgres_host: str = "postgres"` when running the CLI from the host.
+- **First real Chrome-launch failure**: `SessionNotCreatedError` —
+  `does not have permission android.permission.CLEAR_APP_USER_DATA to clear
+  data of package com.android.chrome`. ChromeDriver's Android launch flow
+  runs `adb shell pm clear <package>` before every session to guarantee a
+  clean state; OxygenOS restricts that shell permission on system apps
+  (`com.android.chrome` ships as a system app on OnePlus phones) unless a
+  second, separate developer toggle is enabled beyond plain "USB debugging"
+  — labeled **"USB debugging (Security settings)"** on this device. Enabling
+  it resolved the permission error on the very next run, no code change
+  needed. (Documented fallback if a future device's OEM build lacks this
+  toggle entirely: ChromeDriver's `androidUseRunningApp` capability skips
+  the clear-and-relaunch step by attaching to a Chrome instance the operator
+  opens manually first — not implemented since it wasn't needed here, but a
+  real, verified-to-exist option, not a guess.)
+- **Real result, first live run**: navigated real Chrome 151.0.7922.137 on
+  the physical device to `https://fluidcontrols.com/`, ran the shared M3
+  responsive-assertion contract against the real 360×690 on-device viewport,
+  found genuine layout problems (2 critical elements overflowing the
+  viewport, 5 overlapping elements, 5 tap targets under the 24×24px
+  minimum), and ingested as execution `c2e5400a-807d-442b-bc3f-263ff4d99a59`
+  — verified by querying Postgres directly afterward (`status: partial` on
+  the execution, matching the documented "real evidence produced even on a
+  failing page" contract; `chrome`/`android`/`fail` on the page-result row),
+  not just trusted from console output.
+- **Lane C's real-device gap is now closed.** The only remaining
+  un-live-verified device/OS gap in this initiative is the iPad Simulator
+  timeout noted above (pending, by explicit decision, not blocking).
+
 #### iOS/iPadOS Simulator Safari lane — shipped 2026-08-15, fully automated
 
 Unlike Lane C, this lane is genuinely FULLY automatable: GitHub-hosted macOS
@@ -999,8 +1081,9 @@ level.
 - **Status:** SHIPPED (2026-08-14), Action Plan integration for the desktop
   Tier 0 lane. Reporting-section integration (surfacing Tier 0 findings in
   the customer-facing Findings register, not just Action Plan) was NOT in
-  scope — the plan doc's own language ("a device/browser failure becomes an
-  action item") pointed specifically at the Action Plan system.
+  scope at ship time — the plan doc's own language ("a device/browser
+  failure becomes an action item") pointed specifically at the Action Plan
+  system. **Closed 2026-08-16** — see "Findings Register integration" below.
 - **Purpose:** Make results actionable, not just stored.
 - **A real architectural mismatch found before writing any code, not
   assumed:** `AnalysisFinding` (the table one would naively expect to
@@ -1062,6 +1145,67 @@ level.
   integration (group/item creation, idempotent replay, insufficient-evidence
   counting, unavailable-execution error, clean-page no-op), and the route
   (success + 404). Full suite: 995 passed, 1 skipped (983 baseline + 12 new).
+
+##### Findings Register integration — shipped 2026-08-16
+
+Closed the open item flagged when M6 shipped: Tier 0 structural findings
+(horizontal overflow, clipped/overlapping elements, small tap targets) now
+appear in the customer-facing Complete Findings Register and Technical
+Appendix, not just the Browser Compatibility matrix (M5) and Action Plan
+(M6).
+
+- **No fake `AnalysisFinding` rows** — the same architectural mismatch M6
+  hit (Tier 0 has no per-page `deep_analysis_run_id`-shaped run to attach
+  to) still applies. Instead, followed the precedent already proven in this
+  same file: `_browser_finding_payload` already adapts a non-`AnalysisFinding`
+  evidence source (an `AgentArtifact`) into the finding-dict shape
+  `_group_detailed_findings` consumes. New `_tier0_finding_payloads()` in
+  `report_delivery.py` does the same for Tier 0's `BrowserUatTier0PageResult`/
+  `BrowserUatTier0ViewportResult` rows — one dict per (page, problem
+  category) actually observed, reusing `FINDING_TO_ACTION_MAP`'s existing
+  `issue_title`/`category`/`severity`/remediation text (imported from
+  `action_generation.py`, no drift possible between the finding and its
+  matching action item) so the two never disagree on what a `TIER0_*` code
+  means.
+- **New query function**: `fetch_latest_tier0_structural_results()` in
+  `browser_uat_tier0.py`, sharing a newly-factored-out
+  `_latest_usable_tier0_execution()` selection rule with the existing
+  `fetch_latest_tier0_page_results()` (M5) — same "most recent
+  terminal-with-evidence execution for this run" semantics, now also
+  returning full per-viewport structural detail rather than just a
+  pass/fail summary.
+- **Merge-across-pages decision**: a page failing `TIER0_SMALL_TAP_TARGETS`
+  with 3 undersized targets and another page failing it with 5 must not
+  read as two different "unique findings" in the register — same rule,
+  same site-wide issue class. Generalized the existing
+  `browser_engine_compatibility`-only suppression in
+  `_group_detailed_findings` (previously a single hardcoded string check)
+  into a `MERGE_ACROSS_PAGES_FINDING_CODES` set now covering all 4 `TIER0_*`
+  codes too — occurrences (and their exact per-page counts) are still
+  preserved individually within the merged finding, only the register-entry
+  identity merges.
+- **One insertion point reaches every artifact**: `_tier0_finding_payloads()`'s
+  output is appended into the same `all_detailed_findings` list that
+  JSON/PDF/HTML/Technical Appendix/comparison all already read from — no
+  parallel rendering path, verified by an integration test asserting a
+  Tier 0 finding's `issue_title` literally appears in the generated HTML
+  artifact's text, not just the JSON payload.
+- **Deliberately NOT added to** the separate `security_technical` section
+  (`technical_findings` list) — that section is scoped to security/
+  performance/technical categories; Tier 0's `responsive_design`/
+  `accessibility` categories already have their proper home in the register,
+  and force-fitting them into a mismatched section would be inconsistent
+  with their own declared category.
+- **Tests:** 8 new (3 for `fetch_latest_tier0_structural_results` against a
+  real SQLite DB — empty case, most-recent-execution selection, unavailable-
+  execution exclusion; 4 for `_tier0_finding_payloads`/grouping — cross-page
+  merge despite differing counts, distinct codes stay separate, a clean page
+  produces zero findings, same-page-two-viewports produces one occurrence
+  not two; 1 full report-generation integration test proving real Tier 0 DB
+  rows produce register entries with correct category/severity/scope that
+  render in the HTML artifact, and that a clean viewport never fabricates a
+  finding). Full suite: 1089 passed, 1 skipped (1081 baseline + 8 new).
+  `ruff check`/`ruff format --check` both clean.
 
 ### M7 — Logging & traceability
 
@@ -1369,17 +1513,48 @@ level.
   failing each run rather than being silently skipped, so it can be
   revisited later. Full findings and all 4 dispatch outcomes are in the
   iOS lane's own M2 entry above.
-- **2026-08-14 — Not yet decided:** interaction_failures/
-  accessibility_differences in the cross-engine runner (confirmed also
-  hardcoded empty, deliberately not touched — bigger scope than M3); the
-  TRUE per-form-factor (phone vs tablet) verification split — still
-  deferred, now moot everywhere except Lane C's phone-only Android coverage
-  (no Android tablet lane exists); whether Tier 0 findings should also
-  surface in the customer-facing Findings register (report_delivery.py),
-  not just the Action Plan — explicitly out of scope for M6 as written; a
-  real end-to-end run of Lane C specifically (Android hardware still not
-  available); revisiting the iPad Simulator gap if this ever becomes a
-  documented, better-understood Appium issue.
+- **2026-08-16 — Lane C verified end-to-end on real Android hardware:**
+  closed the "Android hardware still not available" gap from the entry
+  below, using a OnePlus Nord 2 5G over USB. Four distinct real problems
+  found and fixed: no Windows ADB driver bound (Device Manager showed "ADB
+  Interface" / `Status: Unknown`; fixed via Windows Update's own driver
+  search, resolving to Google's "WinUsb Device" driver — deliberately
+  avoided third-party OnePlus-driver mirror sites as an untrusted-download
+  risk); `selenium-webdriver` was never actually `npm install`ed at the repo
+  root despite being documented as a prerequisite; Postgres had no host
+  port published in `docker-compose.yml`, so the CLI (which must run on the
+  Windows host, since Docker cannot pass through USB to a container)
+  couldn't reach the DB — first attempt published the port directly in
+  `docker-compose.yml`, which broke a locked security-boundary test
+  (`tests/test_production_network_boundary.py` forbids publishing
+  postgres/redis from that tracked file); corrected to a gitignored
+  `docker-compose.override.yml` instead, which Compose auto-merges but the
+  boundary test never scans; and a `CLEAR_APP_USER_DATA`
+  `SecurityException` from ChromeDriver's pre-session `pm clear`, caused by
+  OxygenOS restricting that shell permission on system apps unless a
+  second, separate "USB debugging (Security settings)" developer toggle is
+  also enabled — enabling it fixed the error with no code change. Full
+  writeup with exact commands/errors is in the Lane C section's own "Real
+  hardware verification" entry above. Real result: execution
+  `c2e5400a-807d-442b-bc3f-263ff4d99a59` against the live
+  `fluidcontrols.com` analysis run, verified by querying Postgres directly
+  afterward, not just trusted from console output.
+- **2026-08-16 — Tier 0 findings now surface in the Complete Findings
+  Register, closing M6's flagged open item:** decided to reuse the proven
+  `_browser_finding_payload`/`_group_detailed_findings` adapter pattern
+  rather than fabricate `AnalysisFinding` rows — same reasoning M6 already
+  established for the Action Plan side applies here too (Tier 0's execution
+  shape has no per-page `deep_analysis_run_id` to attach to). Full writeup
+  in the M6 section's own "Findings Register integration" entry above. Full
+  suite: 1089 passed, 1 skipped (1081 baseline + 8 new); `ruff check`/
+  `ruff format --check` both clean.
+- **2026-08-14 — Not yet decided, genuinely bigger than this initiative:**
+  interaction_failures/accessibility_differences in the cross-engine runner
+  (confirmed also hardcoded empty, deliberately not touched — bigger scope
+  than M3); the TRUE per-form-factor (phone vs tablet) verification split —
+  still deferred, now moot everywhere except Lane C's phone-only Android
+  coverage (no Android tablet lane exists); revisiting the iPad Simulator
+  gap if this ever becomes a documented, better-understood Appium issue.
 
 ## 8. Current real-world version snapshot (illustrative, re-derive at
    execution time — do not hardcode)

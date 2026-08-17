@@ -245,30 +245,83 @@ def ingest_browser_uat_tier0_job_result(
     return page_results
 
 
-def _latest_usable_tier0_execution(
+def _usable_tier0_executions(
     db: Session,
     *,
     analysis_run_id: uuid.UUID,
     lane: str,
-) -> BrowserUatTier0Execution | None:
-    """Shared selection rule for both fetch_latest_tier0_* functions below:
-    the MOST RECENT terminal-with-evidence Tier 0 execution for this
-    analysis run, not a merge across every execution ever run -- an
-    analysis run may have zero, one, or several Tier 0 executions (retries,
-    explicit re-checks, or a manual Lane C run recorded after an automatic
-    Lane A/B one), and merging them could mix stale and fresh evidence or
-    double-count pages. Returns None when no usable execution exists.
+) -> list[BrowserUatTier0Execution]:
+    """Every terminal-with-evidence Tier 0 execution for this analysis run,
+    newest-completed first. An analysis run's real coverage often comes from
+    MULTIPLE separate executions -- e.g. Lane A/B's automatic GitHub Actions
+    dispatch (desktop Chrome/Edge/Safari) and Lane C's manual Android CLI
+    run are always separate executions, since Lane C has no way to be
+    dispatched together with the others (see
+    docs/DEVICE_OS_BROWSER_QA_PLAN.md's Lane C entry). Returns [] when no
+    usable execution exists.
     """
-    return db.scalar(
-        select(BrowserUatTier0Execution)
-        .where(
-            BrowserUatTier0Execution.analysis_run_id == analysis_run_id,
-            BrowserUatTier0Execution.lane == lane,
-            BrowserUatTier0Execution.status.in_(_USABLE_TIER0_STATUSES),
+    return list(
+        db.scalars(
+            select(BrowserUatTier0Execution)
+            .where(
+                BrowserUatTier0Execution.analysis_run_id == analysis_run_id,
+                BrowserUatTier0Execution.lane == lane,
+                BrowserUatTier0Execution.status.in_(_USABLE_TIER0_STATUSES),
+            )
+            .order_by(BrowserUatTier0Execution.completed_at.desc())
         )
-        .order_by(BrowserUatTier0Execution.completed_at.desc())
-        .limit(1)
     )
+
+
+def _merged_usable_page_results(
+    db: Session,
+    *,
+    analysis_run_id: uuid.UUID,
+    lane: str,
+) -> list[BrowserUatTier0PageResult]:
+    """Real page results across EVERY usable Tier 0 execution for this
+    analysis run, deduplicated by (browser_channel, platform, url) -- the
+    most-recently-COMPLETED execution's row wins per combination, but an
+    older execution still contributes any combination the newer one doesn't
+    cover.
+
+    This fixes a real bug found via live verification, not a hypothetical:
+    selecting only the single most recent execution meant that ingesting a
+    later, narrower Lane C Android-only result made the analysis run's
+    earlier, still-valid Lane A/B desktop Chrome/Edge/Safari evidence
+    disappear entirely from the customer-facing Browser Compatibility
+    matrix and Complete Findings Register -- reverting those rows to "Not
+    verified in current environment" even though real evidence for them
+    still existed in the database, just in an execution that was no longer
+    "the latest." Real, separate Tier 0 lanes must accumulate, not replace
+    each other.
+    """
+    executions = _usable_tier0_executions(db, analysis_run_id=analysis_run_id, lane=lane)
+    if not executions:
+        return []
+
+    page_results = db.scalars(
+        select(BrowserUatTier0PageResult).where(
+            BrowserUatTier0PageResult.execution_id.in_([execution.id for execution in executions])
+        )
+    ).all()
+    # executions is already newest-completed-first; sort page results the
+    # same way so the loop below naturally keeps the freshest row per
+    # combination and only fills in gaps from older executions.
+    execution_rank = {execution.id: index for index, execution in enumerate(executions)}
+    page_results_newest_first = sorted(
+        page_results, key=lambda page_result: execution_rank[page_result.execution_id]
+    )
+
+    merged: list[BrowserUatTier0PageResult] = []
+    seen_combinations: set[tuple[str, str, str]] = set()
+    for page_result in page_results_newest_first:
+        combination = (page_result.browser_channel, page_result.platform, page_result.url)
+        if combination in seen_combinations:
+            continue
+        seen_combinations.add(combination)
+        merged.append(page_result)
+    return merged
 
 
 def fetch_latest_tier0_page_results(
@@ -280,22 +333,11 @@ def fetch_latest_tier0_page_results(
     """Real evidence for M5's evidence-state mapping, as plain dicts (matches
     browser_compatibility.py's dict-based interface, not ORM objects).
 
-    Returns [] when no usable execution exists, which is the correct, honest
+    Returns [] when no usable evidence exists, which is the correct, honest
     input for apply_tier0_evidence (rows stay exactly as built from engine
     data -- an unavailable Tier 0 lane never blocks or alters the rest of
     the report).
     """
-    latest_execution = _latest_usable_tier0_execution(
-        db, analysis_run_id=analysis_run_id, lane=lane
-    )
-    if latest_execution is None:
-        return []
-
-    page_results = db.scalars(
-        select(BrowserUatTier0PageResult).where(
-            BrowserUatTier0PageResult.execution_id == latest_execution.id
-        )
-    ).all()
     return [
         {
             "browser_channel": page_result.browser_channel,
@@ -303,7 +345,9 @@ def fetch_latest_tier0_page_results(
             "browser_version": page_result.browser_version,
             "status": page_result.status,
         }
-        for page_result in page_results
+        for page_result in _merged_usable_page_results(
+            db, analysis_run_id=analysis_run_id, lane=lane
+        )
     ]
 
 
@@ -315,7 +359,8 @@ def fetch_latest_tier0_structural_results(
 ) -> list[dict[str, Any]]:
     """Real per-page, per-viewport M3 structural evidence (horizontal
     overflow, clipped/overlapping elements, small tap targets) for the SAME
-    execution fetch_latest_tier0_page_results would select, as plain dicts.
+    merged page results fetch_latest_tier0_page_results would select, as
+    plain dicts.
 
     Unlike fetch_latest_tier0_page_results' lightweight per-page summary,
     this carries the viewport-level detail report_delivery.py needs to build
@@ -324,17 +369,7 @@ def fetch_latest_tier0_structural_results(
     and the Findings Register are different, independently-testable
     consumers of the same underlying rows.
     """
-    latest_execution = _latest_usable_tier0_execution(
-        db, analysis_run_id=analysis_run_id, lane=lane
-    )
-    if latest_execution is None:
-        return []
-
-    page_results = db.scalars(
-        select(BrowserUatTier0PageResult).where(
-            BrowserUatTier0PageResult.execution_id == latest_execution.id
-        )
-    ).all()
+    page_results = _merged_usable_page_results(db, analysis_run_id=analysis_run_id, lane=lane)
     if not page_results:
         return []
 
@@ -356,6 +391,8 @@ def fetch_latest_tier0_structural_results(
             "browser_channel": page_result.browser_channel,
             "platform": page_result.platform,
             "browser_version": page_result.browser_version,
+            "status": page_result.status,
+            "error_message": page_result.error_message,
             "viewport_results": [
                 {
                     "viewport_name": viewport.viewport_name,
@@ -374,3 +411,28 @@ def fetch_latest_tier0_structural_results(
         }
         for page_result in page_results
     ]
+
+
+def fetch_latest_tier0_execution(
+    db: Session,
+    *,
+    analysis_run_id: uuid.UUID,
+    lane: str = DEFAULT_LANE,
+) -> BrowserUatTier0Execution | None:
+    """The single most recent Tier 0 execution for this analysis run,
+    REGARDLESS of status -- unlike _usable_tier0_executions (which only
+    returns terminal-with-evidence executions, correct for M5/the Findings
+    Register), a status-polling consumer needs to see "pending" and
+    "running" executions too, so it knows to keep polling rather than
+    concluding no check was ever started. Returns None only when this
+    analysis run has never had a Tier 0 execution in this lane at all.
+    """
+    return db.scalar(
+        select(BrowserUatTier0Execution)
+        .where(
+            BrowserUatTier0Execution.analysis_run_id == analysis_run_id,
+            BrowserUatTier0Execution.lane == lane,
+        )
+        .order_by(BrowserUatTier0Execution.requested_at.desc())
+        .limit(1)
+    )

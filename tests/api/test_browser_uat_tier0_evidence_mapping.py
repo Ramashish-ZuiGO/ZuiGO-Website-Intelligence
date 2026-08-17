@@ -26,6 +26,7 @@ from app.services.browser_compatibility import (
     apply_tier0_evidence,
 )
 from app.services.browser_uat_tier0 import (
+    fetch_latest_tier0_execution,
     fetch_latest_tier0_page_results,
     fetch_latest_tier0_structural_results,
 )
@@ -385,9 +386,11 @@ class TestFetchLatestTier0PageResults:
 
         assert results == []
 
-    def test_returns_page_results_from_the_most_recent_completed_execution(
+    def test_the_freshest_execution_wins_for_the_same_browser_platform_url_combination(
         self, db_session: Session
     ) -> None:
+        # Same (browser_channel, platform, url) checked twice (a retry/
+        # re-check) -- the newer result must win, not both showing up.
         analysis_run_id = _seed_analysis_run(db_session)
         now = datetime.now(UTC)
 
@@ -403,7 +406,7 @@ class TestFetchLatestTier0PageResults:
                 execution_id=older.id,
                 browser_channel="msedge",
                 platform="windows",
-                url="https://stale.test/",
+                url="https://example.test/",
                 status="fail",
             )
         )
@@ -419,7 +422,7 @@ class TestFetchLatestTier0PageResults:
                 execution_id=newer.id,
                 browser_channel="msedge",
                 platform="windows",
-                url="https://fresh.test/",
+                url="https://example.test/",
                 status="pass",
             )
         )
@@ -429,6 +432,69 @@ class TestFetchLatestTier0PageResults:
 
         assert len(results) == 1
         assert results[0]["status"] == "pass"
+
+    def test_evidence_merges_across_separate_executions_instead_of_replacing(
+        self, db_session: Session
+    ) -> None:
+        # Real bug this fixes: Lane A/B's automatic desktop dispatch and
+        # Lane C's manual Android CLI run are always SEPARATE executions.
+        # A later, narrower execution (e.g. Android only) must not erase an
+        # earlier execution's still-valid evidence for OTHER browser/
+        # platform/url combinations it never touched.
+        analysis_run_id = _seed_analysis_run(db_session)
+        now = datetime.now(UTC)
+
+        desktop_run = _seed_execution(
+            db_session,
+            analysis_run_id,
+            idempotency_key="lane-ab-desktop",
+            completed_at=now - timedelta(hours=2),
+            status="completed",
+        )
+        db_session.add_all(
+            [
+                BrowserUatTier0PageResult(
+                    execution_id=desktop_run.id,
+                    browser_channel="msedge",
+                    platform="windows",
+                    url="https://example.test/",
+                    status="pass",
+                ),
+                BrowserUatTier0PageResult(
+                    execution_id=desktop_run.id,
+                    browser_channel="safari",
+                    platform="macos",
+                    url="https://example.test/",
+                    status="pass",
+                ),
+            ]
+        )
+        android_run = _seed_execution(
+            db_session,
+            analysis_run_id,
+            idempotency_key="lane-c-android",
+            completed_at=now,
+            status="partial",
+        )
+        db_session.add(
+            BrowserUatTier0PageResult(
+                execution_id=android_run.id,
+                browser_channel="chrome",
+                platform="android",
+                url="https://example.test/",
+                status="fail",
+            )
+        )
+        db_session.commit()
+
+        results = fetch_latest_tier0_page_results(db_session, analysis_run_id=analysis_run_id)
+
+        combinations = {(r["browser_channel"], r["platform"], r["status"]) for r in results}
+        assert combinations == {
+            ("msedge", "windows", "pass"),
+            ("safari", "macos", "pass"),
+            ("chrome", "android", "fail"),
+        }
 
     def test_unavailable_executions_are_not_treated_as_usable_evidence(
         self, db_session: Session
@@ -455,7 +521,7 @@ class TestFetchLatestTier0StructuralResults:
 
         assert results == []
 
-    def test_returns_viewport_detail_from_the_most_recent_completed_execution(
+    def test_the_freshest_execution_wins_for_the_same_browser_platform_url_combination(
         self, db_session: Session
     ) -> None:
         analysis_run_id = _seed_analysis_run(db_session)
@@ -472,7 +538,7 @@ class TestFetchLatestTier0StructuralResults:
             execution_id=older.id,
             browser_channel="chrome",
             platform="android",
-            url="https://stale.test/",
+            url="https://example.test/",
             status="fail",
         )
         db_session.add(stale_page)
@@ -499,7 +565,7 @@ class TestFetchLatestTier0StructuralResults:
             execution_id=newer.id,
             browser_channel="chrome",
             platform="android",
-            url="https://fresh.test/",
+            url="https://example.test/",
             status="fail",
             browser_version="151.0.7922.137",
         )
@@ -525,7 +591,6 @@ class TestFetchLatestTier0StructuralResults:
 
         assert len(results) == 1
         page = results[0]
-        assert page["url"] == "https://fresh.test/"
         assert page["browser_version"] == "151.0.7922.137"
         assert len(page["viewport_results"]) == 1
         viewport = page["viewport_results"][0]
@@ -534,6 +599,77 @@ class TestFetchLatestTier0StructuralResults:
         assert viewport["overlapping_elements"] == 5
         assert viewport["small_tap_targets"] == 13
         assert viewport["tap_target_samples"][0]["element_type"] == "a"
+
+    def test_evidence_merges_across_separate_executions_instead_of_replacing(
+        self, db_session: Session
+    ) -> None:
+        # Same real bug/fix as TestFetchLatestTier0PageResults' equivalent
+        # test, proven here for the richer structural-evidence path the
+        # Complete Findings Register actually consumes.
+        analysis_run_id = _seed_analysis_run(db_session)
+        now = datetime.now(UTC)
+
+        desktop_run = _seed_execution(
+            db_session,
+            analysis_run_id,
+            idempotency_key="lane-ab-desktop",
+            completed_at=now - timedelta(hours=2),
+            status="completed",
+        )
+        desktop_page = BrowserUatTier0PageResult(
+            execution_id=desktop_run.id,
+            browser_channel="msedge",
+            platform="windows",
+            url="https://example.test/",
+            status="pass",
+        )
+        db_session.add(desktop_page)
+        db_session.flush()
+        db_session.add(
+            BrowserUatTier0ViewportResult(
+                page_result_id=desktop_page.id,
+                viewport_name="Desktop",
+                viewport_width=1440,
+                viewport_height=900,
+                status="passed",
+                horizontal_overflow=False,
+            )
+        )
+
+        android_run = _seed_execution(
+            db_session,
+            analysis_run_id,
+            idempotency_key="lane-c-android",
+            completed_at=now,
+            status="partial",
+        )
+        android_page = BrowserUatTier0PageResult(
+            execution_id=android_run.id,
+            browser_channel="chrome",
+            platform="android",
+            url="https://example.test/",
+            status="fail",
+        )
+        db_session.add(android_page)
+        db_session.flush()
+        db_session.add(
+            BrowserUatTier0ViewportResult(
+                page_result_id=android_page.id,
+                viewport_name="Mobile (real device)",
+                viewport_width=360,
+                viewport_height=690,
+                status="failed",
+                small_tap_targets=13,
+            )
+        )
+        db_session.commit()
+
+        results = fetch_latest_tier0_structural_results(db_session, analysis_run_id=analysis_run_id)
+
+        assert len(results) == 2
+        by_channel = {page["browser_channel"]: page for page in results}
+        assert by_channel["msedge"]["status"] == "pass"
+        assert by_channel["chrome"]["viewport_results"][0]["small_tap_targets"] == 13
 
     def test_unavailable_executions_are_not_treated_as_usable_evidence(
         self, db_session: Session
@@ -550,3 +686,65 @@ class TestFetchLatestTier0StructuralResults:
         results = fetch_latest_tier0_structural_results(db_session, analysis_run_id=analysis_run_id)
 
         assert results == []
+
+
+class TestFetchLatestTier0Execution:
+    """Unlike _usable_tier0_executions (Findings Register/M5 evidence,
+    terminal-with-evidence only), this backs the frontend status-polling
+    route -- pending/running executions must be visible too."""
+
+    def test_returns_none_when_no_execution_exists(self, db_session: Session) -> None:
+        analysis_run_id = _seed_analysis_run(db_session)
+
+        result = fetch_latest_tier0_execution(db_session, analysis_run_id=analysis_run_id)
+
+        assert result is None
+
+    def test_a_pending_execution_is_returned(self, db_session: Session) -> None:
+        analysis_run_id = _seed_analysis_run(db_session)
+        analysis_run = db_session.get(AnalysisRun, analysis_run_id)
+        execution = BrowserUatTier0Execution(
+            website_id=analysis_run.website_id,
+            analysis_run_id=analysis_run_id,
+            lane="github_actions_chrome_edge",
+            idempotency_key="pending-key",
+            correlation_id="pending-key",
+            status="pending",
+        )
+        db_session.add(execution)
+        db_session.commit()
+
+        result = fetch_latest_tier0_execution(db_session, analysis_run_id=analysis_run_id)
+
+        assert result is not None
+        assert result.status == "pending"
+
+    def test_returns_the_most_recently_requested_execution_regardless_of_status(
+        self, db_session: Session
+    ) -> None:
+        analysis_run_id = _seed_analysis_run(db_session)
+        now = datetime.now(UTC)
+        older = _seed_execution(
+            db_session,
+            analysis_run_id,
+            idempotency_key="exec-older",
+            completed_at=now - timedelta(hours=1),
+            status="completed",
+        )
+        older.requested_at = now - timedelta(hours=2)
+        newer = _seed_execution(
+            db_session,
+            analysis_run_id,
+            idempotency_key="exec-newer",
+            completed_at=now,
+            status="unavailable",
+        )
+        newer.requested_at = now - timedelta(minutes=1)
+        db_session.commit()
+
+        result = fetch_latest_tier0_execution(db_session, analysis_run_id=analysis_run_id)
+
+        # "unavailable" would never qualify as usable evidence, but it IS
+        # the most recently REQUESTED execution -- a polling frontend must
+        # see it, not silently fall back to the older completed one.
+        assert result.id == newer.id

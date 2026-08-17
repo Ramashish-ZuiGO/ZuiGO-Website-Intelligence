@@ -28,11 +28,26 @@ in the customer-facing Complete Findings Register (not just the Browser
 Compatibility matrix and Action Plan), via the same
 `_group_detailed_findings` pipeline every other finding source uses, no
 fabricated `AnalysisFinding` rows (see M6's "Findings Register integration"
-entry). **Everything in this initiative is now shipped and real-verified
-except two deliberately-deferred items: the iPad Simulator timeout (known
-pending limitation, see the iOS lane section) and the `apps/web` frontend
-one-click UI (deferred pending an explicit handoff from the parallel
-"Antigravity" agent).**
+entry). **Everything in this initiative is now shipped and real-verified, including
+the `apps/web` frontend piece — the only remaining deliberately-deferred
+item is the iPad Simulator timeout (known pending limitation, see the iOS
+lane section).** A read API (`GET .../tier0` status poll,
+`GET .../tier0/results`) was built and live-verified first (see "Read API
+for the apps/web frontend handoff" under M6), handed off via a spec
+document, and the "Antigravity" frontend agent built
+`apps/web/src/components/browser-uat/BrowserUatPanel.tsx` +
+`apps/web/src/lib/browser-uat-api.ts` against it correctly on the first
+pass (2026-08-16) — verified independently via a new
+`tests/test_frontend_browser_uat_contract.py` (4/4 passing against the
+real backend routes, not just trusted from the frontend session's own
+report), plus a clean `npm run typecheck`/`lint`/`build`. Minor, non-blocking
+note: `types.ts` declares a `BrowserUatLane` union including lane values the
+backend never actually produces (`manual_android`, `github_actions_safari`,
+etc. — every execution's real `lane` value is `github_actions_chrome_edge`
+regardless of which platform/lane actually ran; Android results are
+distinguished by `platform: "android"` in `page_results`, not by `lane`) —
+currently unused/dead code, zero functional impact, flagged for whoever
+touches this next.
 This document is the
 single source of truth for this initiative and is written to be portable —
 any competent engineer or any LLM (not just Claude) should be able to resume
@@ -1206,6 +1221,43 @@ Appendix, not just the Browser Compatibility matrix (M5) and Action Plan
   render in the HTML artifact, and that a clean viewport never fabricates a
   finding). Full suite: 1089 passed, 1 skipped (1081 baseline + 8 new).
   `ruff check`/`ruff format --check` both clean.
+
+##### Read API for the `apps/web` frontend handoff — shipped 2026-08-16
+
+Before this, `/analysis-runs/{id}/browser-uat/tier0` only had a `POST` to
+start a check — no way for a frontend to read status or results back. Added
+the read side so the eventual Antigravity frontend handoff has a real,
+working contract to build against immediately rather than a documented gap.
+
+- **`GET /analysis-runs/{analysis_run_id}/browser-uat/tier0`** — poll
+  target. Returns the most recent Tier 0 execution in ANY status (pending/
+  running/completed/partial/failed/cancelled/unavailable), backed by new
+  `fetch_latest_tier0_execution()` — deliberately a DIFFERENT query than
+  the Findings Register/M5 evidence mapping use
+  (`_latest_usable_tier0_execution`, terminal-with-evidence only), since a
+  polling frontend needs to see in-progress executions too, not just
+  finished ones. 404 (`BROWSER_UAT_TIER0_NOT_FOUND`) only means no check
+  was ever started for this analysis run — distinct from one that's still
+  running.
+- **`GET /analysis-runs/{analysis_run_id}/browser-uat/tier0/results`** —
+  real per-page, per-viewport structural evidence (the same data source
+  the Complete Findings Register itself uses, via
+  `fetch_latest_tier0_structural_results`, now also carrying page-level
+  `status`/`error_message`, added for this route). Deliberately never
+  404s for "no usable evidence yet" — returns `{"page_results": []}`,
+  since the analysis run itself is real; only 404s if the analysis run
+  doesn't exist at all. Callers use the status route to tell "never
+  started" apart from "started, not finished."
+- Both live-verified against the real docker stack (API image rebuilt
+  first, per this repo's own "images have no source mounts" rule) and the
+  real `fluidcontrols.com` execution from the hardware-verification run
+  above — confirmed real JSON responses, not just SQLite-backed unit tests.
+- **Tests:** 10 new (7 route-level: status poll pending/most-recent/404,
+  results empty-vs-populated/404, real structural evidence shape; 3 for
+  `fetch_latest_tier0_execution` against real SQLite — none exists, a
+  pending execution is visible, most-recently-REQUESTED wins even when its
+  status is "unavailable"). Full suite: 1099 passed, 1 skipped (1089
+  baseline + 10 new). `ruff check`/`ruff format --check` both clean.
 
 ### M7 — Logging & traceability
 

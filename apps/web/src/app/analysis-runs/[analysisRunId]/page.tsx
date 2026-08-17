@@ -21,6 +21,7 @@ import { ScoringIntelligencePanel } from "@/components/scoring/ScoringIntelligen
 import { ReportDeliveryPanel } from "@/components/reports/ReportDeliveryPanel";
 import ExtractedContentPanel from "@/components/content/ExtractedContentPanel";
 import { SectionErrorBoundary } from "@/components/SectionErrorBoundary";
+import { BrowserUatPanel } from "@/components/browser-uat/BrowserUatPanel";
 import type { WorkflowProgress } from "@/components/reports/types";
 import { analysisComparisonApi } from "@/lib/analysis-comparison-api";
 import { StatusBadge } from "@/components/ui/StatusBadge";
@@ -1721,6 +1722,10 @@ export default function AnalysisReportPage() {
                    <p className="text-sm text-z-muted mb-6">Browser UAT scope across Google Chrome, Microsoft Edge, and Apple Safari.</p>
                    <BrowserSummary diagnostics={report.diagnostics} viewMode="executive" />
                  </section>
+               </SectionErrorBoundary>
+
+               <SectionErrorBoundary sectionName="Real Browser Verification">
+                 <BrowserUatPanel analysisRunId={analysisRunId} />
                </SectionErrorBoundary>
 
                <SectionErrorBoundary sectionName="Reanalysis Comparison">

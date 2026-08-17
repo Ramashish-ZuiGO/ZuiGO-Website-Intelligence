@@ -17,6 +17,9 @@ def test_valid_settings_load() -> None:
         postgres_host="database",
         postgres_port=5433,
         redis_url="redis://cache:6379/1",
+        admin_username="admin",
+        admin_password_hash="not-a-real-hash",
+        jwt_secret_key="not-a-real-secret",
     )
 
     database_url = make_url(settings.database_url)
@@ -34,7 +37,12 @@ def test_missing_required_settings_raise_clear_error(monkeypatch: pytest.MonkeyP
     monkeypatch.delenv("REDIS_URL")
 
     with pytest.raises(ValidationError) as error:
-        Settings(_env_file=None)
+        Settings(
+            _env_file=None,
+            admin_username="admin",
+            admin_password_hash="not-a-real-hash",
+            jwt_secret_key="not-a-real-secret",
+        )
 
     missing_fields = {item["loc"] for item in error.value.errors()}
     assert missing_fields == {("postgres_password",), ("redis_url",)}
@@ -45,6 +53,9 @@ def test_settings_parse_multiple_cors_origins() -> None:
         _env_file=None,
         postgres_password="not-a-secret",
         redis_url="redis://cache:6379/0",
+        admin_username="admin",
+        admin_password_hash="not-a-real-hash",
+        jwt_secret_key="not-a-real-secret",
         backend_cors_origins="http://localhost:3000, https://example.com/",
     )
 

@@ -343,6 +343,70 @@ Full findings list, roughly by severity:
     should merge but isn't listed could inflate unique-finding counts
     (not confirmed as currently firing).
 
+## 4.5 Cross-check against a pre-existing planning document (2026-08-16)
+
+The user had a prior planning document
+(`ZuiGO_WebIQ_Phase6_Sitewide_Intelligence_Overhaul_Autonomous_Claude.md`,
+authored ~5 days before this initiative started, targeting a sweeping
+"autonomous mode" rewrite) plus 12 PDF screenshots of every report tab
+against a real `fluidcontrols.com` run from that time. The user was
+explicit this document is NOT a command to implement as-written — it may
+be partially outdated by since-then work, and needed cross-checking against
+real current code/data before trusting any of it. Verified findings below,
+not assumptions.
+
+**Confirmed FIXED since that document was written** (verified against a
+real report generated 2026-08-16, not assumed):
+- The document's headline claim — "Findings tab shows 6, embedded report
+  shows 220 unique findings, same analysis run" — does NOT reproduce today.
+  Checked `total_unique_findings` (223), `page_level_findings.finding_count`
+  (223), and `executive_summary.verified_finding_count` (223): all
+  reconcile. `top_finding_count: 5` is correctly labeled as a subset, not
+  falsely presented as complete.
+- "Action Plan capped at 5, hiding a bigger complete register" — the same
+  report genuinely generated only 4 real action items, internally
+  consistent (`action_count` matches the actual `actions` array length) —
+  not evidence of an artificial cap.
+- "Chrome/Edge/Safari permanently show Not verified, recommend BrowserStack
+  integration" — superseded by this same day's work: real GitHub-Actions +
+  real-device branded-browser evidence (built and live-verified earlier in
+  this session) already achieves genuine VERIFIED/PARTIALLY_VERIFIED
+  states for free. **Do not pursue BrowserStack** — it would duplicate
+  working infrastructure.
+
+**Confirmed STILL REAL, independently corroborated:**
+- Accessibility's "Manual review required: 10" / "expanded: 0 items" split
+  — checked today's real report directly: `incomplete_count: 10` exists as
+  a bare number with no corresponding list of those 10 items anywhere in
+  the payload. This independently confirms Finding 7 above (M6) via a
+  completely different method (product observation 5 days ago vs. direct
+  JSON inspection today) — strong signal this is real, not stale.
+- Security & Technical showing vague, not-genuinely-informative labels
+  instead of real findings — matches Finding 3 above (M3) closely.
+
+**Not yet verified — real, open questions, not yet checked against current
+code, added as audit candidates below rather than assumed true or false:**
+- Site-wide vs. homepage-only evidence per domain (SEO/content, links,
+  downloads, performance) — the document's biggest architectural claim.
+  **The user separately confirmed this as a standing requirement regardless
+  of the document's fate — see constraint #8 in §6.**
+- The Performance tab's raw internal keys (`LAB_FCP` etc.) and epoch
+  timestamps (`1786697643944`) — the report SNAPSHOT contains no lab-metric
+  data at all (checked, confirmed absent), consistent with an earlier
+  finding that the frontend Performance tab hits a separate LIVE endpoint,
+  not the snapshot — that live endpoint's actual output is unverified.
+- Pages tab: dead "View finding detail" buttons, raw UUIDs as primary
+  labels, unreadable long-decimal percentages.
+- HTML/W3C Nu Checker integration, CrUX API integration — likely genuinely
+  absent, not yet confirmed.
+- General UI responsiveness/overflow at narrow widths, a contextual-help
+  glossary system — frontend concerns, not yet checked.
+
+**Deliberately NOT carried over:** the document's own "autonomous mode, do
+not stop, work through all 40+ items as one mega-task" operating style —
+this initiative continues the discussed-module-by-module process the user
+has used throughout instead.
+
 ## 5. Module plan
 
 Proposed modules, grouped by priority tier. **Nothing here is approved for
@@ -362,6 +426,16 @@ prioritized against each other; that's part of the discussion.
 
 ### Tier 2 — customer-facing correctness (the report says something wrong or misleading)
 
+- **M15: Site-wide vs. homepage-only evidence audit — flagged as top
+  priority in this tier per the user's explicit standing requirement (§6,
+  constraint #8).** Audit every domain (performance, accessibility,
+  SEO/content, links/downloads, security/technical) to prove whether it
+  genuinely aggregates ALL successfully analysed eligible pages or is
+  silently homepage-only somewhere. Not yet verified either way for most
+  domains — this module IS the verification work, likely to fan out into
+  narrower per-domain fixes once real gaps are found. Applies as an
+  ongoing review criterion to every other module too, not just its own
+  scope.
 - **M3: Security & Technical section mislabeling.** Real security-header
   findings are misclassified away from the section titled "Security and
   Technical Findings." Smallest, most surgical fix in this tier — likely a
@@ -391,6 +465,17 @@ prioritized against each other; that's part of the discussion.
   (`interaction_failures`/`accessibility_differences` — already known;
   `screenshot_artifact_reference` — newly found). Decide: implement real
   detection, or formally document as a known limitation like the iPad gap.
+- **M16: Performance live-endpoint raw-label/epoch-timestamp audit.** From
+  the historical-doc cross-check (§4.5) — the report snapshot has no lab
+  metrics, so this data comes from a separate live endpoint
+  (`/analysis-runs/{id}/performance`) not yet audited. Confirm whether raw
+  internal keys (`LAB_FCP` etc.) and epoch timestamps still reach the
+  customer, and whether Field/Lab/Timing data is duplicated across tabs.
+- **M17: Pages tab UI functionality audit.** From §4.5 — confirm whether
+  "View finding detail" buttons are genuinely non-functional and whether
+  raw UUIDs/unreadable long-decimal percentages still appear as primary
+  labels. Frontend-facing; likely needs an Antigravity handoff once
+  confirmed real.
 
 ### Tier 4 — infrastructure (enables correctness/traceability everywhere else)
 
@@ -406,9 +491,131 @@ prioritized against each other; that's part of the discussion.
   representations (`SemanticLimitation` vs. `limitation_reasons`).
 - **M14: `MERGE_ACROSS_PAGES_FINDING_CODES` coverage audit.** Confirm
   whether any real finding code is currently mis-splitting across pages.
+- **M18: HTML/W3C Nu Checker integration.** From the historical doc — likely
+  genuinely absent today (not yet confirmed), a real new capability rather
+  than a fix. Doc's own correction worth keeping regardless of the rest:
+  there is no official universal W3C numeric score; any implementation
+  must expose real validator results (errors/warnings/line/column) and
+  keep a clearly-separate `ZuiGO HTML Quality Score` labeled as such, never
+  as "official W3C scoring."
+- **M19: CrUX API integration.** From the historical doc — likely genuinely
+  absent today (not yet confirmed). Needs a Google Cloud API key
+  (external dependency) if pursued; URL-level vs. origin-level-fallback
+  semantics need explicit, truthful labeling per Google's own current
+  documentation, never substituting Lighthouse lab data into a field-data
+  surface.
 
 Each module, once discussed, gets a decision-log entry below (mirroring the
 QA initiative's format) before implementation starts.
+
+### M1 — SHIPPED 2026-08-16
+
+**Scope decided first, before any code:** current usage is internal-only
+(just the user/team, no external customers yet). Given that, chose a
+minimal shared-credential gate now over building the full multi-tenant
+accounts/RBAC system the product spec describes as a later phase — stops
+the immediate abuse risk fast without over-building for a scale this
+product isn't at yet.
+
+**What shipped:** one admin username/password (bcrypt-hashed, no plaintext
+ever stored), `POST /api/v1/auth/login` issuing a signed JWT
+(`apps/api/app/services/auth.py`), and `require_bearer_auth` applied ONCE
+at the router level (`apps/api/app/api/router.py`) to every `/api/v1/*`
+route except login itself — so a newly added route can never accidentally
+ship unprotected. `/health` stays open. No new DB table (stateless
+verification, matching the "keep it simple" scope decision) — this
+generalizes cleanly to a real user table later without discarding the JWT
+mechanism.
+
+**Real security detail that shaped the design:** the frontend calls the API
+directly from the browser (no server-side proxy — confirmed by reading
+`apps/web/src/lib/api.ts`), and Next.js `NEXT_PUBLIC_*` env vars are baked
+into the public JS bundle. A static shared secret embedded that way would
+be visible to anyone via devtools — not real protection. This is why the
+design is a real login (password verified server-side, short-lived signed
+token issued per session) rather than a baked-in client constant.
+
+**Test-suite blast radius handled centrally:** ~20 existing test files
+already build their own `TestClient`/`dependency_overrides[get_db]`
+fixtures; rather than editing all of them, a new `tests/conftest.py`
+autouse fixture bypasses auth by default for every test (mirroring how a
+real caller would carry a valid token), and `tests/api/test_auth.py`'s 17
+tests explicitly undo that bypass to exercise the real mechanism end to
+end (login success/failure, protected-route rejection for missing/invalid/
+expired tokens, health and login staying unprotected).
+
+**Live-verified against the real docker stack**, not just unit tests: real
+login with the real admin credential returns a working token; an
+unauthenticated request to a real protected route returns real `401
+AUTHENTICATION_REQUIRED`; the same request with the token succeeds; a wrong
+password returns real `401 INVALID_CREDENTIALS`.
+
+**Known, expected, immediate consequence:** the `apps/web` frontend had no
+login screen yet, so every existing page got 401s and silently showed
+empty/no-data states (confirmed live: the homepage's "Recent analyses" list
+read "No analysis has been submitted yet" despite real analyses existing).
+A handoff spec was sent to Antigravity the same day.
+
+**Frontend login screen — Antigravity built it, verified here through 2 real
+bug-fix rounds, not just trusted from green checks:**
+- `apps/web/src/lib/auth.ts` (token storage + `login()`),
+  `apps/web/src/lib/api.ts` (attaches `Authorization` header, redirects to
+  `/login` on 401), `apps/web/src/components/auth/AuthGuard.tsx` (route
+  gate), `apps/web/src/app/login/page.tsx`.
+- **Round 1 bug found via live testing** (not caught by lint/typecheck/
+  build/pytest, which all passed): `AuthGuard` called `router.replace()`
+  synchronously in the render body instead of inside a `useEffect` — a
+  React anti-pattern that broke the login form's submit handler entirely
+  (confirmed: zero `POST /api/v1/auth/login` requests ever fired when
+  clicking Sign in) and caused a `ReferenceError: location is not defined`
+  during `npm run build`'s static-page generation. Root-caused via the
+  browser console's own React warning, fixed by moving the redirect into
+  `useEffect`.
+- **Round 2 bug found via live testing**, again invisible to automated
+  checks: the round-1 fix used `useSyncExternalStore` with a
+  `getServerSnapshot` returning `null` (correct for avoiding a hydration
+  mismatch), but the `useEffect` fired its redirect decision from that
+  transient null-token render — before React re-synced to the real
+  client-side token — meaning a genuinely logged-in user got bounced back
+  to `/login` on every hard page reload. Reproduced directly: real token
+  confirmed present in `localStorage` via `javascript_tool`, yet
+  `window.location.pathname` was `/login` after a fresh navigation. Fixed
+  by replacing `useSyncExternalStore` entirely with an explicit
+  `useState`-based "checked" flag that only decides to redirect after
+  genuinely reading the token client-side in an effect.
+- **Real, unrelated build-tooling bug found and fixed along the way**: the
+  root-level `package.json`/`package-lock.json` (added earlier this session
+  for the unrelated Android Lane C CLI, see the QA initiative doc) made
+  Turbopack infer the wrong monorepo workspace root, breaking
+  `apps/web`'s own dependency resolution (`Can't resolve 'tailwindcss'`).
+  Fixed with an explicit `turbopack.root` in `apps/web/next.config.ts`.
+- **Real `.env`/Docker Compose gotcha hit and fixed during manual
+  credential rotation**: `ADMIN_PASSWORD_HASH` must be a bcrypt HASH, not
+  the plaintext password (user initially set it to the plaintext value by
+  mistake). Separately, bcrypt hashes contain literal `$` characters, which
+  Docker Compose's `.env` parser can misinterpret as variable references
+  if a `$` happens to be followed by letters (e.g. `$LjfI...` looked like a
+  reference to a variable named `LjfI`, silently corrupting the value,
+  confirmed via real "variable is not set" warnings on `docker compose up`)
+  — fixed by escaping every literal `$` as `$$`. Worth remembering for any
+  future secret rotation, not just this one incident.
+- **Final live verification, all real, not assumed**: login with real
+  rotated credentials → real `200`; hard reload while authenticated → stays
+  on the real page with real data (the exact scenario that was broken);
+  logged-out access → redirects to `/login`; a fresh real
+  `POST /api/v1/auth/login` confirmed in the network log, not leftover
+  browser state.
+
+**Tests:** 17 new (`test_auth.py`) + 3 existing `test_config.py` tests
+updated for the 3 new required settings + 5 new
+(`test_frontend_auth_contract.py`, Antigravity-authored, verified against
+the real frontend code). Full suite: 1127 passed, 1 skipped. `ruff check`/
+`ruff format --check` both clean. Frontend: lint 0 errors, typecheck clean,
+production build clean (the `ReferenceError` confirmed gone).
+
+**Explicitly deferred, not part of this module:** full multi-tenant
+accounts, organizations, RBAC, password reset/registration flows — all
+remain future work once real external customers are onboarded.
 
 ## 6. Non-negotiable constraints for this initiative
 
@@ -429,6 +636,17 @@ Inherited from `CLAUDE.md`, restated here for portability:
    central discipline for this entire initiative given the "deployed live"
    context — every number, badge, and claim in the report must be traceable
    to a real evidence source, or explicitly marked unavailable.
+8. **Every analysis must be site-wide, never homepage-limited** (user's
+   explicit instruction, 2026-08-16). For every domain where the product
+   claims "website analysis" (performance, accessibility, SEO/content,
+   links, security/technical, findings, action plan), the default behavior
+   must use ALL successfully analysed eligible pages, not just the
+   homepage. Homepage-only evidence may exist as a page-level DETAIL, but
+   must never be presented as if it were site-wide evidence. If a domain
+   is genuinely sampled for cost/runtime reasons, that sampling must be
+   explicit (policy, sampled pages, why those pages) — never silent. This
+   applies to every module below and to any new module added later; treat
+   it as a standing review criterion, not a one-time module.
 
 ## 7. Decision log
 
@@ -441,3 +659,26 @@ Inherited from `CLAUDE.md`, restated here for portability:
   logging/traceability everywhere, feedback collection, and this document's
   own continuous, portable maintenance so ownership can transfer to a
   different LLM/session later.
+- **2026-08-16 — M12 (feedback collection) explicitly deferred:** discussed
+  scope (per-finding vs. per-action vs. whole-report vs. general feedback);
+  user chose to defer the decision, explicit instruction not to add it to
+  the implementation queue yet. Stays listed as M12 for future discussion.
+- **2026-08-16 — Historical planning document cross-checked, not adopted
+  as-is:** user supplied a pre-existing planning doc (authored ~5 days
+  before this initiative, targeting a sweeping "autonomous mode" rewrite)
+  plus 12 PDF screenshots, explicit that it was reference material to
+  cross-check, not a command. Verified its headline claim (6 vs. 220
+  findings) against a real report generated today and found it already
+  fixed; found its Browser UAT complaint already superseded by this
+  session's own real-branded-browser work; found its accessibility
+  manual-review complaint independently corroborated and still real (now
+  merged into M6's description). Added 4 new module candidates (M15-M19)
+  for genuinely open, not-yet-verified claims. Full reasoning in §4.5.
+  Declined to adopt the document's own sweeping, uninterrupted "autonomous"
+  working style — continuing the discussed-module-by-module process
+  instead.
+- **2026-08-16 — Site-wide-not-homepage-only elevated to a standing
+  constraint:** user explicit instruction: every analysis must be
+  site-wide, never homepage-limited, applying to every module, not just
+  M15. Added as constraint #8 in §6, and M15 flagged as the top-priority
+  item in Tier 2 to verify this holds across every domain.

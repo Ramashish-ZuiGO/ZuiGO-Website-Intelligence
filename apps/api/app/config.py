@@ -36,6 +36,16 @@ class Settings(BaseSettings):
     backend_cors_origins: Annotated[list[str], NoDecode] = ["http://localhost:3000"]
     allowed_repository_roots: list[str] = ["C:\\Users", "/home", "/app"]
 
+    # M1 (docs/REPORT_QUALITY_INITIATIVE.md): a single shared admin
+    # credential, not a user table -- this is a minimal gate for
+    # internal-only usage today, not the full multi-tenant/RBAC system the
+    # product spec describes as a later phase. The password is never stored
+    # in plaintext; only its bcrypt hash lives in config.
+    admin_username: str
+    admin_password_hash: SecretStr
+    jwt_secret_key: SecretStr
+    jwt_expiry_hours: int = Field(default=24, ge=1, le=168)
+
     # Readiness probing. Bounded so /ready can never become a slow or hanging
     # endpoint when a dependency is degraded.
     readiness_timeout_seconds: float = Field(default=3.0, ge=0.1, le=15.0)

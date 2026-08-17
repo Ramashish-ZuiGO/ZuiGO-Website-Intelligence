@@ -42,6 +42,9 @@ services:
       POSTGRES_PORT: ${POSTGRES_PORT:-5432}
       REDIS_URL: ${REDIS_URL:?Set REDIS_URL in .env}
       BACKEND_CORS_ORIGINS: ${BACKEND_CORS_ORIGINS:-http://localhost:3000}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:?Set ADMIN_USERNAME in .env}
+      ADMIN_PASSWORD_HASH: ${ADMIN_PASSWORD_HASH:?Set ADMIN_PASSWORD_HASH in .env}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Set JWT_SECRET_KEY in .env}
     ports:
       - "8000:8000"
     healthcheck:

@@ -1,3 +1,5 @@
+import { getToken, clearToken } from "@/lib/auth";
+
 const configuredApiUrl = process.env.NEXT_PUBLIC_API_URL;
 
 // NEXT_PUBLIC_* values are inlined at build time. A production build with the
@@ -36,10 +38,16 @@ export class ApiError extends Error {
 }
 
 export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = getToken();
+  const authHeaders: Record<string, string> = token
+    ? { Authorization: `Bearer ${token}` }
+    : {};
+
   const response = await fetch(`${apiUrl}${path}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",
+      ...authHeaders,
       ...init?.headers,
     },
   });
@@ -58,6 +66,17 @@ export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T
     } catch {
       // Preserve the safe status-based message when the response is not JSON.
     }
+
+    // 401 — clear stale token and redirect to login (unless already on /login)
+    if (
+      response.status === 401 &&
+      typeof window !== "undefined" &&
+      !window.location.pathname.startsWith("/login")
+    ) {
+      clearToken();
+      window.location.assign("/login");
+    }
+
     throw new ApiError(message, response.status, code, details, requestId);
   }
 

@@ -102,6 +102,9 @@ jobs:
           POSTGRES_PORT=5432
           REDIS_URL=redis://redis:6379/0
           BACKEND_CORS_ORIGINS=http://localhost:3000
+          ADMIN_USERNAME=ci-admin
+          ADMIN_PASSWORD_HASH=$$2b$$12$$r0nu6RSqzlpFX6KdKHLvIOZ3zw9hVnth5QoQAqloy4qH1JChdG/KC
+          JWT_SECRET_KEY=ci-only-dummy-jwt-secret-key-at-least-32-bytes-long
           EOF
 
       - name: Validate Docker Compose

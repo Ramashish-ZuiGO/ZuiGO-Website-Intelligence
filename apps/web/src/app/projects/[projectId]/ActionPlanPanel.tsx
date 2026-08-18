@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { apiRequest } from "@/lib/api";
 import type {
@@ -104,7 +104,7 @@ export function ActionPlanPanel({ websiteId, projectId }: ActionPlanPanelProps) 
 
   const [filterStatus, setFilterStatus] = useState("");
   const [filterSeverity, setFilterSeverity] = useState("");
-  const filterCategory = "";
+  const [filterCategory, setFilterCategory] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
@@ -281,6 +281,31 @@ export function ActionPlanPanel({ websiteId, projectId }: ActionPlanPanelProps) 
     { value: "low", label: "Low" },
   ];
 
+  // Category has no fixed enum server-side; build options from the
+  // categories actually present in the currently-loaded page of groups.
+  // The currently-selected category is always kept present even if it
+  // filtered the current page down to zero of that category, so the
+  // dropdown never silently drops the active selection.
+  const categoryOptions = useMemo(() => {
+    const seen = new Set<string>(filterCategory ? [filterCategory] : []);
+    for (const g of groups) seen.add(g.category);
+    return [
+      { value: "", label: "All categories" },
+      ...[...seen].sort().map((value) => ({ value, label: value.replace(/_/g, " ") })),
+    ];
+  }, [groups, filterCategory]);
+
+  const searchedGroups = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return groups;
+    return groups.filter((g) =>
+      [g.issue_title, g.category, g.responsible_area, g.responsible_role]
+        .join(" ")
+        .toLowerCase()
+        .includes(query),
+    );
+  }, [groups, searchQuery]);
+
   return (
     <section className="mt-5 border-t pt-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -374,12 +399,22 @@ export function ActionPlanPanel({ websiteId, projectId }: ActionPlanPanelProps) 
             >
               {severityOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
+            <select
+              aria-label="Filter by category"
+              className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+              value={filterCategory}
+              onChange={(e) => { setFilterCategory(e.target.value); setGroupsPage(1); }}
+            >
+              {categoryOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
           </div>
 
           {groupsLoading ? (
             <p className="mt-4 text-sm text-slate-500" role="status">Loading action groups…</p>
-          ) : groups.length === 0 ? (
-            <p className="mt-4 text-sm text-slate-500">No action groups found.</p>
+          ) : searchedGroups.length === 0 ? (
+            <p className="mt-4 text-sm text-slate-500">
+              {groups.length === 0 ? "No action groups found." : "No action groups match your search."}
+            </p>
           ) : (
             <div className="mt-4 overflow-x-auto">
               <table className="w-full min-w-[700px] text-left text-xs">
@@ -397,7 +432,7 @@ export function ActionPlanPanel({ websiteId, projectId }: ActionPlanPanelProps) 
                   </tr>
                 </thead>
                 <tbody>
-                  {groups.map((g) => (
+                  {searchedGroups.map((g) => (
                     <tr
                       className="cursor-pointer border-b align-top transition-colors hover:bg-slate-50"
                       key={g.id}

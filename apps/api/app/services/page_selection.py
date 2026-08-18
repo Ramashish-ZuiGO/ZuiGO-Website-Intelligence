@@ -6,6 +6,18 @@ CRITICAL_PAGE_TYPES = frozenset(
     {"home", "homepage", "navigation", "product", "service", "checkout", "contact"}
 )
 
+# M15 (docs/REPORT_QUALITY_INITIATIVE.md): the real bounded-cost ceiling for
+# real Lighthouse+axe-core (Level 2) runs on the current single-worker,
+# sequential-per-page infrastructure -- calibrated against the L2 stage's
+# real 300-second default deadline (page_analysis.py's total_deadline) at a
+# realistic ~25-30s/page (Playwright navigation + Lighthouse). Was already
+# the code's own internal default (worker_app/tasks/page_analysis.py's
+# `config.get("max_lighthouse_pages", 10)`) before the two real API call
+# sites hardcoded 0, silently disabling it in production. Raising this
+# requires either a longer L2 deadline or bounded per-page concurrency --
+# see the decision log in docs/REPORT_QUALITY_INITIATIVE.md's M15 entry.
+DEFAULT_MAX_LIGHTHOUSE_PAGES = 10
+
 
 def _value(page: Any, key: str, default: Any = None) -> Any:
     if isinstance(page, Mapping):

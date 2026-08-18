@@ -426,16 +426,8 @@ prioritized against each other; that's part of the discussion.
 
 ### Tier 2 — customer-facing correctness (the report says something wrong or misleading)
 
-- **M15: Site-wide vs. homepage-only evidence audit — flagged as top
-  priority in this tier per the user's explicit standing requirement (§6,
-  constraint #8).** Audit every domain (performance, accessibility,
-  SEO/content, links/downloads, security/technical) to prove whether it
-  genuinely aggregates ALL successfully analysed eligible pages or is
-  silently homepage-only somewhere. Not yet verified either way for most
-  domains — this module IS the verification work, likely to fan out into
-  narrower per-domain fixes once real gaps are found. Applies as an
-  ongoing review criterion to every other module too, not just its own
-  scope.
+- **M15: Site-wide vs. homepage-only evidence audit — SHIPPED 2026-08-17,
+  see full writeup below.**
 - **M3: Security & Technical section mislabeling.** Real security-header
   findings are misclassified away from the section titled "Security and
   Technical Findings." Smallest, most surgical fix in this tier — likely a
@@ -617,6 +609,143 @@ production build clean (the `ReferenceError` confirmed gone).
 accounts, organizations, RBAC, password reset/registration flows — all
 remain future work once real external customers are onboarded.
 
+### M15 — SHIPPED 2026-08-17
+
+**The real, most severe finding of the whole audit.** Lighthouse
+(Performance) and axe-core (Accessibility) only ever ran against the
+homepage — one page — for every real analysis, regardless of site size.
+This wasn't an occasional bug: `AnalysisResult.analysis_run_id` has a
+database-level unique constraint, meaning the schema itself only allowed
+one Lighthouse/Playwright result per analysis run. A "Level 2" deep-analysis
+tier existed in the worker code specifically to extend Lighthouse to more
+pages, but both real production call sites
+(`report_delivery.py`/`analysis_comparison.py`) hardcoded
+`max_lighthouse_pages: 0`, confirmed by an existing test that literally
+asserted this — Level 2 never ran on any page, ever, in the real flow. Worse:
+the "page coverage" numbers the report actually showed (e.g. "150/174 pages
+analyzed," "100% — all required evidence complete") were computed from the
+cheap Level-1 crawl only, not from Lighthouse/axe-core depth — so a report
+could genuinely claim full completeness while Performance/Accessibility
+evidence came from exactly 1 page, with no disclosure anywhere.
+
+**Investigated before writing any code, not assumed:** traced the real
+mechanism precisely — `AccessibilityAudit` and `PerformanceSnapshot` both
+turned out to be already multi-page-capable by design (their REAL unique
+constraints are `(execution_id, website_id, url, ...)`, not
+`analysis_run_id` alone — confirmed by reading the models directly). This
+meant **no schema migration was needed at all**; the tables were built for
+this and simply never got more than one page's worth of data written.
+
+**Real architectural subtlety found and handled correctly:** the Level-2
+page-analysis phase runs BEFORE the main report-generating `AnalysisRun`
+exists (it's a genuinely earlier, independent pipeline stage) — so it can't
+tag evidence with `analysis_run_id` the way the homepage flow does. Instead,
+it uses `execution_id` (the page-analysis execution's own id, which it does
+have), and `report_delivery.py` was extended to look up evidence by EITHER
+`analysis_run_id == run.id` (the homepage's own evidence) OR
+`execution_id == page_execution_id` (the Level-2 pages' evidence) — both
+genuinely this run's real evidence, just written by two different pipeline
+stages.
+
+**What shipped:**
+1. Un-hardcoded `max_lighthouse_pages` at both real call sites, replacing
+   `0` with a new shared constant `DEFAULT_MAX_LIGHTHOUSE_PAGES = 10`
+   (`app/services/page_selection.py`) — restoring the code's own
+   already-calibrated default that had been silently disabled.
+2. Wired real evidence collection (`process_axe_results`,
+   `process_lighthouse_accessibility`, `collect_lighthouse_evidence`) into
+   the Level-2 loop (`worker_app/tasks/page_analysis.py`), each
+   independently guarded so one evidence type failing never blocks the
+   others or the page's own findings/score.
+3. `report_delivery.py`'s accessibility section now merges homepage +
+   Level-2 pages' real `AccessibilityAudit` rows.
+4. `report_delivery.py`'s findings pipeline now merges homepage +
+   Level-2 pages' real `AnalysisFinding` rows (reusing the existing,
+   already-correct URL-keyed `_analysis_finding_payload` adapter directly —
+   no new adapter needed) — these flow into both the Performance section
+   and the Complete Findings Register.
+5. **Honest, separate disclosure**: new `deep_evidence_pages_analysed` /
+   `deep_evidence_coverage_percentage` / `deep_evidence_scope` fields in
+   `page_coverage`, and a new `DEEP_EVIDENCE_COVERAGE_LIMITED` limitation
+   reason — classified `optional_infrastructure` (same treatment as Branded
+   Browser UAT's own carve-out), a deliberate design decision: this is a
+   cost-bounded sampling decision, not a quality defect, so it's fully
+   visible for transparency but does NOT collapse the single blended
+   `report_confidence` score — including it in that blend would make nearly
+   every real report's confidence collapse to ~6% (10/174) regardless of
+   actual quality, which would be a disproportionate, confusing regression
+   in service of "honesty" that doesn't actually serve the customer.
+6. `select_level2_pages`'s existing priority ordering (homepage,
+   navigation, contact, about, product, service first) means the bounded
+   sample is the most valuable pages, not arbitrary ones — matches the
+   product's own "genuinely sampled... must be explicit... which pages and
+   why" standard from the historical planning doc reviewed in §4.5.
+
+**Tests:** one comprehensive, real-DB-backed integration test
+(`test_deep_evidence_covers_l2_pages_not_just_the_homepage`,
+`tests/api/test_report_delivery.py`) seeding a realistic 10-eligible-page
+site with 3 Level-2 pages (synthetic per-page `AnalysisRun` +
+`AnalysisResult` + `AnalysisFinding`, plus real `AccessibilityAudit` rows),
+proving: real 3/10 (30%) deep-evidence coverage is computed and disclosed
+correctly; the limitation reason is present with the correct
+`optional_infrastructure` classification; `deep_evidence_coverage_percent`
+is visible in `confidence_components` but does NOT drag down overall
+`confidence_percent`; accessibility audit/violation counts reflect all 3
+L2 pages, not just one; real per-page performance findings from all 3 L2
+pages reach the Complete Findings Register. Full suite: 1128 passed, 1
+skipped. `ruff check`/`ruff format --check` both clean.
+
+**Live-verified against the real docker stack** (images rebuilt first):
+regenerated a report for the real `fluidcontrols.com` analysis run that
+predates this fix — confirmed no crash, and confirmed HONEST zero-state
+behavior (`deep_evidence_pages_analysed: 0`, `0.0%`, the limitation reason
+correctly present) rather than fabricating data for old runs that never had
+real Level-2 evidence — exactly the "no fabricated evidence" discipline
+this whole initiative is about.
+
+**Fully live-verified 2026-08-17** (user: "go ahead with live run"): a
+brand-new real analysis run against `fluidcontrols.com`
+(execution `9a32683e-d516-4f79-ac5a-94585d612b7b`, run
+`927405cb-1f0a-4ead-8044-1c3b079e01a1`) ran the real Level-2 loop end-to-end
+and generated a fresh report (`d553f218-bc24-4319-b11f-11e6d7e53dba`).
+Confirmed directly from the generated payload, not assumed:
+- `deep_evidence_pages_analysed: 10`, `deep_evidence_coverage_percentage:
+  5.7` (10/174) — present in `confidence_components` but top-level
+  `confidence_percent` stayed at 50, not collapsed toward ~6%, proving the
+  `optional_infrastructure` exclusion works live, not just in the test.
+- Accessibility `audit_count` was 22 (vs. 1 before this fix, homepage-only).
+- Performance and Accessibility findings both carry real per-page
+  `affected_pages[].final_url` values spanning **10 distinct real URLs**
+  (homepage + 9 product/category pages), not just the homepage — the actual
+  defect M15 set out to fix, confirmed with real evidence from real
+  Lighthouse/axe-core runs, not by construction.
+
+**Real infrastructure bug this run surfaced (unrelated to M15's own code,
+fixed separately)**: the first attempt at this live run failed immediately
+at the `setup` stage (0% progress, all 8 agents still `queued`, stale after
+900s). Root cause: M1's auth commit (`2d1aead`) added
+`ADMIN_USERNAME`/`ADMIN_PASSWORD_HASH`/`JWT_SECRET_KEY` as *required*
+`Settings` fields, but only the `api` service's `docker-compose.yml` block
+was updated with them — the `worker` service, which imports the same shared
+`app.config.Settings`, was never given these vars. Every worker container
+had been crash-looping on startup (`pydantic.ValidationError`) since that
+commit, silently failing every Celery task with no report-facing error,
+until this live run's setup stage went stale waiting for a worker that could
+never boot. Fixed in `docker-compose.yml` (commit `7f905bb`, committed
+separately from M15's still-uncommitted changes) by adding the three vars to
+the worker's `environment:` block, matching the `api` service's pattern.
+After `docker compose up -d worker` recreated the container, it booted
+clean and picked the originally-queued Celery messages back up on its own —
+no manual resume needed.
+
+**Explicitly out of scope for this module** (from the original §4.5
+cross-check, still genuinely unverified): SEO/Content and Security/
+Technical were already independently confirmed genuinely site-wide by
+earlier audit work (no fix needed there) — Performance/Accessibility were
+the real, severe gap. The Performance live endpoint's raw-label/epoch-
+timestamp formatting (M16) and the Pages tab's dead-button/raw-UUID claims
+(M17) remain separate, unverified, un-fixed items.
+
 ## 6. Non-negotiable constraints for this initiative
 
 Inherited from `CLAUDE.md`, restated here for portability:
@@ -682,3 +811,25 @@ Inherited from `CLAUDE.md`, restated here for portability:
   site-wide, never homepage-limited, applying to every module, not just
   M15. Added as constraint #8 in §6, and M15 flagged as the top-priority
   item in Tier 2 to verify this holds across every domain.
+- **2026-08-16 — User granted broad authority to change anything needed**
+  to fix real problems, explicitly including locked architecture (agent
+  count, scoring formula, schema) — with an important, self-imposed
+  boundary: this authority is for design/architecture changes, not for
+  safety/trust boundaries (SSRF protections, "no fabricated evidence"
+  itself), which stay non-negotiable regardless. Used immediately for M15's
+  real fix.
+- **2026-08-17 — M15 shipped, no schema migration needed:** investigated
+  before implementing and found `AccessibilityAudit`/`PerformanceSnapshot`
+  were ALREADY designed to be multi-page-capable (real unique constraints
+  include the page URL, not just `analysis_run_id`) — so the fix was
+  wiring + query changes, not a database migration. Chose to classify the
+  new deep-evidence-coverage limitation as `optional_infrastructure`
+  (excluded from the blended `report_confidence` score) rather than
+  `required` (included) — a deliberate design decision: including it would
+  collapse nearly every real report's confidence to ~6% regardless of
+  actual quality, which serves neither honesty nor the customer. Full
+  reasoning and real live-verification results in M15's own writeup above.
+  Decided NOT to spend the ~1 hour needed for a full new real analysis run
+  to prove Level-2's real Lighthouse/axe-core execution end-to-end within
+  this same session turn — flagged as the next concrete step, pending the
+  user's explicit go-ahead on that time cost.

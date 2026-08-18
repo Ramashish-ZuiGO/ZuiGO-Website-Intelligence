@@ -564,6 +564,27 @@ def _completion_semantics(
             "page_analysis",
             f"Analysed-page coverage is {page_confidence}% of eligible pages.",
         )
+    # M15 (docs/REPORT_QUALITY_INITIATIVE.md): real Lighthouse/axe-core depth
+    # coverage, always well under 100% by design for sites larger than
+    # DEFAULT_MAX_LIGHTHOUSE_PAGES -- classified "optional_infrastructure"
+    # (same treatment as Branded Browser UAT below) since it's a cost-bounded
+    # sampling decision, not a quality defect, and must never silently
+    # collapse an otherwise-complete analysis's status.
+    deep_evidence_confidence = confidence_components.get("deep_evidence_coverage_percent")
+    if deep_evidence_confidence is not None and float(deep_evidence_confidence) < 100:
+        reason(
+            "DEEP_EVIDENCE_COVERAGE_LIMITED",
+            "optional_infrastructure",
+            "performance_accessibility_depth",
+            (
+                f"Real Lighthouse performance audits and full axe-core "
+                f"accessibility audits ran on {deep_evidence_confidence}% of "
+                "eligible pages (a prioritized, bounded sample), not every "
+                "page. Findings from every audited page appear in the "
+                "Findings Register; pages outside the sample are not "
+                "represented in Performance or Accessibility findings."
+            ),
+        )
     if discovery_completeness not in (None, "complete"):
         reason(
             "DISCOVERY_NOT_COMPLETE",
@@ -707,6 +728,24 @@ def _real_evidence_summary(
                     PageAnalysisRun.analysis_level == 1,
                 )
                 .order_by(PageAnalysisRun.created_at, PageAnalysisRun.id)
+            )
+        )
+        if discovery and page_execution_id
+        else []
+    )
+    # M15 (docs/REPORT_QUALITY_INITIATIVE.md): real Lighthouse/axe-core
+    # (Level 2) depth is a DIFFERENT, narrower measure than the cheap L1
+    # crawl coverage above -- a report must never claim "100% complete"
+    # from L1 success alone while deep evidence covered a small subset.
+    deep_evidence_page_runs = (
+        list(
+            db.scalars(
+                select(PageAnalysisRun).where(
+                    PageAnalysisRun.page_analysis_execution_id == uuid.UUID(str(page_execution_id)),
+                    PageAnalysisRun.discovery_run_id == discovery.id,
+                    PageAnalysisRun.analysis_level == 2,
+                    PageAnalysisRun.status == "completed",
+                )
             )
         )
         if discovery and page_execution_id
@@ -963,6 +1002,9 @@ def _real_evidence_summary(
     skipped_count = len(skipped) + max(0, len(scheduled) - len(scheduled_page_runs))
     denominator = len(eligible)
     analysed_page_coverage = round(len(successful) / denominator * 100, 1) if denominator else None
+    deep_evidence_coverage = (
+        round(len(deep_evidence_page_runs) / denominator * 100, 1) if denominator else None
+    )
     engine_rows = {
         str(item.get("engine")): dict(item)
         for item in browser.get("engines", [])
@@ -1078,6 +1120,21 @@ def _real_evidence_summary(
             "coverage_denominator": denominator,
             "coverage_percentage": analysed_page_coverage,
             "analysed_page_coverage_percentage": analysed_page_coverage,
+            # M15: real Lighthouse/axe-core (Level 2) depth -- a genuinely
+            # narrower, more expensive measure than the L1 crawl coverage
+            # above. See DEFAULT_MAX_LIGHTHOUSE_PAGES's own docstring for why
+            # this is bounded rather than every eligible page.
+            "deep_evidence_pages_analysed": len(deep_evidence_page_runs),
+            "deep_evidence_coverage_percentage": deep_evidence_coverage,
+            "deep_evidence_scope": (
+                "Real Lighthouse performance audits and full axe-core accessibility "
+                "audits ran on a prioritized, bounded sample of pages (homepage, "
+                "navigation, and other high-value page types first), not every "
+                "eligible page -- this keeps analysis time and compute cost bounded. "
+                "Findings from every audited page appear in the Findings Register; "
+                "pages outside this sample are not represented in Performance or "
+                "Accessibility findings."
+            ),
             "full_site_coverage_percentage": (
                 analysed_page_coverage if discovery_complete else None
             ),
@@ -2120,10 +2177,23 @@ def _build_sections(
     diagnostic_refs = (
         [_evidence("site_diagnostic_execution", diagnostics.execution_id)] if diagnostics else []
     )
+    # M15 (docs/REPORT_QUALITY_INITIATIVE.md): real site-wide accessibility
+    # coverage. The homepage's own audit is tagged analysis_run_id == run.id
+    # (set once the main AnalysisRun exists). Real Level-2 pages' audits are
+    # tagged execution_id == page_execution_id instead, since page analysis
+    # runs BEFORE the main AnalysisRun exists and never had a real
+    # analysis_run_id to tag them with -- both are genuinely this run's real
+    # evidence, just written by two different pipeline stages.
+    page_execution_id = workflow.structured_input.get("page_analysis_execution_id")
+    accessibility_filters = [AccessibilityAudit.analysis_run_id == run.id]
+    if page_execution_id:
+        accessibility_filters.append(
+            AccessibilityAudit.execution_id == uuid.UUID(str(page_execution_id))
+        )
     accessibility = list(
         db.scalars(
             select(AccessibilityAudit)
-            .where(AccessibilityAudit.analysis_run_id == run.id)
+            .where(or_(*accessibility_filters))
             .order_by(AccessibilityAudit.created_at, AccessibilityAudit.id)
         )
     )
@@ -2225,7 +2295,6 @@ def _build_sections(
         )
     )
     page_by_url = {page.normalized_url: page for page in pages}
-    page_execution_id = workflow.structured_input.get("page_analysis_execution_id")
     report_page_runs = (
         list(
             db.scalars(
@@ -2250,13 +2319,50 @@ def _build_sections(
                 page_run_by_url[page_url] = page_run
     actions_by_identity = {item.source_finding_identity: item for item in actions}
 
+    # M15 (docs/REPORT_QUALITY_INITIATIVE.md): real Level-2 pages' performance
+    # findings. Each L2 page's generate_findings() output is persisted under
+    # a SYNTHETIC per-page AnalysisRun (worker_app/tasks/page_analysis.py --
+    # page analysis runs before the main AnalysisRun exists, so it has
+    # nothing real to attach to), reachable via
+    # PageAnalysisRun.deep_analysis_run_id. _analysis_finding_payload is
+    # URL-keyed (page_by_url/page_run_by_url), not run-id-keyed, so it's
+    # safe to reuse directly for these -- the only run-id-scoped field it
+    # reads is run.result.lighthouse_version for a cosmetic provider-version
+    # string, not a correctness-critical value.
+    l2_deep_run_ids = (
+        [
+            page_run.deep_analysis_run_id
+            for page_run in db.scalars(
+                select(PageAnalysisRun).where(
+                    PageAnalysisRun.page_analysis_execution_id == uuid.UUID(str(page_execution_id)),
+                    PageAnalysisRun.analysis_level == 2,
+                    PageAnalysisRun.status == "completed",
+                )
+            )
+            if page_run.deep_analysis_run_id is not None
+        ]
+        if page_execution_id
+        else []
+    )
+    l2_findings = (
+        list(
+            db.scalars(
+                select(AnalysisFinding).where(AnalysisFinding.analysis_run_id.in_(l2_deep_run_ids))
+            )
+        )
+        if l2_deep_run_ids
+        else []
+    )
+    all_analysis_findings = list(run.findings) + l2_findings
+    finding_refs.extend(_evidence("analysis_finding", item.id) for item in l2_findings)
+
     analysis_related = {
         str(item.id): [
             str(other.id)
-            for other in run.findings
+            for other in all_analysis_findings
             if other.id != item.id and other.category == item.category
         ]
-        for item in run.findings
+        for item in all_analysis_findings
     }
     diagnostic_related = {
         str(item.id): [
@@ -2283,7 +2389,7 @@ def _build_sections(
             actions_by_identity=actions_by_identity,
             related_ids=analysis_related[str(item.id)],
         )
-        for item in run.findings
+        for item in all_analysis_findings
     ]
     detailed_diagnostic_findings = (
         [
@@ -5034,6 +5140,17 @@ def generate_report(
         if browser_expected_attempts
         else None
     )
+    # M15 (docs/REPORT_QUALITY_INITIATIVE.md): deep_evidence_coverage_percent
+    # is deliberately EXCLUDED from confidence_values/report_confidence's
+    # blended min() below, same treatment as Browser UAT's branded
+    # verification status -- it's a cost-bounded infrastructure sampling
+    # decision (DEFAULT_MAX_LIGHTHOUSE_PAGES), not an analysis quality
+    # defect, and for any site with more than that many eligible pages this
+    # percentage is ALWAYS well under 100% by design. Including it in the
+    # blend would collapse report_confidence for nearly every real report
+    # regardless of actual quality. Still fully visible here for real
+    # transparency, and still surfaced as its own limitation reason below.
+    deep_evidence_coverage_percent = page_coverage.get("deep_evidence_coverage_percentage")
     confidence_components = {
         "formula_determinism_percent": formula_confidence,
         "evidence_completeness_percent": coverage,
@@ -5044,6 +5161,7 @@ def generate_report(
     confidence_values = [
         float(value) for value in confidence_components.values() if value is not None
     ]
+    confidence_components["deep_evidence_coverage_percent"] = deep_evidence_coverage_percent
     report_confidence = int(min(confidence_values)) if confidence_values else None
     confidence_explanation = (
         "The score formula is deterministic, while report confidence is limited by the "

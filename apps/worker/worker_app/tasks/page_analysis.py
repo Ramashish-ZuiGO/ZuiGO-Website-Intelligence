@@ -330,6 +330,12 @@ def run_page_analysis(discovery_run_id: str, page_analysis_execution_id: str) ->
             url = str(page.get("final_url") or page["original_url"])
 
             try:
+                from app.services.accessibility_service import (
+                    process_axe_results,
+                    process_lighthouse_accessibility,
+                )
+                from app.services.performance_service import collect_lighthouse_evidence
+
                 from worker_app.analysis.lighthouse_audit import run_lighthouse
                 from worker_app.analysis.playwright_audit import (
                     chromium_executable_path,
@@ -363,6 +369,68 @@ def run_page_analysis(discovery_run_id: str, page_analysis_execution_id: str) ->
                 metrics = parse_lighthouse(lighthouse_data)
                 findings = generate_findings(playwright_data, metrics)
                 score = calculate_score(metrics, playwright_data, findings, audit_completed=True)
+
+                # M15 (docs/REPORT_QUALITY_INITIATIVE.md): real site-wide
+                # Performance/Accessibility evidence. Tagged with
+                # execution_id=execution_uuid (this page-analysis execution),
+                # NOT analysis_run_id -- the main report-generating AnalysisRun
+                # doesn't exist yet at this pipeline stage (page analysis runs
+                # before it). AccessibilityAudit/PerformanceSnapshot are both
+                # uniquely constrained on (execution_id, website_id, url, ...),
+                # not analysis_run_id alone, so one row per L2 page here is
+                # exactly what those tables were already designed for --
+                # report_delivery.py resolves the same execution_id via
+                # workflow.structured_input["page_analysis_execution_id"] to
+                # read these back. Each call is independently guarded so one
+                # evidence type failing never blocks the others or the page's
+                # own findings/score/persist_results below.
+                try:
+                    axe_results = playwright_data.get("accessibility_axe_results")
+                    if axe_results:
+                        process_axe_results(
+                            session,
+                            execution_uuid,
+                            website_id,
+                            url,
+                            axe_results,
+                            page_id=page["id"],
+                        )
+                except Exception as exception:
+                    logger.warning(
+                        "page_l2_axe_evidence_failed page_id=%s error=%s",
+                        page["id"],
+                        exception,
+                    )
+                try:
+                    process_lighthouse_accessibility(
+                        session,
+                        execution_uuid,
+                        website_id,
+                        url,
+                        lighthouse_data,
+                        page_id=page["id"],
+                    )
+                except Exception as exception:
+                    logger.warning(
+                        "page_l2_lighthouse_accessibility_failed page_id=%s error=%s",
+                        page["id"],
+                        exception,
+                    )
+                try:
+                    collect_lighthouse_evidence(
+                        session,
+                        execution_uuid,
+                        website_id,
+                        url,
+                        metrics,
+                    )
+                except Exception as exception:
+                    logger.warning(
+                        "page_l2_performance_evidence_failed page_id=%s error=%s",
+                        page["id"],
+                        exception,
+                    )
+                session.commit()
 
                 session.execute(
                     insert(analysis_runs).values(

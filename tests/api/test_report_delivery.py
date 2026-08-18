@@ -10,6 +10,7 @@ from app.db.base import Base
 from app.db.session import get_db
 from app.main import app
 from app.models import (
+    AccessibilityAudit,
     AgentExecution,
     AgentRun,
     AnalysisFinding,
@@ -535,6 +536,227 @@ def test_partial_discovery_never_claims_full_site_coverage(
             "full-site coverage is not established" in item
             for item in executive["content"]["important_limitations"]
         )
+
+
+def test_deep_evidence_covers_l2_pages_not_just_the_homepage(
+    report_api: tuple[
+        TestClient,
+        sessionmaker[Session],
+        uuid.UUID,
+        uuid.UUID,
+        uuid.UUID,
+        list[tuple[str, str, int]],
+    ],
+) -> None:
+    """M15 (docs/REPORT_QUALITY_INITIATIVE.md): Lighthouse/axe-core (Level 2)
+    evidence must cover real additional pages, not just the homepage, and
+    the report must honestly disclose how much of the site that covers --
+    never silently claim completeness from the cheap L1 crawl alone.
+
+    Real bug this proves fixed: before M15, Level 2 was hardcoded to 0
+    pages in production, and even when it ran, its evidence was written
+    under synthetic per-page AnalysisRuns the report never read from.
+    """
+    _client, factory, _project_id, website_id, run_id, _dispatched = report_api
+    with factory() as db:
+        workflow = db.scalar(select(AgentExecution).where(AgentExecution.analysis_run_id == run_id))
+        assert workflow is not None
+        now = datetime.now(UTC)
+        discovery = DiscoveryRun(
+            website_id=website_id,
+            status="completed",
+            progress_percent=100,
+            current_stage="completed",
+            urls_discovered=10,
+            urls_unique=10,
+            urls_eligible=10,
+            completed_at=now,
+        )
+        db.add(discovery)
+        db.flush()
+
+        page_execution_id = uuid.uuid4()
+        pages = []
+        for index in range(10):
+            page = WebsitePage(
+                website_id=website_id,
+                normalized_url=f"https://report.test/page-{index}",
+                original_url=f"https://report.test/page-{index}",
+                final_url=f"https://report.test/page-{index}",
+                page_type="homepage" if index == 0 else "content",
+                discovery_source="crawl",
+                discovery_evidence=[{"source": "crawl"}],
+                crawl_depth=0 if index == 0 else 1,
+                origin_relation="same_origin",
+                robots_status="allowed",
+                eligibility_status="eligible",
+                last_discovery_run_id=discovery.id,
+                first_discovered_at=now,
+                last_discovered_at=now,
+            )
+            db.add(page)
+            pages.append(page)
+        db.flush()
+
+        for page in pages:
+            db.add(
+                PageAnalysisRun(
+                    website_page=page,
+                    discovery_run_id=discovery.id,
+                    page_analysis_execution_id=page_execution_id,
+                    analysis_level=1,
+                    status="completed",
+                    analysis_started_at=now,
+                    analysis_completed_at=now,
+                    requested_url=page.normalized_url,
+                    final_url=page.normalized_url,
+                    http_status_code=200,
+                )
+            )
+        db.flush()
+
+        # Only 3 of the 10 eligible pages get real Level-2 (Lighthouse +
+        # axe-core) depth -- a deliberate, bounded, disclosed sample, not
+        # every page. Each gets a synthetic per-page AnalysisRun (matching
+        # worker_app/tasks/page_analysis.py's real L2 loop), its own
+        # AnalysisResult + AnalysisFinding, and a real AccessibilityAudit
+        # tagged by execution_id (not analysis_run_id, since the main
+        # AnalysisRun didn't exist yet when L2 ran for real).
+        l2_pages = pages[:3]
+        for page in l2_pages:
+            synthetic_run = AnalysisRun(
+                website_id=website_id,
+                status="completed",
+                progress_percent=100,
+            )
+            db.add(synthetic_run)
+            db.flush()
+            db.add(
+                PageAnalysisRun(
+                    website_page_id=page.id,
+                    discovery_run_id=discovery.id,
+                    page_analysis_execution_id=page_execution_id,
+                    analysis_level=2,
+                    status="completed",
+                    analysis_started_at=now,
+                    analysis_completed_at=now,
+                    requested_url=page.normalized_url,
+                    final_url=page.normalized_url,
+                    http_status_code=200,
+                    deep_analysis_run_id=synthetic_run.id,
+                )
+            )
+            db.add(
+                AnalysisResult(
+                    analysis_run_id=synthetic_run.id,
+                    requested_url=page.normalized_url,
+                    final_url=page.normalized_url,
+                    http_status_code=200,
+                    analysis_started_at=now,
+                    analysis_completed_at=now,
+                    raw_lighthouse_data={"lighthouseVersion": "12.0.0"},
+                    raw_playwright_data={"final_url": page.normalized_url},
+                )
+            )
+            db.add(
+                AnalysisFinding(
+                    analysis_run_id=synthetic_run.id,
+                    finding_code="l2_render_blocking",
+                    category="performance",
+                    title=f"Render-blocking resource on {page.normalized_url}",
+                    description="A retained stylesheet delayed first render on this page.",
+                    severity=FindingSeverity.HIGH,
+                    affected_url=page.normalized_url,
+                    evidence={"observed_value": "blocking"},
+                    source=FindingSource.LIGHTHOUSE,
+                    confidence_percent=90,
+                )
+            )
+            db.add(
+                AccessibilityAudit(
+                    execution_id=page_execution_id,
+                    website_id=website_id,
+                    normalized_url=page.normalized_url,
+                    provider="axe-core",
+                    status="completed",
+                    violation_count=2,
+                    incomplete_count=1,
+                    pass_count=40,
+                    inapplicable_count=10,
+                    started_at=now,
+                    completed_at=now,
+                )
+            )
+        workflow.structured_input = {
+            **workflow.structured_input,
+            "discovery_run_id": str(discovery.id),
+            "page_analysis_execution_id": str(page_execution_id),
+        }
+        db.commit()
+
+        generated, created = generate_report(
+            db,
+            run_id,
+            idempotency_key="deep-evidence-report",
+        )
+
+        assert created is True
+        payload = generated.snapshot.snapshot_payload
+        coverage = payload["page_coverage"]
+
+        # The core M15 fix: real depth coverage is a genuine 3/10, not
+        # silently absent or conflated with the 10/10 L1 crawl coverage.
+        assert coverage["coverage_numerator"] == 10
+        assert coverage["coverage_denominator"] == 10
+        assert coverage["analysed_page_coverage_percentage"] == 100.0
+        assert coverage["deep_evidence_pages_analysed"] == 3
+        assert coverage["deep_evidence_coverage_percentage"] == 30.0
+
+        # Honest disclosure: a limitation reason exists, correctly
+        # classified as bounded/infrastructure rather than a quality defect
+        # -- must never silently disappear, and must never collapse the
+        # analysis to "required evidence limited" just because deep
+        # evidence is deliberately sampled.
+        reasons = payload["completion"]["limitation_reasons"]
+        deep_reason = next(
+            item for item in reasons if item["code"] == "DEEP_EVIDENCE_COVERAGE_LIMITED"
+        )
+        assert deep_reason["kind"] == "optional_infrastructure"
+        assert "30.0%" in deep_reason["message"]
+
+        # deep_evidence_coverage_percent is visible for transparency but
+        # must NOT drag down the single blended confidence score -- with
+        # everything else at 100%, report confidence must not collapse to
+        # ~30 just because deep evidence is a deliberate, disclosed sample.
+        executive = next(
+            item for item in payload["sections"] if item["section_key"] == "executive_summary"
+        )
+        assert (
+            executive["content"]["confidence_components"]["deep_evidence_coverage_percent"] == 30.0
+        )
+        assert payload["confidence_percent"] >= 90
+
+        # Real accessibility evidence from all 3 L2 pages actually reaches
+        # the accessibility section, not just a homepage-only audit.
+        accessibility_section = next(
+            item for item in payload["sections"] if item["section_key"] == "accessibility"
+        )
+        assert accessibility_section["content"]["audit_count"] == 3
+        assert accessibility_section["content"]["violation_count"] == 6  # 2 per page x 3
+
+        # Real per-page performance findings from L2 reach the Complete
+        # Findings Register, not just whatever's attached to the main run.
+        findings_section = next(
+            item for item in payload["sections"] if item["section_key"] == "page_level_findings"
+        )
+        l2_finding_titles = {
+            finding["issue_title"]
+            for finding in findings_section["content"]["findings"]
+            if finding["finding_code"] == "l2_render_blocking"
+        }
+        assert l2_finding_titles == {
+            f"Render-blocking resource on {page.normalized_url}" for page in l2_pages
+        }
 
 
 def test_html_pdf_json_artifacts_checksums_safety_and_repeatability(

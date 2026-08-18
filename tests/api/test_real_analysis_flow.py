@@ -17,7 +17,7 @@ from app.models import (
     WebsitePage,
 )
 from app.schemas.report_delivery import RealWebsiteAnalysisStartRequest
-from app.services.page_selection import select_scheduled_pages
+from app.services.page_selection import DEFAULT_MAX_LIGHTHOUSE_PAGES, select_scheduled_pages
 from app.services.priority import PRIORITY_FORMULA_VERSION
 from app.services.public_url_safety import (
     PublicURLSafetyError,
@@ -319,7 +319,9 @@ def test_real_submission_creates_history_and_prevents_duplicate_dispatch(
         assert discovery.configuration["normalized_url"] == payload["normalized_url"]
         assert "max_discovered_urls" not in discovery.configuration
         assert discovery.configuration["max_html_pages"] == 12
-        assert discovery.configuration["max_lighthouse_pages"] == 0
+        # M15 (docs/REPORT_QUALITY_INITIATIVE.md): was hardcoded to 0, silently
+        # disabling real Lighthouse/axe-core (Level 2) coverage in production.
+        assert discovery.configuration["max_lighthouse_pages"] == DEFAULT_MAX_LIGHTHOUSE_PAGES
 
     recent = client.get("/api/v1/analysis/recent?limit=10")
     assert recent.status_code == 200, recent.text

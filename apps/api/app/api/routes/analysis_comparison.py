@@ -33,6 +33,7 @@ from app.services.analysis_comparison import (
     latest_comparison,
 )
 from app.services.analysis_queue import enqueue_real_analysis_journey
+from app.services.page_selection import DEFAULT_MAX_LIGHTHOUSE_PAGES
 from app.services.workflow_execution import (
     WorkflowExecutionError,
     create_workflow_execution,
@@ -196,7 +197,7 @@ def start_reanalysis(
         configuration={
             "maximum_pages": request.maximum_pages,
             "max_html_pages": request.maximum_pages,
-            "max_lighthouse_pages": 0,
+            "max_lighthouse_pages": DEFAULT_MAX_LIGHTHOUSE_PAGES,
             "browser_engines": list(request.browser_engines),
             "include_mobile": request.include_mobile,
             "submitted_url": website.url,

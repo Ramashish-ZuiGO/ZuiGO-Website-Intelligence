@@ -47,7 +47,7 @@ from app.services.analysis_queue import (
     enqueue_analysis_journey,
     enqueue_real_analysis_journey,
 )
-from app.services.page_selection import select_scheduled_pages
+from app.services.page_selection import DEFAULT_MAX_LIGHTHOUSE_PAGES, select_scheduled_pages
 from app.services.public_url_safety import (
     PublicURLSafetyError,
     validate_and_normalize_public_url,
@@ -201,7 +201,7 @@ def start_real_website_analysis(
         configuration={
             "maximum_pages": request.maximum_pages,
             "max_html_pages": request.maximum_pages,
-            "max_lighthouse_pages": 0,
+            "max_lighthouse_pages": DEFAULT_MAX_LIGHTHOUSE_PAGES,
             "browser_engines": scheduled_engines,
             "requested_browser_engines": list(request.browser_engines),
             "include_mobile": request.include_mobile,

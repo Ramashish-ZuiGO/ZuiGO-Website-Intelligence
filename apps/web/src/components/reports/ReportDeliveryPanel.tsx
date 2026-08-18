@@ -16,6 +16,7 @@ import { UrlCell } from "@/components/ui/UrlCell";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { MetricStat } from "@/components/ui/MetricStat";
 import { AnalysisProgressTimeline } from "@/components/reports/AnalysisProgressTimeline";
+import { QUALITY_STYLES, type ReportQuality } from "@/lib/report-quality";
 
 const PAGE_SIZE = 5;
 const FINDINGS_PAGE_SIZE = 20;
@@ -620,7 +621,12 @@ function ReportViewer({ report }: { report: DeliveredReport }) {
   );
   const safeUnavailableSections = Array.isArray(report.unavailable_sections) ? report.unavailable_sections : [];
   const reportStatus = displayStatus(report.status, "historical");
-  const reportQuality = (() => {
+  // Reads evidence_coverage_numerator/denominator from the canonical report
+  // snapshot -- a different backing shape than the live analysis-run page's
+  // own quality computation (which reads score.available_categories from a
+  // simpler /analysis-runs/{id}/report payload), so the formula itself
+  // stays separate. Only the resulting label/styling is shared (report-quality.ts).
+  const reportQuality: ReportQuality = (() => {
     const n = report.evidence_coverage_numerator;
     const d = report.evidence_coverage_denominator;
     const hasScore = typeof scores.overall_score === "number";
@@ -631,12 +637,6 @@ function ReportViewer({ report }: { report: DeliveredReport }) {
     if (ratio >= 0.4 || hasScore) return "PARTIAL";
     return "INCONCLUSIVE";
   })();
-  const qualityColor: Record<string, string> = {
-    COMPLETE: "bg-green-100 text-green-800 border-green-300",
-    PARTIAL: "bg-yellow-100 text-yellow-800 border-yellow-300",
-    INCONCLUSIVE: "bg-orange-100 text-orange-800 border-orange-300",
-    FAILED: "bg-red-100 text-red-800 border-red-300",
-  };
 
   return (
     <article
@@ -655,7 +655,7 @@ function ReportViewer({ report }: { report: DeliveredReport }) {
           <span>Immutable evidence snapshot</span>
           <span className="text-slate-500">·</span>
           <span>{reportStatus}</span>
-          <span className={`inline-block rounded-full border px-2.5 py-0.5 text-xs font-bold ${qualityColor[reportQuality] ?? "bg-slate-100 text-slate-700 border-slate-300"}`}>
+          <span className={`inline-block rounded-full border px-2.5 py-0.5 text-xs font-bold ${QUALITY_STYLES[reportQuality]}`}>
             {reportQuality}
           </span>
         </p>

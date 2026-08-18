@@ -5,7 +5,8 @@ import { useParams, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { ApiError, apiRequest } from "@/lib/api";
-import type { AnalysisReport, AnalysisFinding, DiagnosticGroup } from "@/lib/types";
+import type { AnalysisReport, AnalysisFinding, AnalysisStatus, DiagnosticGroup } from "@/lib/types";
+import { QUALITY_STYLES, type ReportQuality } from "@/lib/report-quality";
 import { PerformanceIntelligence } from "@/components/performance/PerformanceIntelligence";
 import {
   AccessibilityIntelligence,
@@ -918,11 +919,24 @@ function BrowserSummary({
 // Report quality label
 // ---------------------------------------------------------------------------
 
-function qualityFromScore(score: {
-  overall_score: number | null;
-  confidence_percent: number;
-  available_categories: string[];
-}): string {
+const ANALYSIS_STATUS_DOT: Record<AnalysisStatus, string> = {
+  completed: "bg-emerald-500",
+  running: "bg-blue-400",
+  queued: "bg-slate-400",
+  failed: "bg-red-500",
+};
+
+function qualityFromScore(
+  analysisStatus: AnalysisStatus,
+  score: {
+    overall_score: number | null;
+    confidence_percent: number;
+    available_categories: string[];
+  },
+): ReportQuality {
+  // A genuinely failed run must always read FAILED, regardless of whatever
+  // partial score data happened to be persisted before the failure.
+  if (analysisStatus === "failed") return "FAILED";
   const availableCount = Array.isArray(score.available_categories) ? score.available_categories.length : 0;
   if (
     availableCount === 0 ||
@@ -933,13 +947,6 @@ function qualityFromScore(score: {
     return "COMPLETE";
   return "PARTIAL";
 }
-
-const QUALITY_STYLES: Record<string, string> = {
-  COMPLETE: "bg-emerald-100 text-emerald-800 border-emerald-200",
-  PARTIAL: "bg-amber-100 text-amber-800 border-amber-200",
-  INCONCLUSIVE: "bg-orange-100 text-orange-800 border-orange-200",
-  FAILED: "bg-red-100 text-red-800 border-red-200",
-};
 
 // ---------------------------------------------------------------------------
 // Metric labels
@@ -1298,7 +1305,7 @@ export default function AnalysisReportPage() {
       comparisonDataAvailable,
   );
 
-  const quality = qualityFromScore(report.score);
+  const quality = qualityFromScore(report.analysis_status, report.score);
   const safeFindings = Array.isArray(report.findings) ? report.findings : [];
   const grouped = groupFindings(safeFindings);
   const topFindings = grouped
@@ -1365,7 +1372,7 @@ export default function AnalysisReportPage() {
           </div>
 
           <div className="mt-5 flex flex-wrap gap-x-8 gap-y-3 text-sm">
-             <div className="flex gap-2 items-center text-slate-200"><span className="w-2 h-2 rounded-full bg-emerald-500"></span><span className="capitalize font-semibold">Analysis: {report.analysis_status}</span></div>
+             <div className="flex gap-2 items-center text-slate-200"><span className={`w-2 h-2 rounded-full ${ANALYSIS_STATUS_DOT[report.analysis_status] ?? "bg-slate-400"}`}></span><span className="capitalize font-semibold">Analysis: {report.analysis_status}</span></div>
              <div className="text-slate-300">Started {new Date(report.result.analysis_started_at).toLocaleString()}</div>
              {report.result.analysis_completed_at && <div className="text-slate-300">Completed {new Date(report.result.analysis_completed_at).toLocaleString()}</div>}
              <div className="text-slate-300 font-mono text-xs">{report.result.requested_url}</div>
@@ -1418,7 +1425,7 @@ export default function AnalysisReportPage() {
                  <span className="sm:hidden">{allLimitations.size} limitation{allLimitations.size !== 1 ? 's' : ''}</span>
                </button>
              ) : (
-               <span className="text-emerald-600 flex items-center gap-1 border-l pl-4 border-z-border">Full evidence collected</span>
+               <span className="text-emerald-600 flex items-center gap-1 border-l pl-4 border-z-border">No evidence limitations flagged</span>
              )}
           </div>
         </div>

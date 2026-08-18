@@ -699,12 +699,28 @@ prioritized against each other; that's part of the discussion.
   separated. Covered by TEMPLATE_VERSION 2.2.0. Site-wide W3C validation
   (calling the external validator per L2 page) is a genuinely separate
   decision — flagged, not silently done.
-- **M19: CrUX API integration.** From the historical doc — likely genuinely
-  absent today (not yet confirmed). Needs a Google Cloud API key
-  (external dependency) if pursued; URL-level vs. origin-level-fallback
-  semantics need explicit, truthful labeling per Google's own current
-  documentation, never substituting Lighthouse lab data into a field-data
-  surface.
+- **M19: CrUX API integration — INVESTIGATED 2026-08-18, BLOCKED on a
+  real external credential, not a design or code gap.** Same surprise as
+  M18: already fully built, correctly designed, and already matches the
+  historical doc's own warnings without needing any changes.
+  `CruxProvider` (`app/services/crux_provider.py`) makes a real call to
+  `chromeuxreport.googleapis.com`; `collect_performance_evidence`
+  (`performance_service.py`) tries URL-level first, falls back to
+  origin-level only on a real `404 no_record` response, and persists both
+  with an explicit `scope` field distinguishing them — exactly the
+  "explicit, truthful URL-vs-origin labeling" the doc asked for. Field
+  data is stored with `evidence_type: "field"`/`evidence_source: "crux"`,
+  kept structurally separate from Lighthouse's `evidence_type: "lab"` —
+  never substituted into each other, per the doc's other warning. Wired
+  to a real route (`POST /analysis-runs/{id}/performance/collect`), not
+  dead code. **The only missing piece is a real `CRUX_API_KEY`** —
+  confirmed absent from the local `.env`; without it `CruxProvider`
+  correctly returns `{"status": "unavailable", "reason": "No API key
+  configured"}` rather than fabricating data. Getting a Google Cloud API
+  key requires the user (a Cloud project, enabling the CrUX API, billing
+  setup) — this is a genuine external blocker, not something to route
+  around or skip past silently. **No code change shipped; flagged for the
+  user to decide whether to obtain a key.**
 
 Each module, once discussed, gets a decision-log entry below (mirroring the
 QA initiative's format) before implementation starts.

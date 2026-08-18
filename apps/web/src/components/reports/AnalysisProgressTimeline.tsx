@@ -243,7 +243,7 @@ export function AnalysisProgressTimeline({
         );
       case "waiting":
         return (
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-z-neutral-subtle text-z-text-subtle border border-z-border px-3 py-1 text-xs font-bold">
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-z-neutral-subtle text-z-ink-secondary border border-z-border px-3 py-1 text-xs font-bold">
             <PauseCircle className="h-3.5 w-3.5" aria-hidden="true" /> {RUN_STATE_TEXT.waiting}
           </span>
         );
@@ -294,13 +294,13 @@ export function AnalysisProgressTimeline({
       <div className="rounded-xl border border-z-border bg-z-surface p-5 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-widest text-z-muted">
+            <p className="text-xs font-semibold uppercase tracking-widest text-z-ink-muted">
               Active Analysis Run
             </p>
-            <h3 className="mt-1 text-xl font-bold text-z-text">
+            <h3 className="mt-1 text-xl font-bold text-z-ink">
               {progress.submitted_website ?? "Website Analysis"}
             </h3>
-            <p className="mt-1 text-sm text-z-text-subtle">
+            <p className="mt-1 text-sm text-z-ink-secondary">
               Started {new Date(progress.started_at).toLocaleString()}
             </p>
           </div>
@@ -308,7 +308,7 @@ export function AnalysisProgressTimeline({
         </div>
 
         <div className="mt-6">
-          <div className="flex flex-wrap justify-between gap-2 text-sm font-semibold text-z-text mb-2">
+          <div className="flex flex-wrap justify-between gap-2 text-sm font-semibold text-z-ink mb-2">
             <span>{progressDescription}</span>
             <span>{displayedProgress.toFixed(0)}%</span>
           </div>
@@ -352,39 +352,39 @@ export function AnalysisProgressTimeline({
             it is always paired with the backend last-activity heartbeat. */}
         <dl className="mt-5 grid grid-cols-2 gap-x-6 gap-y-3 text-sm sm:grid-cols-3 lg:grid-cols-5">
           <div>
-            <dt className="text-xs font-semibold uppercase tracking-wider text-z-muted">Elapsed</dt>
-            <dd className="mt-0.5 font-bold text-z-text">{formatDuration(progress.elapsed_seconds)}</dd>
+            <dt className="text-xs font-semibold uppercase tracking-wider text-z-ink-muted">Elapsed</dt>
+            <dd className="mt-0.5 font-bold text-z-ink">{formatDuration(progress.elapsed_seconds)}</dd>
           </div>
           <div>
-            <dt className="text-xs font-semibold uppercase tracking-wider text-z-muted">Last activity</dt>
-            <dd className={`mt-0.5 font-bold ${runState === "stalled" ? "text-z-warning" : "text-z-text"}`}>
+            <dt className="text-xs font-semibold uppercase tracking-wider text-z-ink-muted">Last activity</dt>
+            <dd className={`mt-0.5 font-bold ${runState === "stalled" ? "text-z-warning" : "text-z-ink"}`}>
               {lastActivityText}
             </dd>
           </div>
           <div>
-            <dt className="text-xs font-semibold uppercase tracking-wider text-z-muted">Stage</dt>
-            <dd className="mt-0.5 font-bold text-z-text">{currentStageLabel}</dd>
+            <dt className="text-xs font-semibold uppercase tracking-wider text-z-ink-muted">Stage</dt>
+            <dd className="mt-0.5 font-bold text-z-ink">{currentStageLabel}</dd>
           </div>
           {pagesEligible > 0 && (
             <div>
-              <dt className="text-xs font-semibold uppercase tracking-wider text-z-muted">Pages analysed</dt>
-              <dd className="mt-0.5 font-bold text-z-text">
+              <dt className="text-xs font-semibold uppercase tracking-wider text-z-ink-muted">Pages analysed</dt>
+              <dd className="mt-0.5 font-bold text-z-ink">
                 {pagesAnalysed} / {pagesEligible}
               </dd>
             </div>
           )}
           {(browserStageActive || browserChecksDone > 0) && browserChecksTotal > 0 && (
             <div>
-              <dt className="text-xs font-semibold uppercase tracking-wider text-z-muted">Browser analysis</dt>
-              <dd className="mt-0.5 font-bold text-z-text">
+              <dt className="text-xs font-semibold uppercase tracking-wider text-z-ink-muted">Browser analysis</dt>
+              <dd className="mt-0.5 font-bold text-z-ink">
                 {browserChecksDone} / {browserChecksTotal} checks
               </dd>
             </div>
           )}
           {progress.attempt > 1 && (
             <div>
-              <dt className="text-xs font-semibold uppercase tracking-wider text-z-muted">Attempt</dt>
-              <dd className="mt-0.5 font-bold text-z-text">{progress.attempt}</dd>
+              <dt className="text-xs font-semibold uppercase tracking-wider text-z-ink-muted">Attempt</dt>
+              <dd className="mt-0.5 font-bold text-z-ink">{progress.attempt}</dd>
             </div>
           )}
         </dl>
@@ -397,7 +397,7 @@ export function AnalysisProgressTimeline({
             <AlertTriangle className="h-5 w-5 text-z-warning shrink-0 mt-0.5" aria-hidden="true" />
             <div>
               <h4 className="font-semibold text-z-warning">Analysis appears stalled</h4>
-              <p className="mt-1 text-sm text-z-text">
+              <p className="mt-1 text-sm text-z-ink">
                 No analysis activity has been recorded recently
                 {activityAgeSeconds !== null
                   ? ` (last activity ${formatDuration(activityAgeSeconds)} ago)`
@@ -405,10 +405,10 @@ export function AnalysisProgressTimeline({
                 .
               </p>
               {progress.business_error_message && (
-                <p className="mt-1 text-sm text-z-text-subtle">{progress.business_error_message}</p>
+                <p className="mt-1 text-sm text-z-ink-secondary">{progress.business_error_message}</p>
               )}
               {progress.resume_available && (
-                <p className="mt-2 text-sm text-z-text-subtle">
+                <p className="mt-2 text-sm text-z-ink-secondary">
                   Resuming continues from the completed work — pages already analysed are preserved.
                 </p>
               )}
@@ -457,7 +457,7 @@ export function AnalysisProgressTimeline({
 
       {/* 4. Site coverage stays primary — customers care about page progress. */}
       <div className="rounded-xl border border-z-border bg-z-surface p-5">
-        <h4 className="text-base font-bold text-z-text flex items-center justify-between mb-4">
+        <h4 className="text-base font-bold text-z-ink flex items-center justify-between mb-4">
           Site Coverage
           <ConceptInfoButton conceptId="discovery_completeness" title="Discovery completeness" />
         </h4>
@@ -484,12 +484,12 @@ export function AnalysisProgressTimeline({
       {/* 5. Technical execution details — the 8-agent pipeline and internal
           engine diagnostics remain fully available, as a secondary disclosure. */}
       <details className="rounded-xl border border-z-border bg-z-surface">
-        <summary className="cursor-pointer select-none p-5 text-base font-bold text-z-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-z-info rounded-xl">
+        <summary className="cursor-pointer select-none p-5 text-base font-bold text-z-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-z-info rounded-xl">
           Technical execution details
         </summary>
         <div className="flex flex-col gap-6 px-5 pb-5">
           <div>
-            <h4 className="text-base font-bold text-z-text flex items-center gap-2 mb-4">
+            <h4 className="text-base font-bold text-z-ink flex items-center gap-2 mb-4">
               Eight-Agent Execution Pipeline
             </h4>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -507,16 +507,16 @@ export function AnalysisProgressTimeline({
                         ? "border-z-info bg-z-info-subtle/30 shadow-sm"
                         : isActive
                           ? "border-z-border bg-z-surface"
-                          : "border-z-border/50 bg-z-background/50 opacity-70"
+                          : "border-z-border/50 bg-z-surface/50 opacity-70"
                     }`}
                   >
                     <div className="flex items-start justify-between mb-2">
-                      <div className={`p-1.5 rounded-md ${isRunning ? 'bg-z-info text-white' : isActive ? 'bg-z-neutral-subtle text-z-text' : 'bg-z-neutral-subtle/50 text-z-muted'}`}>
+                      <div className={`p-1.5 rounded-md ${isRunning ? 'bg-z-info text-white' : isActive ? 'bg-z-neutral-subtle text-z-ink' : 'bg-z-neutral-subtle/50 text-z-ink-muted'}`}>
                         <Icon className="h-4 w-4" aria-hidden="true" />
                       </div>
                       <StatusBadge status={agent.status} size="xs" />
                     </div>
-                    <p className={`text-sm font-semibold mt-2 ${isActive ? 'text-z-text' : 'text-z-text-subtle'}`}>
+                    <p className={`text-sm font-semibold mt-2 ${isActive ? 'text-z-ink' : 'text-z-ink-secondary'}`}>
                       {label}
                     </p>
                   </div>
@@ -526,35 +526,35 @@ export function AnalysisProgressTimeline({
           </div>
 
           <div>
-            <h4 className="text-base font-bold text-z-text flex items-center justify-between mb-4">
+            <h4 className="text-base font-bold text-z-ink flex items-center justify-between mb-4">
               Internal Browser Engines
               <ConceptInfoButton conceptId="browser_coverage" title="Browser coverage" />
             </h4>
-            <p className="mb-3 text-xs text-z-text-subtle">
+            <p className="mb-3 text-xs text-z-ink-secondary">
               Engine-level internal evidence. This is not branded browser
               verification: Chromium is not Chrome or Edge, and WebKit is not Safari.
             </p>
             <div className="space-y-4">
               <div className="flex justify-between items-end pb-3 border-b border-z-border">
                 <div>
-                  <p className="text-xs font-semibold text-z-muted uppercase tracking-wider">Overall Status</p>
-                  <p className="mt-1 font-bold text-z-text capitalize">{statusLabel(progress.browser_engine_progress.status)}</p>
+                  <p className="text-xs font-semibold text-z-ink-muted uppercase tracking-wider">Overall Status</p>
+                  <p className="mt-1 font-bold text-z-ink capitalize">{statusLabel(progress.browser_engine_progress.status)}</p>
                 </div>
                 <div className="text-right">
-                  <p className="text-xs font-semibold text-z-muted uppercase tracking-wider">Engine Coverage</p>
-                  <p className="mt-1 font-bold text-z-text">{browserChecksDone} / {browserChecksTotal} tests</p>
+                  <p className="text-xs font-semibold text-z-ink-muted uppercase tracking-wider">Engine Coverage</p>
+                  <p className="mt-1 font-bold text-z-ink">{browserChecksDone} / {browserChecksTotal} tests</p>
                 </div>
               </div>
               <div className="grid grid-cols-3 gap-2">
                 {progress.browser_engine_progress.engines.map((engine) => (
                   <div key={engine.engine} className="text-center">
-                    <p className="text-xs font-medium text-z-text-subtle truncate" title={ENGINE_LABELS[engine.engine] ?? statusLabel(engine.engine)}>
+                    <p className="text-xs font-medium text-z-ink-secondary truncate" title={ENGINE_LABELS[engine.engine] ?? statusLabel(engine.engine)}>
                       {ENGINE_LABELS[engine.engine] ?? statusLabel(engine.engine)}
                     </p>
                     {engine.availability_status === "unavailable" ? (
-                      <span className="mt-1 inline-block text-[10px] bg-z-neutral-subtle text-z-muted px-1.5 py-0.5 rounded">N/A</span>
+                      <span className="mt-1 inline-block text-[10px] bg-z-neutral-subtle text-z-ink-muted px-1.5 py-0.5 rounded">N/A</span>
                     ) : (
-                      <p className="mt-1 text-sm font-bold text-z-text">{engine.tested_pages}/{engine.eligible_pages}</p>
+                      <p className="mt-1 text-sm font-bold text-z-ink">{engine.tested_pages}/{engine.eligible_pages}</p>
                     )}
                   </div>
                 ))}
@@ -582,7 +582,7 @@ export function AnalysisProgressTimeline({
             className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold shadow-sm focus:ring-2 focus:outline-none disabled:opacity-50 transition-colors ${
               runState === "stalled"
                 ? "bg-z-info text-white hover:bg-z-info/90 focus:ring-z-info/50"
-                : "bg-z-surface border border-z-border text-z-text hover:bg-z-neutral-subtle focus:ring-z-text/50"
+                : "bg-z-surface border border-z-border text-z-ink hover:bg-z-neutral-subtle focus:ring-z-ink/50"
             }`}
             disabled={acting || !progress.resume_available}
             onClick={() => onPerformAction("resume")}

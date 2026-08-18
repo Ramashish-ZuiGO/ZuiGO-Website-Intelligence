@@ -1394,7 +1394,7 @@ export default function AnalysisReportPage() {
 
         <div className="flex flex-wrap items-center justify-between gap-6 px-6 py-4 bg-z-surface">
            <div className="flex items-baseline gap-2">
-            <span className="text-4xl font-bold text-z-text">
+            <span className="text-4xl font-bold text-z-ink">
               {report.score.overall_score != null ? (
                 <ScoreValue metricId="overall_score" value={report.score.overall_score} />
               ) : "—"}
@@ -1409,7 +1409,7 @@ export default function AnalysisReportPage() {
               );
             })()}
           </div>
-          <div className="text-sm font-medium text-z-text-subtle flex gap-4 items-center">
+          <div className="text-sm font-medium text-z-ink-secondary flex gap-4 items-center">
              <span>Confidence {report.score.confidence_percent}%</span>
              <span>Formula {report.score.formula_version}</span>
              {allLimitations.size > 0 ? (
@@ -1431,7 +1431,7 @@ export default function AnalysisReportPage() {
       )}
 
       {/* Secondary Sticky Navigation */}
-      <div className="sticky top-0 z-40 -mx-4 px-4 sm:mx-0 sm:px-0 mb-8 bg-z-background/95 backdrop-blur-md border-b border-z-border overflow-x-auto custom-scrollbar">
+      <div className="sticky top-0 z-40 -mx-4 px-4 sm:mx-0 sm:px-0 mb-8 bg-z-surface/95 backdrop-blur-md border-b border-z-border overflow-x-auto custom-scrollbar">
          <nav className="flex space-x-1 min-w-max" aria-label="Tabs">
             {TABS.map(tab => (
               <button
@@ -1439,8 +1439,8 @@ export default function AnalysisReportPage() {
                 onClick={() => setActiveTab(tab.id as TabId)}
                 className={`whitespace-nowrap flex-shrink-0 px-4 py-3 text-sm font-bold border-b-2 transition-colors ${
                   activeTab === tab.id
-                  ? 'border-z-primary text-z-primary'
-                  : 'border-transparent text-z-muted hover:text-z-text hover:border-z-border'
+                  ? 'border-z-accent text-z-accent'
+                  : 'border-transparent text-z-ink-muted hover:text-z-ink hover:border-z-border'
                 }`}
               >
                 {tab.label}
@@ -1455,9 +1455,9 @@ export default function AnalysisReportPage() {
            <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
              {/* Category Scores */}
               <section className="rounded-xl border border-z-border bg-z-surface p-6">
-                <h2 className="text-lg font-bold text-z-text">Category Scores</h2>
+                <h2 className="text-lg font-bold text-z-ink">Category Scores</h2>
                 {interpretationsUnavailable && (
-                  <p className="mt-2 text-xs text-z-muted">
+                  <p className="mt-2 text-xs text-z-ink-muted">
                     Metric interpretation help is unavailable. Scores remain available.
                   </p>
                 )}
@@ -1465,7 +1465,7 @@ export default function AnalysisReportPage() {
                   {Object.entries(categoryScores).map(([name, score]) => {
                     const mId = name.toLowerCase().replace(" ", "_") + "_score";
                     return (
-                      <div key={name} className="bg-z-background p-4 rounded-lg border border-z-border">
+                      <div key={name} className="bg-z-surface p-4 rounded-lg border border-z-border">
                         <ScoreBar score={score} label={name} />
                         <div className="mt-2 flex justify-end">
                           <MetricRatingBadge interpretation={interpretations.find((i) => i.metric_id === mId)} />
@@ -1479,8 +1479,8 @@ export default function AnalysisReportPage() {
               {/* Website Signals */}
               <SectionErrorBoundary sectionName="Website Signals">
                 <section className="rounded-xl border border-z-border bg-z-surface p-6">
-                  <h2 className="text-lg font-bold text-z-text">Website Signals</h2>
-                  <p className="mt-1 text-sm text-z-muted">Evidence-based detection of privacy, copyright, security, analytics, responsiveness, HTML standards, and security posture.</p>
+                  <h2 className="text-lg font-bold text-z-ink">Website Signals</h2>
+                  <p className="mt-1 text-sm text-z-ink-muted">Evidence-based detection of privacy, copyright, security, analytics, responsiveness, HTML standards, and security posture.</p>
                   <div className="mt-6">
                     <WebsiteSignalsSection diagnostics={report.diagnostics} />
                   </div>
@@ -1490,20 +1490,20 @@ export default function AnalysisReportPage() {
               {/* Top Findings */}
               <section className="rounded-xl border border-z-border bg-z-surface p-6">
                 <div className="flex items-baseline justify-between mb-4">
-                  <h2 className="text-lg font-bold text-z-text">Top Findings</h2>
-                  <span className="text-sm font-semibold text-z-muted bg-z-background px-3 py-1 rounded-full border border-z-border">
+                  <h2 className="text-lg font-bold text-z-ink">Top Findings</h2>
+                  <span className="text-sm font-semibold text-z-ink-muted bg-z-surface px-3 py-1 rounded-full border border-z-border">
                     {grouped.length} unique · {safeFindings.length} total
                   </span>
                 </div>
                 {topFindings.length > 0 ? (
                   <div className="space-y-3">
                     {topFindings.map((finding) => (
-                      <div key={finding.finding_code} className="flex items-start gap-4 rounded-lg border border-z-border p-4 bg-z-background hover:border-z-border-hover transition-colors">
+                      <div key={finding.finding_code} className="flex items-start gap-4 rounded-lg border border-z-border p-4 bg-z-surface hover:border-z-border-strong transition-colors">
                         <StatusBadge status={finding.severity} />
                         <div className="min-w-0 flex-1">
-                          <p className="font-bold text-z-text">{finding.title}</p>
-                          <p className="mt-1 text-sm text-z-text-subtle line-clamp-2">{finding.description}</p>
-                          <div className="mt-3 flex flex-wrap gap-4 text-xs font-semibold text-z-muted">
+                          <p className="font-bold text-z-ink">{finding.title}</p>
+                          <p className="mt-1 text-sm text-z-ink-secondary line-clamp-2">{finding.description}</p>
+                          <div className="mt-3 flex flex-wrap gap-4 text-xs font-semibold text-z-ink-muted">
                             <span className="flex items-center gap-1">
                               <span className="w-4 h-4 flex items-center justify-center bg-z-surface rounded border border-z-border">{finding.affectedUrls.size}</span>
                               Page{finding.affectedUrls.size !== 1 ? "s" : ""}
@@ -1517,7 +1517,7 @@ export default function AnalysisReportPage() {
                         </div>
                         <button
                           type="button"
-                          className="shrink-0 text-sm font-bold text-z-primary hover:text-z-primary-hover bg-z-primary/10 px-3 py-1.5 rounded-md"
+                          className="shrink-0 text-sm font-bold text-z-accent hover:text-z-accent-hover bg-z-accent/10 px-3 py-1.5 rounded-md"
                           onClick={() => setActiveTab("findings")}
                         >
                           Details
@@ -1532,7 +1532,7 @@ export default function AnalysisReportPage() {
                   <div className="mt-4 text-center">
                     <button
                       type="button"
-                      className="text-sm font-bold text-z-text hover:text-z-primary border border-z-border bg-z-background px-4 py-2 rounded-lg transition-colors"
+                      className="text-sm font-bold text-z-ink hover:text-z-accent border border-z-border bg-z-surface px-4 py-2 rounded-lg transition-colors"
                       onClick={() => setActiveTab("findings")}
                     >
                       View all {grouped.length} findings
@@ -1558,15 +1558,15 @@ export default function AnalysisReportPage() {
                </SectionErrorBoundary>
 
                <section className="rounded-xl border border-z-border bg-z-surface p-6">
-                  <h2 className="text-lg font-bold text-z-text">Lighthouse Metrics</h2>
+                  <h2 className="text-lg font-bold text-z-ink">Lighthouse Metrics</h2>
                   <dl className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                     {Object.entries(metricLabels).map(([key, name]) => (
-                      <div key={key} className="rounded-lg border border-z-border bg-z-background p-4">
-                        <dt className="flex items-center justify-between gap-2 text-sm font-semibold text-z-text-subtle">
+                      <div key={key} className="rounded-lg border border-z-border bg-z-surface p-4">
+                        <dt className="flex items-center justify-between gap-2 text-sm font-semibold text-z-ink-secondary">
                           {name}
                           <MetricRatingBadge interpretation={interpretations.find(i => i.metric_id === key.replace("_ms", ""))} />
                         </dt>
-                        <dd className="mt-2 text-2xl font-black text-z-text tabular-nums">
+                        <dd className="mt-2 text-2xl font-black text-z-ink tabular-nums">
                           {display(report.lighthouse_metrics[key])}
                         </dd>
                       </div>
@@ -1575,16 +1575,16 @@ export default function AnalysisReportPage() {
                </section>
 
                <section className="rounded-xl border border-z-border bg-z-surface p-6">
-                  <h2 className="text-lg font-bold text-z-text">Page Measurements</h2>
+                  <h2 className="text-lg font-bold text-z-ink">Page Measurements</h2>
                   <dl className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                    <div className="rounded-lg border border-z-border bg-z-background p-4">
-                      <dt className="text-sm font-semibold text-z-text-subtle">HTTP status</dt>
-                      <dd className="mt-2 text-xl font-black text-z-text tabular-nums">{display(report.result.http_status_code)}</dd>
+                    <div className="rounded-lg border border-z-border bg-z-surface p-4">
+                      <dt className="text-sm font-semibold text-z-ink-secondary">HTTP status</dt>
+                      <dd className="mt-2 text-xl font-black text-z-ink tabular-nums">{display(report.result.http_status_code)}</dd>
                     </div>
                     {Object.entries(measurementLabels).map(([key, name]) => (
-                      <div key={key} className="rounded-lg border border-z-border bg-z-background p-4">
-                        <dt className="text-sm font-semibold text-z-text-subtle">{name}</dt>
-                        <dd className="mt-2 text-xl font-black text-z-text tabular-nums">{display(report.playwright_measurements[key])}</dd>
+                      <div key={key} className="rounded-lg border border-z-border bg-z-surface p-4">
+                        <dt className="text-sm font-semibold text-z-ink-secondary">{name}</dt>
+                        <dd className="mt-2 text-xl font-black text-z-ink tabular-nums">{display(report.playwright_measurements[key])}</dd>
                       </div>
                     ))}
                   </dl>
@@ -1593,7 +1593,7 @@ export default function AnalysisReportPage() {
                {!!technology && (
                  <section className="rounded-xl border border-z-border bg-z-surface p-6">
                    <CollapsibleSection title="Technology Detection" defaultOpen>
-                     <div className="bg-z-background p-4 rounded-lg border border-z-border mt-2">
+                     <div className="bg-z-surface p-4 rounded-lg border border-z-border mt-2">
                        <HumanValue value={technology} />
                      </div>
                    </CollapsibleSection>
@@ -1612,11 +1612,11 @@ export default function AnalysisReportPage() {
                {auditBreakdown.length > 0 && (
                  <section className="rounded-xl border border-z-border bg-z-surface p-6">
                    <CollapsibleSection title={`Lighthouse Audit Breakdown (${auditBreakdown.length})`} defaultOpen>
-                     <div className="bg-z-background p-4 rounded-lg border border-z-border mt-2 overflow-x-auto">
+                     <div className="bg-z-surface p-4 rounded-lg border border-z-border mt-2 overflow-x-auto">
                        <HumanValue value={auditBreakdown} />
                      </div>
                    </CollapsibleSection>
-                   <p className="mt-4 text-xs font-semibold text-z-muted">Lighthouse automated checks. A score of 100 does not prove complete accessibility compliance.</p>
+                   <p className="mt-4 text-xs font-semibold text-z-ink-muted">Lighthouse automated checks. A score of 100 does not prove complete accessibility compliance.</p>
                  </section>
                )}
             </div>
@@ -1627,7 +1627,7 @@ export default function AnalysisReportPage() {
             <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
                <SectionErrorBoundary sectionName="Extracted Content">
                  <section className="rounded-xl border border-z-border bg-z-surface p-6">
-                   <h2 className="text-lg font-bold text-z-text">Extracted Content</h2>
+                   <h2 className="text-lg font-bold text-z-ink">Extracted Content</h2>
                    <div className="mt-4">
                      <ExtractedContentPanel analysisRunId={analysisRunId} />
                    </div>
@@ -1641,10 +1641,10 @@ export default function AnalysisReportPage() {
             <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
                <SectionErrorBoundary sectionName="Verified Diagnostics">
                   <section className="rounded-xl border border-z-border bg-z-surface p-6">
-                    <h2 className="text-lg font-bold text-z-text mb-4">Verified Diagnostics</h2>
+                    <h2 className="text-lg font-bold text-z-ink mb-4">Verified Diagnostics</h2>
                     <div className="space-y-4">
                       {diagnostics.map(([name, diagnostic]) => (
-                        <div key={name} className="border border-z-border rounded-lg bg-z-background p-4">
+                        <div key={name} className="border border-z-border rounded-lg bg-z-surface p-4">
                           <CollapsibleSection title={`${diagnosticTitles[name] ?? formatLabel(name)} — ${formatLabel(diagnostic.status)}`}>
                             <div className="grid gap-4 text-sm sm:grid-cols-3 mt-4">
                               <MetricStat label="Status" value={formatLabel(diagnostic.status)} />
@@ -1661,18 +1661,18 @@ export default function AnalysisReportPage() {
                             </div>
                             {!!diagnostic.score && (
                               <div className="mt-4 rounded-lg bg-z-surface border border-z-border p-4">
-                                <p className="text-xs font-bold uppercase text-z-muted mb-2">{diagnostic.score.label}</p>
+                                <p className="text-xs font-bold uppercase text-z-ink-muted mb-2">{diagnostic.score.label}</p>
                                 <div className="flex flex-wrap gap-x-8 gap-y-4">
                                   <div>
-                                    <span className="text-xs font-semibold text-z-text-subtle block mb-1">Raw Base</span>
+                                    <span className="text-xs font-semibold text-z-ink-secondary block mb-1">Raw Base</span>
                                     <span className="font-mono">{diagnostic.score.starting_score}</span>
                                   </div>
                                   <div>
-                                    <span className="text-xs font-semibold text-z-text-subtle block mb-1">Deductions</span>
+                                    <span className="text-xs font-semibold text-z-ink-secondary block mb-1">Deductions</span>
                                     <span className="font-mono text-red-600">-{Array.isArray(diagnostic.score?.deductions) ? diagnostic.score.deductions.reduce((a: number, b: { points: number }) => a + b.points, 0) : 0}</span>
                                   </div>
                                   <div>
-                                    <span className="text-xs font-semibold text-z-text-subtle block mb-1">Final Index</span>
+                                    <span className="text-xs font-semibold text-z-ink-secondary block mb-1">Final Index</span>
                                     <span className="font-mono font-bold">{diagnostic.score.final_score}</span>
                                   </div>
                                 </div>
@@ -1687,22 +1687,22 @@ export default function AnalysisReportPage() {
 
                <SectionErrorBoundary sectionName="Website Signals Evidence">
                  <section className="rounded-xl border border-z-border bg-z-surface p-6">
-                   <h2 className="text-lg font-bold text-z-text mb-4">Website Signals — Technical Evidence</h2>
+                   <h2 className="text-lg font-bold text-z-ink mb-4">Website Signals — Technical Evidence</h2>
                    <WebsiteSignalsTechnicalEvidence diagnostics={report.diagnostics} />
                  </section>
                </SectionErrorBoundary>
 
                <SectionErrorBoundary sectionName="Score Transparency">
                  <section className="rounded-xl border border-z-border bg-z-surface p-6">
-                   <h2 className="text-lg font-bold text-z-text">Score Transparency</h2>
-                   <div className="mt-4 space-y-2 text-sm text-z-text-subtle">
+                   <h2 className="text-lg font-bold text-z-ink">Score Transparency</h2>
+                   <div className="mt-4 space-y-2 text-sm text-z-ink-secondary">
                      <p><strong>Available:</strong> {Array.isArray(report.score.available_categories) ? report.score.available_categories.join(", ") : "None"}</p>
                      <p><strong>Unavailable:</strong> {Array.isArray(report.score.unavailable_categories) ? report.score.unavailable_categories.join(", ") : "None"}</p>
                    </div>
                    {Array.isArray(report.score.deductions) && report.score.deductions.length > 0 && (
                      <div className="mt-6">
                        <CollapsibleSection title={`Technical Quality deductions (${report.score.deductions.length})`}>
-                         <div className="bg-z-background border border-z-border rounded-lg p-4 mt-2">
+                         <div className="bg-z-surface border border-z-border rounded-lg p-4 mt-2">
                            <HumanValue value={report.score.deductions} />
                          </div>
                        </CollapsibleSection>
@@ -1718,8 +1718,8 @@ export default function AnalysisReportPage() {
             <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
                <SectionErrorBoundary sectionName="Browser Compatibility">
                  <section className="rounded-xl border border-z-border bg-z-surface p-6">
-                   <h2 className="text-lg font-bold text-z-text mb-2">Browser UAT & Responsive Verification</h2>
-                   <p className="text-sm text-z-muted mb-6">Browser UAT scope across Google Chrome, Microsoft Edge, and Apple Safari.</p>
+                   <h2 className="text-lg font-bold text-z-ink mb-2">Browser UAT & Responsive Verification</h2>
+                   <p className="text-sm text-z-ink-muted mb-6">Browser UAT scope across Google Chrome, Microsoft Edge, and Apple Safari.</p>
                    <BrowserSummary diagnostics={report.diagnostics} viewMode="executive" />
                  </section>
                </SectionErrorBoundary>
@@ -1739,7 +1739,7 @@ export default function AnalysisReportPage() {
             <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
                <SectionErrorBoundary sectionName="Pages Analysis">
                  <section className="rounded-xl border border-z-border bg-z-surface p-6">
-                   <h2 className="text-lg font-bold text-z-text mb-4">Discovered Pages Analysis</h2>
+                   <h2 className="text-lg font-bold text-z-ink mb-4">Discovered Pages Analysis</h2>
                    <SiteDiagnosticsPanel websiteId={report.website.id} />
                  </section>
                </SectionErrorBoundary>
@@ -1750,27 +1750,27 @@ export default function AnalysisReportPage() {
          {activeTab === 'actions' && (
             <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
                <section className="rounded-xl border border-z-border bg-z-surface p-6">
-                 <h2 className="text-lg font-bold text-z-text mb-4">Priority Action Plan</h2>
+                 <h2 className="text-lg font-bold text-z-ink mb-4">Priority Action Plan</h2>
                  {topActions.length > 0 ? (
                    <div className="space-y-4">
                      {topActions.map((action, i) => (
-                       <div key={action.recommendation_id} className="rounded-xl border border-z-border bg-z-background p-5 shadow-sm">
+                       <div key={action.recommendation_id} className="rounded-xl border border-z-border bg-z-surface p-5 shadow-sm">
                          <div className="flex items-start gap-4">
                            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-z-dark-surface text-sm font-black text-white shadow-sm">
                              {i + 1}
                            </span>
                            <div className="min-w-0 flex-1">
                              <div className="flex items-start justify-between gap-2">
-                               <p className="font-bold text-z-text text-lg">{action.title}</p>
+                               <p className="font-bold text-z-ink text-lg">{action.title}</p>
                                <StatusBadge status={action.priority} />
                              </div>
-                             <p className="mt-2 text-sm leading-relaxed text-z-text-subtle">
+                             <p className="mt-2 text-sm leading-relaxed text-z-ink-secondary">
                                {action.explanation}
                              </p>
-                             <div className="mt-4 flex flex-wrap gap-4 text-xs font-semibold text-z-muted bg-z-surface p-3 rounded-lg border border-z-border">
-                               <div><span className="text-z-text-subtle block mb-1">Owner</span>{action.responsible_role}</div>
-                               <div className="border-l border-z-border pl-4"><span className="text-z-text-subtle block mb-1">Effort</span>{action.estimated_effort}</div>
-                               <div className="border-l border-z-border pl-4"><span className="text-z-text-subtle block mb-1">Confidence</span>{action.confidence_percent}%</div>
+                             <div className="mt-4 flex flex-wrap gap-4 text-xs font-semibold text-z-ink-muted bg-z-surface p-3 rounded-lg border border-z-border">
+                               <div><span className="text-z-ink-secondary block mb-1">Owner</span>{action.responsible_role}</div>
+                               <div className="border-l border-z-border pl-4"><span className="text-z-ink-secondary block mb-1">Effort</span>{action.estimated_effort}</div>
+                               <div className="border-l border-z-border pl-4"><span className="text-z-ink-secondary block mb-1">Confidence</span>{action.confidence_percent}%</div>
                              </div>
                            </div>
                          </div>
@@ -1797,18 +1797,18 @@ export default function AnalysisReportPage() {
 
                <SectionErrorBoundary sectionName="Methodology">
                  <section className="rounded-xl border border-z-border bg-z-surface p-6">
-                   <h2 className="text-lg font-bold text-z-text mb-4">Methodology</h2>
+                   <h2 className="text-lg font-bold text-z-ink mb-4">Methodology</h2>
                    <dl className="grid gap-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
-                     <div className="bg-z-background border border-z-border p-4 rounded-lg">
-                       <dt className="text-z-text-subtle font-semibold mb-1">Scoring formula</dt>
+                     <div className="bg-z-surface border border-z-border p-4 rounded-lg">
+                       <dt className="text-z-ink-secondary font-semibold mb-1">Scoring formula</dt>
                        <dd className="font-mono text-xs">v{report.score.formula_version}</dd>
                      </div>
-                     <div className="bg-z-background border border-z-border p-4 rounded-lg">
-                       <dt className="text-z-text-subtle font-semibold mb-1">Lighthouse version</dt>
+                     <div className="bg-z-surface border border-z-border p-4 rounded-lg">
+                       <dt className="text-z-ink-secondary font-semibold mb-1">Lighthouse version</dt>
                        <dd className="font-mono text-xs">{report.result.lighthouse_version ?? "Not available"}</dd>
                      </div>
-                     <div className="bg-z-background border border-z-border p-4 rounded-lg">
-                       <dt className="text-z-text-subtle font-semibold mb-1">Analysis run</dt>
+                     <div className="bg-z-surface border border-z-border p-4 rounded-lg">
+                       <dt className="text-z-ink-secondary font-semibold mb-1">Analysis run</dt>
                        <dd className="font-mono text-xs break-all">{report.analysis_run_id}</dd>
                      </div>
                    </dl>
@@ -1818,12 +1818,12 @@ export default function AnalysisReportPage() {
                {allLimitations.size > 0 && (
                  <SectionErrorBoundary sectionName="All Limitations">
                    <section className="rounded-xl border border-z-border bg-z-surface p-6">
-                     <h2 className="text-lg font-bold text-z-text mb-4 flex items-center gap-2">
+                     <h2 className="text-lg font-bold text-z-ink mb-4 flex items-center gap-2">
                        <span className="text-amber-500">⚠</span> All Limitations
                      </h2>
                      <ul className="space-y-3">
                        {[...allLimitations].map((lim) => (
-                         <li key={lim} className="flex items-start gap-3 text-sm text-z-text-subtle bg-z-background border border-z-border p-3 rounded-lg">
+                         <li key={lim} className="flex items-start gap-3 text-sm text-z-ink-secondary bg-z-surface border border-z-border p-3 rounded-lg">
                            <span className="text-amber-500 font-bold">•</span>
                            <span>{lim}</span>
                          </li>

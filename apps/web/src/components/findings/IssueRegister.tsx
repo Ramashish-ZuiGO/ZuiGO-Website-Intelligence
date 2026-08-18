@@ -95,8 +95,8 @@ export function IssueRegister({ findings }: IssueRegisterProps) {
       header: "Issue",
       render: (row) => (
         <div>
-          <p className="font-semibold text-z-text">{row.title}</p>
-          <p className="text-xs text-z-text-subtle font-mono mt-0.5">{row.finding_code}</p>
+          <p className="font-semibold text-z-ink">{row.title}</p>
+          <p className="text-xs text-z-ink-secondary font-mono mt-0.5">{row.finding_code}</p>
         </div>
       ),
     },
@@ -121,7 +121,7 @@ export function IssueRegister({ findings }: IssueRegisterProps) {
       key: "actions",
       header: "",
       render: (row) => (
-        <div className="flex justify-end text-z-muted transition-colors opacity-50 hover:opacity-100">
+        <div className="flex justify-end text-z-ink-muted transition-colors opacity-50 hover:opacity-100">
           <span className="sr-only">View details</span>
           <ChevronRight className="h-5 w-5" />
         </div>
@@ -138,20 +138,20 @@ export function IssueRegister({ findings }: IssueRegisterProps) {
         {/* Filters */}
         <div className="flex flex-wrap items-center gap-3 bg-z-surface p-4 rounded-xl border border-z-border">
           <div className="relative flex-1 min-w-[200px]">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-z-muted" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-z-ink-muted" />
             <input
               type="text"
               placeholder="Search findings..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-4 py-2 bg-z-background border border-z-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-z-primary/50"
+              className="w-full pl-9 pr-4 py-2 bg-z-surface border border-z-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-z-accent/50"
             />
           </div>
 
           <select
             value={severityFilter}
             onChange={(e) => setSeverityFilter(e.target.value)}
-            className="px-3 py-2 bg-z-background border border-z-border rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-z-primary/50"
+            className="px-3 py-2 bg-z-surface border border-z-border rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-z-accent/50"
           >
             <option value="all">All Severities</option>
             <option value="critical">Critical</option>
@@ -164,7 +164,7 @@ export function IssueRegister({ findings }: IssueRegisterProps) {
           <select
             value={categoryFilter}
             onChange={(e) => setCategoryFilter(e.target.value)}
-            className="px-3 py-2 bg-z-background border border-z-border rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-z-primary/50 capitalize"
+            className="px-3 py-2 bg-z-surface border border-z-border rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-z-accent/50 capitalize"
           >
             <option value="all">All Categories</option>
             {categories.map(c => (
@@ -172,7 +172,7 @@ export function IssueRegister({ findings }: IssueRegisterProps) {
             ))}
           </select>
 
-          <div className="text-sm font-semibold text-z-muted ml-auto whitespace-nowrap">
+          <div className="text-sm font-semibold text-z-ink-muted ml-auto whitespace-nowrap">
             {filtered.length === grouped.length
               ? `${grouped.length} finding${grouped.length === 1 ? '' : 's'}`
               : `${filtered.length} of ${grouped.length} finding${grouped.length === 1 ? '' : 's'}`}
@@ -193,7 +193,7 @@ export function IssueRegister({ findings }: IssueRegisterProps) {
         {/* Mobile Cards */}
         <div className="md:hidden flex flex-col gap-3">
           {filtered.length === 0 ? (
-            <div className="p-6 text-center text-sm text-z-muted border border-z-border rounded-xl bg-z-surface">
+            <div className="p-6 text-center text-sm text-z-ink-muted border border-z-border rounded-xl bg-z-surface">
               No findings match your filters.
             </div>
           ) : (
@@ -201,17 +201,17 @@ export function IssueRegister({ findings }: IssueRegisterProps) {
               <button
                 key={row.id}
                 onClick={() => setSelectedFindingId(row.id)}
-                className="text-left bg-z-surface border border-z-border rounded-xl p-4 flex items-center justify-between shadow-sm hover:border-z-primary/30 active:scale-[0.99] transition-all"
+                className="text-left bg-z-surface border border-z-border rounded-xl p-4 flex items-center justify-between shadow-sm hover:border-z-accent/30 active:scale-[0.99] transition-all"
               >
                 <div className="flex-1 min-w-0 pr-4">
                   <div className="mb-2"><StatusBadge status={row.severity} size="sm" /></div>
-                  <p className="font-bold text-z-text text-sm mb-1 leading-tight">{row.title}</p>
-                  <p className="text-xs text-z-text-subtle capitalize mb-2">{row.category.replace(/_/g, " ")}</p>
-                  <p className="text-xs font-semibold text-z-muted">
+                  <p className="font-bold text-z-ink text-sm mb-1 leading-tight">{row.title}</p>
+                  <p className="text-xs text-z-ink-secondary capitalize mb-2">{row.category.replace(/_/g, " ")}</p>
+                  <p className="text-xs font-semibold text-z-ink-muted">
                     {row.affectedUrls.size} page{row.affectedUrls.size !== 1 ? 's' : ''} &middot; {row.totalOccurrences} occurrence{row.totalOccurrences !== 1 ? 's' : ''}
                   </p>
                 </div>
-                <div className="text-z-muted flex-shrink-0">
+                <div className="text-z-ink-muted flex-shrink-0">
                   <ChevronRight className="h-5 w-5 opacity-50" />
                 </div>
               </button>
@@ -226,12 +226,12 @@ export function IssueRegister({ findings }: IssueRegisterProps) {
           <div className="p-5 border-b border-z-border sticky top-0 bg-z-surface/95 backdrop-blur z-10 flex items-start justify-between">
             <div className="min-w-0">
               <StatusBadge status={selectedFinding.severity} size="sm" />
-              <h3 className="text-lg font-bold text-z-text mt-3 leading-tight">{selectedFinding.title}</h3>
-              <p className="text-xs font-mono text-z-muted mt-1">{selectedFinding.finding_code}</p>
+              <h3 className="text-lg font-bold text-z-ink mt-3 leading-tight">{selectedFinding.title}</h3>
+              <p className="text-xs font-mono text-z-ink-muted mt-1">{selectedFinding.finding_code}</p>
             </div>
             <button
               onClick={() => setSelectedFindingId(null)}
-              className="p-1.5 text-z-muted hover:text-z-text hover:bg-z-neutral-subtle rounded-md transition-colors"
+              className="p-1.5 text-z-ink-muted hover:text-z-ink hover:bg-z-neutral-subtle rounded-md transition-colors"
               aria-label="Close details"
             >
               <X className="h-5 w-5" />
@@ -240,22 +240,22 @@ export function IssueRegister({ findings }: IssueRegisterProps) {
 
           <div className="p-5 flex flex-col gap-6">
             <section>
-              <h4 className="text-sm font-bold text-z-text mb-2">Description</h4>
-              <p className="text-sm text-z-text-subtle leading-relaxed">
+              <h4 className="text-sm font-bold text-z-ink mb-2">Description</h4>
+              <p className="text-sm text-z-ink-secondary leading-relaxed">
                 {selectedFinding.description}
               </p>
             </section>
 
             <section className="bg-z-neutral-subtle/50 rounded-lg p-4 border border-z-border/50">
               <div className="flex justify-between items-center mb-3">
-                <h4 className="text-sm font-bold text-z-text">Affected Pages</h4>
-                <span className="text-xs font-semibold bg-z-background px-2 py-0.5 rounded text-z-muted">
+                <h4 className="text-sm font-bold text-z-ink">Affected Pages</h4>
+                <span className="text-xs font-semibold bg-z-surface px-2 py-0.5 rounded text-z-ink-muted">
                   {selectedFinding.affectedUrls.size} Total
                 </span>
               </div>
-              <ul className="text-sm text-z-text-subtle space-y-2 max-h-48 overflow-y-auto pr-2 custom-scrollbar">
+              <ul className="text-sm text-z-ink-secondary space-y-2 max-h-48 overflow-y-auto pr-2 custom-scrollbar">
                 {Array.from(selectedFinding.affectedUrls).map(url => (
-                  <li key={url} className="break-all font-mono text-xs bg-z-background border border-z-border p-2 rounded truncate" title={url}>
+                  <li key={url} className="break-all font-mono text-xs bg-z-surface border border-z-border p-2 rounded truncate" title={url}>
                     {url}
                   </li>
                 ))}
@@ -263,14 +263,14 @@ export function IssueRegister({ findings }: IssueRegisterProps) {
             </section>
 
             <section>
-              <h4 className="text-sm font-bold text-z-text mb-2 flex justify-between">
+              <h4 className="text-sm font-bold text-z-ink mb-2 flex justify-between">
                 <span>Evidence Examples</span>
-                <span className="text-xs font-normal text-z-muted">First 3 occurrences</span>
+                <span className="text-xs font-normal text-z-ink-muted">First 3 occurrences</span>
               </h4>
               <div className="space-y-3">
                 {selectedFinding.occurrences.slice(0, 3).map((occ, idx) => (
-                  <div key={idx} className="bg-z-background border border-z-border rounded-lg p-3 overflow-x-auto">
-                    <pre className="text-[10px] font-mono text-z-text-subtle">
+                  <div key={idx} className="bg-z-surface border border-z-border rounded-lg p-3 overflow-x-auto">
+                    <pre className="text-[10px] font-mono text-z-ink-secondary">
                       {JSON.stringify(occ.evidence, null, 2)}
                     </pre>
                   </div>

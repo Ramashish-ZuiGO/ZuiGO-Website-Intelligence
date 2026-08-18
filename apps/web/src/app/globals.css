@@ -45,6 +45,8 @@
   --color-z-border: var(--z-border);
   --color-z-border-strong: var(--z-border-strong);
   --color-z-border-subtle: var(--z-border-subtle);
+
+  --color-z-focus-ring: var(--z-focus-ring);
 }
 
 /* ================================================================

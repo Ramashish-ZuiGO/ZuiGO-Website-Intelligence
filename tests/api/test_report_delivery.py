@@ -1626,3 +1626,66 @@ def test_w3c_validation_evidence_surfaces_and_stays_clearly_labeled(
     assert validation["official_w3c_validation"]["observations"]["error_count"] == 2
     assert validation["zuigo_derived_structural_score"]["observations"]["standards_score"] == 82
     assert "official W3C" in validation["label_statement"]
+
+
+def test_report_feedback_submission_listing_and_validation(
+    report_api: tuple[
+        TestClient,
+        sessionmaker[Session],
+        uuid.UUID,
+        uuid.UUID,
+        uuid.UUID,
+        list[tuple[str, str, int]],
+    ],
+) -> None:
+    """M12 (docs/REPORT_QUALITY_INITIATIVE.md): report-level feedback --
+    the simplest, highest-value surface (was this report accurate/
+    useful) rather than per-finding, which needs UI wiring across every
+    component for comparatively little extra v1 signal. Multiple
+    submissions are allowed since no per-user identity exists yet under
+    the single shared-admin auth model.
+    """
+    client, factory, _project_id, _website_id, run_id, _dispatched = report_api
+    report = _generate_completed_report(factory, run_id, key="feedback-report")
+
+    first = client.post(
+        f"/api/v1/reports/{report.report_id}/feedback",
+        json={"rating": "helpful", "comment": "  Clear and accurate.  "},
+    )
+    assert first.status_code == 201
+    body = first.json()
+    assert body["rating"] == "helpful"
+    assert body["comment"] == "Clear and accurate."
+
+    second = client.post(
+        f"/api/v1/reports/{report.report_id}/feedback",
+        json={"rating": "not_helpful"},
+    )
+    assert second.status_code == 201
+    assert second.json()["comment"] is None
+
+    blank_comment = client.post(
+        f"/api/v1/reports/{report.report_id}/feedback",
+        json={"rating": "helpful", "comment": "   "},
+    )
+    assert blank_comment.status_code == 201
+    assert blank_comment.json()["comment"] is None
+
+    invalid = client.post(
+        f"/api/v1/reports/{report.report_id}/feedback",
+        json={"rating": "excellent"},
+    )
+    assert invalid.status_code == 422
+
+    listing = client.get(f"/api/v1/reports/{report.report_id}/feedback")
+    assert listing.status_code == 200
+    payload = listing.json()
+    assert payload["helpful_count"] == 2
+    assert payload["not_helpful_count"] == 1
+    assert len(payload["items"]) == 3
+
+    missing = client.post(
+        f"/api/v1/reports/{uuid.uuid4()}/feedback",
+        json={"rating": "helpful"},
+    )
+    assert missing.status_code == 404

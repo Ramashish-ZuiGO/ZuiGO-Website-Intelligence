@@ -622,9 +622,39 @@ prioritized against each other; that's part of the discussion.
   successful login, and a real report regeneration, then confirmed the
   actual structured events in `docker compose logs api` with real ids and
   counts. Full suite 1170 passed.
-- **M12: Feedback collection.** Does not exist. New feature, needs its own
-  design discussion (what feedback, on what — a report? a finding? an
-  action item? general NPS?).
+- **M12: Feedback collection — SHIPPED 2026-08-18.** Explicitly deferred
+  since 2026-08-16 pending a scope decision; user approved starting it
+  after the 16-module continuous run. **Scope decision (v1):**
+  report-level feedback (was this report accurate/useful — thumbs up/down
+  + optional comment), not per-finding — per-finding would need UI wiring
+  across every report component for comparatively little extra signal at
+  v1; a natural fast-follow if the user wants it later.
+  - New `ReportFeedback` model/table (`report_feedback`), FK to
+    `report_executions.id` `ON DELETE CASCADE`, `rating` constrained to
+    `helpful`/`not_helpful`, `comment` capped at 4000 chars. Multiple
+    submissions per report allowed — no per-user identity exists yet
+    under the single shared-admin auth model (M1), so each row is an
+    independent, immutable submission, never edited or aggregated away.
+  - `POST /api/v1/reports/{report_id}/feedback` and
+    `GET /api/v1/reports/{report_id}/feedback` (returns items plus
+    `helpful_count`/`not_helpful_count`), added to the existing
+    `report_delivery` router. Logged (`report_feedback_submitted`) per
+    M11's convention.
+  - Frontend: `ReportFeedbackWidget` in `ReportDeliveryPanel.tsx`, visible
+    on every rendered report regardless of executive/technical view mode.
+  - Alembic migration verified against real Postgres per AGENTS.md:
+    upgrade → downgrade (table genuinely dropped) → re-upgrade, real
+    schema inspected via `psql \d`.
+  - New backend test covers submission, comment whitespace-trimming to
+    `None`, invalid rating rejection (422), listing with correct
+    helpful/not_helpful counts, and 404 for an unknown report. Full suite
+    1172 passed. Frontend lint/typecheck/build clean.
+  - **Live-verified end-to-end in the real browser**, not just DOM
+    inspection: clicked the real 👍 button on a real report, confirmed a
+    genuine `POST .../feedback → 201 Created` in the network log, the UI
+    correctly flipped to the "Thanks for the feedback" state, and a
+    follow-up `GET` showed the real persisted row with
+    `helpful_count: 1`.
 - **M13: Limitation-ID stability & dual-representation cleanup — SHIPPED
   2026-08-18.** (1) `_assign_limitation_id`'s fallback used Python's
   `hash()`, which is salted per process — the SAME unmatched limitation

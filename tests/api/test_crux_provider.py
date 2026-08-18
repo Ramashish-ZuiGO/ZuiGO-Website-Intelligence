@@ -54,9 +54,16 @@ async def test_crux_origin_fallback(crux_provider):
 
 @pytest.mark.anyio
 async def test_crux_no_api_key():
-    provider = CruxProvider(api_key=None)
+    """Regression: CruxProvider.__init__ resolves api_key via
+    get_settings().crux_api_key when the constructor arg is falsy -- the
+    mock must be in place BEFORE construction, or a real CRUX_API_KEY
+    configured in the environment (as this project's .env now has, M19)
+    makes self.api_key truthy and the test falls through to a real
+    network call instead of exercising the "no key" path.
+    """
     with patch("app.services.crux_provider.get_settings") as mock_settings:
         mock_settings.return_value.crux_api_key = None
+        provider = CruxProvider(api_key=None)
         result = await provider.fetch_record(url="https://example.com")
         assert result["status"] == "unavailable"
 

@@ -5,6 +5,8 @@ import type {
   PaginatedReports,
   RealWebsiteAnalysisStart,
   RecentRealAnalysis,
+  ReportFeedbackItem,
+  ReportFeedbackList,
   WorkflowProgress,
 } from "@/components/reports/types";
 
@@ -86,5 +88,17 @@ export const reportDeliveryApi = {
     apiRequest<{ status: string }>(
       `/api/v1/workflow-executions/${encodeURIComponent(executionId)}/resume`,
       { method: "POST", body: JSON.stringify({}) },
+    ),
+  submitFeedback: (
+    reportId: string,
+    input: { rating: "helpful" | "not_helpful"; comment?: string | null },
+  ) =>
+    apiRequest<ReportFeedbackItem>(
+      `/api/v1/reports/${encodeURIComponent(reportId)}/feedback`,
+      { method: "POST", body: JSON.stringify(input) },
+    ),
+  listFeedback: (reportId: string) =>
+    apiRequest<ReportFeedbackList>(
+      `/api/v1/reports/${encodeURIComponent(reportId)}/feedback`,
     ),
 };

@@ -1,4 +1,5 @@
 import hashlib
+import logging
 import uuid
 from datetime import UTC, datetime
 from typing import Annotated, Literal
@@ -22,6 +23,7 @@ from app.models import (
     PageAnalysisRun,
     Project,
     ReportExecution,
+    ReportFeedback,
     ScoreExecution,
     Website,
     WebsitePage,
@@ -37,6 +39,9 @@ from app.schemas.report_delivery import (
     RecentRealAnalysisRead,
     ReportArtifactList,
     ReportExecutionRead,
+    ReportFeedbackCreate,
+    ReportFeedbackList,
+    ReportFeedbackRead,
     ReportGenerateRequest,
     ReportStatusRead,
     WorkflowProgressRead,
@@ -74,6 +79,8 @@ from app.services.workflow_execution import (
     real_execution_last_update,
     record_dispatch,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Report delivery"])
 DatabaseSession = Annotated[Session, Depends(get_db)]
@@ -1420,6 +1427,55 @@ def report_artifacts(report_id: uuid.UUID, db: DatabaseSession) -> ReportArtifac
     except ReportDeliveryError as exception:
         raise _report_error(exception) from exception
     return ReportArtifactList(items=report.artifacts)
+
+
+@router.post(
+    "/reports/{report_id}/feedback",
+    response_model=ReportFeedbackRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def submit_report_feedback(
+    report_id: uuid.UUID,
+    request: ReportFeedbackCreate,
+    db: DatabaseSession,
+) -> ReportFeedback:
+    """M12 (docs/REPORT_QUALITY_INITIATIVE.md): report-level feedback.
+    Multiple submissions per report are allowed -- no per-user identity
+    exists yet under the single shared-admin auth model (M1), so each
+    submission is an independent, immutable row."""
+    try:
+        report = load_report(db, report_id)
+    except ReportDeliveryError as exception:
+        raise _report_error(exception) from exception
+    feedback = ReportFeedback(
+        report_execution_id=report.id,
+        rating=request.rating,
+        comment=request.comment,
+    )
+    db.add(feedback)
+    db.commit()
+    db.refresh(feedback)
+    logger.info(
+        "report_feedback_submitted report_id=%s rating=%s has_comment=%s",
+        report_id,
+        request.rating,
+        feedback.comment is not None,
+    )
+    return feedback
+
+
+@router.get("/reports/{report_id}/feedback", response_model=ReportFeedbackList)
+def list_report_feedback(report_id: uuid.UUID, db: DatabaseSession) -> ReportFeedbackList:
+    try:
+        report = load_report(db, report_id)
+    except ReportDeliveryError as exception:
+        raise _report_error(exception) from exception
+    items = list(report.feedback)
+    return ReportFeedbackList(
+        items=items,
+        helpful_count=sum(item.rating == "helpful" for item in items),
+        not_helpful_count=sum(item.rating == "not_helpful" for item in items),
+    )
 
 
 # Formats that are persisted as frozen artifacts at report-generation time.

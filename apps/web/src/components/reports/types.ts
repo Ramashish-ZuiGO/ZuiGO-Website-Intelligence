@@ -278,6 +278,19 @@ export interface DeliveredReport {
   artifacts: ReportArtifact[];
 }
 
+export interface ReportFeedbackItem {
+  id: string;
+  rating: "helpful" | "not_helpful";
+  comment: string | null;
+  created_at: string;
+}
+
+export interface ReportFeedbackList {
+  items: ReportFeedbackItem[];
+  helpful_count: number;
+  not_helpful_count: number;
+}
+
 export interface PaginatedReports {
   items: DeliveredReport[];
   total: number;

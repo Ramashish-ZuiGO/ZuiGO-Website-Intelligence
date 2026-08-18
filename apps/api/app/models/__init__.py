@@ -45,6 +45,7 @@ from app.models.project import Project
 from app.models.report_delivery import (
     ReportArtifact,
     ReportExecution,
+    ReportFeedback,
     ReportSection,
     ReportSnapshot,
 )
@@ -137,6 +138,7 @@ __all__ = [
     "RepositoryScanExecution",
     "ReportArtifact",
     "ReportExecution",
+    "ReportFeedback",
     "ReportSection",
     "ReportSnapshot",
     "ScanStatus",

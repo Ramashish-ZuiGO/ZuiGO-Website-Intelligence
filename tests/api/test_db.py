@@ -43,6 +43,7 @@ def test_database_foundation_uses_psycopg_with_mvp_tables() -> None:
         "repository_scan_executions",
         "report_artifacts",
         "report_executions",
+        "report_feedback",
         "report_sections",
         "report_snapshots",
         "site_diagnostic_executions",

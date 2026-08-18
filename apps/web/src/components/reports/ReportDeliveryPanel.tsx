@@ -353,6 +353,97 @@ function FilterSelect({
   );
 }
 
+function ReportFeedbackWidget({ reportId }: { reportId: string }) {
+  const [rating, setRating] = useState<"helpful" | "not_helpful" | null>(null);
+  const [comment, setComment] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState<{
+    rating: "helpful" | "not_helpful";
+  } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(choice: "helpful" | "not_helpful") {
+    if (submitting) return;
+    setRating(choice);
+    setSubmitting(true);
+    setError(null);
+    try {
+      await reportDeliveryApi.submitFeedback(reportId, {
+        rating: choice,
+        comment: comment.trim() || null,
+      });
+      setSubmitted({ rating: choice });
+    } catch (requestError) {
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : "Unable to submit feedback.",
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (submitted) {
+    return (
+      <div
+        className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800"
+        role="status"
+      >
+        Thanks for the feedback — recorded as{" "}
+        {submitted.rating === "helpful" ? "helpful" : "not helpful"}.
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+      <p className="text-sm font-semibold text-slate-700">
+        Was this report accurate and useful?
+      </p>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <button
+          className={`rounded-md border px-3 py-1.5 text-sm font-medium transition-colors ${
+            rating === "helpful"
+              ? "border-emerald-500 bg-emerald-100 text-emerald-800"
+              : "border-slate-300 text-slate-700 hover:bg-white"
+          }`}
+          disabled={submitting}
+          onClick={() => void submit("helpful")}
+          type="button"
+        >
+          👍 Helpful
+        </button>
+        <button
+          className={`rounded-md border px-3 py-1.5 text-sm font-medium transition-colors ${
+            rating === "not_helpful"
+              ? "border-red-500 bg-red-100 text-red-800"
+              : "border-slate-300 text-slate-700 hover:bg-white"
+          }`}
+          disabled={submitting}
+          onClick={() => void submit("not_helpful")}
+          type="button"
+        >
+          👎 Not helpful
+        </button>
+        <input
+          className="min-w-[14rem] flex-1 rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          maxLength={4000}
+          onChange={(event) => setComment(event.target.value)}
+          placeholder="Optional comment"
+          type="text"
+          value={comment}
+        />
+      </div>
+      {error && (
+        <p className="mt-2 text-xs text-red-700" role="alert">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function ReportViewer({ report }: { report: DeliveredReport }) {
   const safeSections = Array.isArray(report.sections) ? report.sections : [];
   const findings = useMemo(() => findingsFromReport(report), [report]);
@@ -619,6 +710,7 @@ function ReportViewer({ report }: { report: DeliveredReport }) {
       </header>
 
       <div className="space-y-5 p-5">
+        <ReportFeedbackWidget reportId={report.report_id} />
         {safeUnavailableSections.length > 0 && (
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3" role="note">
             <p className="text-sm font-medium text-amber-800">

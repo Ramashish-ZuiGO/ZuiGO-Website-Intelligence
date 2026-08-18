@@ -127,6 +127,12 @@ class ReportExecution(Base):
         passive_deletes=True,
         order_by="ReportSection.position",
     )
+    feedback: Mapped[list["ReportFeedback"]] = relationship(
+        back_populates="execution",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="ReportFeedback.created_at",
+    )
     artifacts: Mapped[list["ReportArtifact"]] = relationship(
         back_populates="execution",
         cascade="all, delete-orphan",
@@ -228,3 +234,39 @@ class ReportArtifact(Base):
     )
 
     execution: Mapped[ReportExecution] = relationship(back_populates="artifacts")
+
+
+RATING_VALUES = ("helpful", "not_helpful")
+
+
+class ReportFeedback(Base):
+    """M12 (docs/REPORT_QUALITY_INITIATIVE.md): the simplest, highest-value
+    feedback surface -- was THIS report accurate/useful -- rather than
+    per-finding feedback, which would need UI wiring across every report
+    component for comparatively little extra signal at v1. Multiple
+    submissions per report are allowed (no per-user identity exists yet
+    under the single shared-admin auth model, see docs M1); each row is
+    an independent, immutable submission, never edited or aggregated away.
+    """
+
+    __tablename__ = "report_feedback"
+    __table_args__ = (
+        CheckConstraint(
+            f"rating IN ({', '.join(repr(item) for item in RATING_VALUES)})",
+            name="ck_report_feedback_rating",
+        ),
+        CheckConstraint("length(comment) <= 4000", name="ck_report_feedback_comment_length"),
+        Index("ix_report_feedback_execution", "report_execution_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    report_execution_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("report_executions.id", ondelete="CASCADE"), nullable=False
+    )
+    rating: Mapped[str] = mapped_column(String(20), nullable=False)
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    execution: Mapped[ReportExecution] = relationship(back_populates="feedback")

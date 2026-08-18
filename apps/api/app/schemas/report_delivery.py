@@ -236,3 +236,31 @@ class PaginatedReports(BaseModel):
 
 class ReportArtifactList(BaseModel):
     items: list[ReportArtifactRead]
+
+
+class ReportFeedbackCreate(BaseModel):
+    rating: Literal["helpful", "not_helpful"]
+    comment: str | None = Field(default=None, max_length=4000)
+
+    @field_validator("comment")
+    @classmethod
+    def strip_comment(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
+
+
+class ReportFeedbackRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    rating: str
+    comment: str | None
+    created_at: datetime
+
+
+class ReportFeedbackList(BaseModel):
+    items: list[ReportFeedbackRead]
+    helpful_count: int
+    not_helpful_count: int

@@ -572,11 +572,29 @@ prioritized against each other; that's part of the discussion.
   loaded the real fluidcontrols project, confirmed via DOM inspection —
   labels, formatted values, and relative offsets all rendering; frontend
   lint/typecheck/build all clean.
-- **M17: Pages tab UI functionality audit.** From §4.5 — confirm whether
-  "View finding detail" buttons are genuinely non-functional and whether
-  raw UUIDs/unreadable long-decimal percentages still appear as primary
-  labels. Frontend-facing; likely needs an Antigravity handoff once
-  confirmed real.
+- **M17: Pages tab UI functionality audit — SHIPPED 2026-08-18. All three
+  historical claims verified against the real running app, then fixed
+  directly (no Antigravity handoff, per the new ownership decision).**
+  (1) "Dead" View-finding-detail buttons: the handler actually worked
+  (fetches the finding, renders a detail section) but the detail renders
+  far BELOW all the finding sections with no scroll or focus — clicking
+  appeared to do nothing. Fixed: after loading, the detail section is
+  scrolled into view and focused. (2) Raw UUIDs as primary labels:
+  the diagnostics History table's first column was the full execution
+  UUID in monospace; now shows the execution date + 8-char short id, full
+  UUID on hover. (3) Unreadable long decimals: `86.20689655172413%` came
+  from `formatMetricValue`'s percentage branch rendering the raw float —
+  fixed centrally (1 decimal, integers clean), improving every percentage
+  in the app. **Two bonus real fixes found during the audit:** the
+  category filter listed "Metadata and Content Patterns" twice
+  (near_duplicate shared the label — now "Duplicate Content"), and M3's
+  new `security` diagnostic category had NO filter label and NO section
+  in this panel (its findings would have been invisible here) — added a
+  "Security Headers" section and filter entry. Live-verified in the real
+  browser after the fixes: no long decimals anywhere on the tab, distinct
+  filter options, date+short-id execution rows, detail section renders on
+  click. Frontend lint/typecheck/build clean; full backend suite
+  (including frontend contract tests) 1170 passed.
 
 ### Tier 4 — infrastructure (enables correctness/traceability everywhere else)
 

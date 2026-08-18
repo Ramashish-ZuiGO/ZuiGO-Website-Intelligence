@@ -28,12 +28,24 @@ const categoryLabels: Record<string, string> = {
   internal_link_graph: "Internal Link Graph",
   canonical_indexability: "Indexability and Canonical",
   metadata_content: "Metadata and Content Patterns",
-  near_duplicate: "Metadata and Content Patterns",
+  // M17: previously shared "Metadata and Content Patterns", producing a
+  // duplicate option in the category filter.
+  near_duplicate: "Duplicate Content",
   technical_consistency: "Technical Consistency",
   evidence_availability: "Evidence Availability",
+  // M3 introduced the security diagnostic category (missing/inconsistent
+  // security headers); without an entry here those findings had no filter
+  // label and no section in this panel.
+  security: "Security Headers",
 };
 
 const sectionCategories = [
+  {
+    id: "security-headers",
+    title: "Security Headers",
+    categories: ["security"],
+    description: "Missing and inconsistent HTTP security headers across analysed pages.",
+  },
   {
     id: "repeated-patterns",
     title: "Repeated Patterns",
@@ -256,7 +268,10 @@ function History({
           <tbody>
             {executions.map((execution) => (
               <tr className={execution.id === activeExecution.id ? "border-b bg-blue-50" : "border-b"} key={execution.id}>
-                <td className="max-w-48 break-all p-2 font-mono text-xs">{execution.execution_id}</td>
+                <td className="p-2 text-xs" title={execution.execution_id}>
+                  <span className="font-semibold">{formatDate(execution.created_at ?? execution.completed_at)}</span>
+                  <span className="ml-2 font-mono text-slate-500">{execution.execution_id.slice(0, 8)}</span>
+                </td>
                 <td><StatusBadge value={execution.status} /></td>
                 <td>{execution.evidence_coverage_numerator}/{execution.evidence_coverage_denominator} ({Math.round(execution.evidence_coverage_ratio * 100)}%)</td>
                 <td>{execution.processed_page_count}/{execution.total_page_count}</td>
@@ -401,7 +416,20 @@ export function SiteDiagnosticsPanel({
     setDetailLoading(true);
     setOccurrencePage(0);
     try {
-      setSelectedFinding(await apiRequest<SiteDiagnosticFindingDetail>(`/api/v1/site-diagnostics/findings/${id}`));
+      const detail = await apiRequest<SiteDiagnosticFindingDetail>(
+        `/api/v1/site-diagnostics/findings/${id}`,
+      );
+      setSelectedFinding(detail);
+      // M17: the detail renders far below the finding cards; without
+      // scrolling and moving focus there, clicking "View finding detail"
+      // appeared to do nothing at all.
+      window.setTimeout(() => {
+        const section = document.getElementById(`finding-${detail.id}`)?.closest("section");
+        if (section instanceof HTMLElement) {
+          section.scrollIntoView({ behavior: "smooth", block: "start" });
+          section.focus({ preventScroll: true });
+        }
+      }, 50);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Unable to load finding detail.");
     } finally {

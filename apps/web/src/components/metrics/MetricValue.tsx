@@ -33,7 +33,10 @@ export function formatMetricValue(
   if (valueType === "percentage") {
     const numValue = Number(value);
     if (isNaN(numValue)) return String(value);
-    return <>{numValue}%</>;
+    // M17: raw float percentages (86.20689655172413%) rendered verbatim.
+    // One decimal is plenty for a customer-facing coverage figure.
+    const rounded = Math.round(numValue * 10) / 10;
+    return <>{Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(1)}%</>;
   }
 
   if (valueType === "count") {

@@ -1,6 +1,7 @@
 import hashlib
 import html
 import json
+import logging
 import re
 import textwrap
 import uuid
@@ -63,6 +64,8 @@ from app.services.resource_classification import (
     classify_resource,
 )
 from app.services.scoring_formula import FORMULA_ID, FORMULA_VERSION
+
+logger = logging.getLogger(__name__)
 
 REPORT_VERSION = "1.1.0"
 TEMPLATE_ID = "zuigo_evidence_report"
@@ -5536,6 +5539,17 @@ def generate_report(
         if concurrent is None or concurrent.input_fingerprint != input_fingerprint:
             raise
         return concurrent, False
+    logger.info(
+        "report_generated report_id=%s analysis_run_id=%s status=%s "
+        "unique_findings=%s occurrences=%s confidence_percent=%s template_version=%s",
+        report_id,
+        run.id,
+        "completed" if full_page_coverage and not unavailable else "partial",
+        len(grouped_findings),
+        finding_content.get("total_occurrence_count"),
+        report_confidence,
+        TEMPLATE_VERSION,
+    )
     return load_report(db, report_id), True
 
 

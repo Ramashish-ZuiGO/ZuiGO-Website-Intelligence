@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -32,6 +33,8 @@ from worker_app.tasks.agent_platform import run_workflow_execution
 from worker_app.tasks.analysis import run_analysis
 from worker_app.tasks.discovery import run_discovery
 from worker_app.tasks.page_analysis import run_page_analysis
+
+logger = logging.getLogger(__name__)
 
 
 def _utc_now() -> datetime:
@@ -133,6 +136,12 @@ def _claim_stage(execution_id: str, stage: str) -> dict[str, Any] | None:
         output[STAGE_OWNERSHIP_KEY] = ownership
         execution.structured_output = output
         db.commit()
+        logger.info(
+            "stage_claimed execution_id=%s stage=%s attempt=%s",
+            execution_id,
+            stage,
+            execution.attempt,
+        )
     return None
 
 
@@ -150,10 +159,21 @@ def _enter_stage(execution_id: str, stage: str) -> dict[str, Any] | None:
     """
     skipped = _skip_terminal_stage(execution_id, stage)
     if skipped is not None:
+        logger.info(
+            "stage_skipped_terminal execution_id=%s stage=%s status=%s",
+            execution_id,
+            stage,
+            skipped.get("status"),
+        )
         return skipped
     try:
         return _claim_stage(execution_id, stage)
     except DuplicateStageDelivery:
+        logger.warning(
+            "stage_duplicate_delivery_ignored execution_id=%s stage=%s",
+            execution_id,
+            stage,
+        )
         raise Ignore() from None
 
 
@@ -270,6 +290,14 @@ def _mark_stage_failed(
     *,
     transient: bool,
 ) -> None:
+    logger.error(
+        "stage_failed execution_id=%s stage=%s code=%s transient=%s message=%s",
+        execution_id,
+        stage,
+        code,
+        transient,
+        message,
+    )
     with SessionLocal() as db:
         execution = db.scalar(
             select(AgentExecution).where(AgentExecution.execution_id == uuid.UUID(execution_id))

@@ -4,6 +4,7 @@ import hashlib
 import html
 import io
 import json
+import logging
 import re
 import uuid
 from datetime import UTC, datetime
@@ -56,6 +57,9 @@ ARTIFACT_MEDIA_TYPES = {
     "pdf": "application/pdf",
     "json": "application/json",
 }
+
+
+logger = logging.getLogger(__name__)
 
 
 class AnalysisComparisonError(Exception):
@@ -1154,6 +1158,12 @@ def generate_comparison(
         if concurrent is None or concurrent.input_fingerprint != input_fingerprint:
             raise
         return concurrent, False
+    logger.info(
+        "analysis_comparison_generated comparison_id=%s baseline_run_id=%s current_run_id=%s",
+        comparison.id,
+        baseline_run_id,
+        current_run_id,
+    )
     return (
         db.scalar(
             select(AnalysisComparison)

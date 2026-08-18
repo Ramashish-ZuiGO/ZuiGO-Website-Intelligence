@@ -1,4 +1,5 @@
 import hashlib
+import logging
 import re
 import uuid
 from datetime import UTC, datetime
@@ -13,6 +14,8 @@ from app.models.accessibility import (
     AccessibilityNode,
     ManualReviewChecklist,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def truncate_html(html: str, max_length: int = 500) -> str:
@@ -223,6 +226,14 @@ def process_axe_results(
         session.execute(insert(ManualReviewChecklist), checklists_to_insert)
 
     session.commit()
+    logger.info(
+        "axe_results_ingested execution_id=%s url=%s findings=%s nodes=%s checklist_items=%s",
+        execution_id,
+        normalized_url,
+        len(findings_to_insert),
+        len(nodes_to_insert),
+        len(checklists_to_insert),
+    )
 
 
 def process_lighthouse_accessibility(

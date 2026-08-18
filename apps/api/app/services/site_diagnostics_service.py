@@ -1,6 +1,7 @@
 import hashlib
 import html
 import json
+import logging
 import re
 import unicodedata
 from collections import defaultdict
@@ -48,6 +49,8 @@ CLICK_DEPTH_THRESHOLDS: Final[dict[str, int]] = {
     "india_government": 3,
     "enterprise": 4,
 }
+logger = logging.getLogger(__name__)
+
 SECURITY_HEADER_KEYS: Final[tuple[str, ...]] = (
     "strict_transport_security",
     "content_security_policy",
@@ -430,6 +433,15 @@ class SiteDiagnosticsService:
         self._availability_findings(execution, page_evidence, technical_pages, link_graph)
         self.db.commit()
         self.db.refresh(execution)
+        logger.info(
+            "site_diagnostics_completed execution_id=%s analysis_run_id=%s status=%s "
+            "processed_pages=%s failed_pages=%s",
+            execution.id,
+            execution.analysis_run_id,
+            execution.status,
+            execution.processed_page_count,
+            execution.failed_page_count,
+        )
         return execution
 
     def _select_evidence(self, run: AnalysisRun) -> tuple[PageEvidence, ...]:

@@ -1,9 +1,12 @@
 import ipaddress
+import logging
 import re
 import socket
 import ssl
 from collections.abc import Callable, Iterable
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+logger = logging.getLogger(__name__)
 
 
 class PublicURLSafetyError(ValueError):
@@ -11,6 +14,10 @@ class PublicURLSafetyError(ValueError):
         super().__init__(message)
         self.code = code
         self.safe_message = message
+        # M11: SSRF/URL-safety denials are security-relevant events; every
+        # rejection is logged at the single construction point. The raw URL
+        # is deliberately NOT logged (it may embed sensitive query values).
+        logger.warning("public_url_rejected code=%s reason=%s", code, message)
 
 
 Resolver = Callable[[str, int], Iterable[tuple[object, object, object, object, tuple[object, ...]]]]

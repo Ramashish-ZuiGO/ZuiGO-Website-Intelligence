@@ -5,6 +5,7 @@ Converts page-analysis findings and recommendations into persistent,
 grouped, prioritized action items with full status tracking.
 """
 
+import logging
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -27,6 +28,8 @@ from app.models.browser_uat_tier0 import (
 from app.models.page_analysis_run import PageAnalysisRun
 from app.models.website_page import WebsitePage
 from app.services.priority import calculate_priority_score, reprice_for_affected_pages
+
+logger = logging.getLogger(__name__)
 
 PAGE_ANALYSIS_SOURCE = "page_analysis"
 TIER0_SOURCE = "browser_uat_tier0"
@@ -716,6 +719,17 @@ def generate_actions(
     execution.duplicate_within_execution_count = duplicates
     execution.historical_equivalent_count = historical
     db.flush()
+    logger.info(
+        "action_generation_completed execution_id=%s processed=%s generated=%s "
+        "unsupported=%s insufficient=%s duplicates=%s historical=%s",
+        execution.id,
+        total_processed,
+        total_generated,
+        unsupported,
+        insufficient,
+        duplicates,
+        historical,
+    )
 
     return execution
 
@@ -1183,6 +1197,15 @@ def generate_tier0_actions(
     execution.unsupported_finding_count = unsupported
     execution.insufficient_evidence_count = insufficient
     db.flush()
+    logger.info(
+        "tier0_action_generation_completed execution_id=%s processed=%s generated=%s "
+        "unsupported=%s insufficient=%s",
+        execution.id,
+        total_processed,
+        total_generated,
+        unsupported,
+        insufficient,
+    )
 
     return execution
 

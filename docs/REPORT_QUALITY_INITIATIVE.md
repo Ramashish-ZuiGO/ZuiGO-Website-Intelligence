@@ -598,10 +598,30 @@ prioritized against each other; that's part of the discussion.
 
 ### Tier 4 — infrastructure (enables correctness/traceability everywhere else)
 
-- **M11: Logging & traceability.** Near-total gap in `apps/api/app/services/`
-  — the locked stage-exclusivity guarantee has no log trail. Foundational
-  for the "everything logged and traceable" requirement; likely worth doing
-  early since it makes every other module's future debugging easier.
+- **M11: Logging & traceability — SHIPPED 2026-08-18.** Deliberately
+  right-sized: not blanket instrumentation of all 30 zero-logging files
+  (which would be noise), but real lifecycle events at the decision points
+  whose invisibility already had a proven cost (the M1 worker crash-loop
+  ran silent for 2 days). What now logs, all in the existing
+  `snake_case_event key=%s` convention: **the locked stage-exclusivity
+  guarantee's first-ever log trail** (`stage_claimed` /
+  `stage_skipped_terminal` / `stage_duplicate_delivery_ignored` /
+  `stage_failed` in `worker_app/tasks/real_analysis.py`); workflow
+  lifecycle (`workflow_execution_created`/`_dispatched`/`_cancelled`/
+  `_resume_prepared`); `report_generated` with report id, run id, status,
+  unique-finding/occurrence counts, confidence, template version;
+  `analysis_comparison_generated`; `action_generation_completed` (+ Tier0
+  variant) with all six real counters; `site_diagnostics_completed`;
+  `axe_results_ingested` with row counts; **security tail**:
+  `public_url_rejected` for every SSRF/URL-safety denial (logged at the
+  single exception-constructor choke point; the raw URL deliberately NOT
+  logged since it may embed sensitive query values) and
+  `login_failed`/`login_succeeded` (username yes, password never); worker
+  orchestration entry/exit (`agent_platform.py`, previously zero calls).
+  Live-verified against the real containers: exercised a failed login, a
+  successful login, and a real report regeneration, then confirmed the
+  actual structured events in `docker compose logs api` with real ids and
+  counts. Full suite 1170 passed.
 - **M12: Feedback collection.** Does not exist. New feature, needs its own
   design discussion (what feedback, on what — a report? a finding? an
   action item? general NPS?).

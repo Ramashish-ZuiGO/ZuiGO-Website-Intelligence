@@ -1,3 +1,4 @@
+import logging
 import uuid
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -100,6 +101,9 @@ class AgentRunOutcome:
     status: ExecutionStatus
     attempt: int
     transient_failure: bool
+
+
+logger = logging.getLogger(__name__)
 
 
 def utc_now() -> datetime:
@@ -292,6 +296,13 @@ def create_workflow_execution(
             raise
         return existing, False
     db.refresh(execution)
+    logger.info(
+        "workflow_execution_created execution_id=%s workflow_id=%s project_id=%s attempt=%s",
+        execution.execution_id,
+        execution.workflow_id,
+        execution.project_id,
+        execution.attempt,
+    )
     return execution, True
 
 
@@ -312,6 +323,12 @@ def record_dispatch(db: Session, execution: AgentExecution, task_id: str) -> Non
         )
         execution.structured_output = output
     db.commit()
+    logger.info(
+        "workflow_execution_dispatched execution_id=%s task_id=%s dispatch_count=%s",
+        execution.execution_id,
+        task_id,
+        metadata["dispatch_count"],
+    )
 
 
 REAL_EXECUTION_STALE_AFTER_SECONDS = 900
@@ -1489,6 +1506,11 @@ def cancel_execution(db: Session, execution: AgentExecution) -> AgentExecution:
     )
     db.commit()
     db.refresh(execution)
+    logger.info(
+        "workflow_execution_cancelled execution_id=%s previous_status=%s",
+        execution.execution_id,
+        execution.status,
+    )
     return execution
 
 
@@ -1537,6 +1559,12 @@ def prepare_resume(db: Session, execution: AgentExecution) -> AgentExecution:
     )
     db.commit()
     db.refresh(execution)
+    logger.info(
+        "workflow_execution_resume_prepared execution_id=%s attempt=%s resume_count=%s",
+        execution.execution_id,
+        execution.attempt,
+        metadata["resume_count"],
+    )
     return execution
 
 

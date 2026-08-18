@@ -9,6 +9,7 @@ project's "keep it simple" principle for this first pass.
 """
 
 import hmac
+import logging
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
@@ -21,6 +22,9 @@ from app.errors.exceptions import ApplicationError
 
 JWT_ALGORITHM = "HS256"
 TOKEN_SUBJECT = "admin"
+
+
+logger = logging.getLogger(__name__)
 
 
 def verify_credentials(username: str, password: str) -> bool:

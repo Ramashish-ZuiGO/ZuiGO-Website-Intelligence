@@ -16,8 +16,8 @@ export interface AccessibilityFindingData {
 }
 
 export interface AccessibilityAuditData {
-  violations_count: number;
-  passes_count: number;
+  violation_count: number;
+  pass_count: number;
   incomplete_count: number;
   inapplicable_count: number;
 }
@@ -91,11 +91,11 @@ export function AccessibilityIntelligence({
       <div className="p-4 grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-4">
         <div className="bg-red-50 p-4 rounded-lg border border-red-100">
           <p className="text-sm font-medium text-red-800">Violations</p>
-          <p className="text-2xl font-bold text-red-600 mt-1">{audit.violations_count}</p>
+          <p className="text-2xl font-bold text-red-600 mt-1">{audit.violation_count}</p>
         </div>
         <div className="bg-emerald-50 p-4 rounded-lg border border-emerald-100">
           <p className="text-sm font-medium text-emerald-800">Passes</p>
-          <p className="text-2xl font-bold text-emerald-600 mt-1">{audit.passes_count}</p>
+          <p className="text-2xl font-bold text-emerald-600 mt-1">{audit.pass_count}</p>
         </div>
         <div className="bg-amber-50 p-4 rounded-lg border border-amber-100">
           <p className="text-sm font-medium text-amber-800">Incomplete (Manual Review Required)</p>

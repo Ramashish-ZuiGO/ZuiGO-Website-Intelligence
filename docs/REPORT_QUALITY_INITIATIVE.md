@@ -512,8 +512,19 @@ prioritized against each other; that's part of the discussion.
   never surfaced) with a statement that unmapped findings stay in the
   Complete Findings Register and are never silently dropped. Covered by
   TEMPLATE_VERSION 2.2.0.
-- **M9: `check_invariants` false-100%-complete guard.** Extend beyond
-  accessibility to all score categories.
+- **M9: `check_invariants` false-100%-complete guard — SHIPPED
+  2026-08-18.** Extended the guard's category→section map from
+  accessibility-only to all five score categories (performance →
+  `performance`, seo → `content_seo`, best_practices/technical_quality →
+  `site_diagnostics`), mirroring `_category_has_dedicated_audit`. 6 new
+  tests (each category flagged at score=100 with its section unavailable;
+  not flagged when available or sub-100). **Honest scoping note found
+  during implementation:** `check_invariants` is a test-facing consistency
+  checker — production report generation was never at risk of the false
+  claim, because `_category_score_limitation` in `report_delivery.py`
+  already attaches a "dedicated audit evidence was unavailable" limitation
+  for ALL categories live; the gap was the checker lagging behind the live
+  behavior, not the report lying to customers.
 - **M10: Two more hardcoded-empty Browser UAT fields**
   (`interaction_failures`/`accessibility_differences` — already known;
   `screenshot_artifact_reference` — newly found). Decide: implement real

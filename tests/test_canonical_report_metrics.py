@@ -751,3 +751,81 @@ class TestAccessibility100WithUnavailableEvidence:
             category_evidence=[cat],
         )
         assert any("accessibility" in v.lower() for v in violations)
+
+
+class TestFalse100GuardCoversAllScoreCategories:
+    """M9 (docs/REPORT_QUALITY_INITIATIVE.md): the false-100%-complete
+    guard only covered accessibility; a perfect score claimed on
+    unavailable evidence in performance/seo/best_practices/
+    technical_quality passed unchecked.
+    """
+
+    @staticmethod
+    def _category(category_id: str) -> CategoryEvidence:
+        return CategoryEvidence(
+            category_id=category_id,
+            score=100,
+            included=True,
+            evidence_available=True,
+            dedicated_audit_available=False,
+            exclusion_reason=None,
+            limitation=None,
+        )
+
+    def _violations(self, category_id: str, section_statuses: dict[str, str]) -> list[str]:
+        return check_invariants(
+            discovered=10,
+            eligible=5,
+            scheduled=5,
+            visited=5,
+            successful=5,
+            affected_eligible=3,
+            browser_tested=10,
+            browser_expected=15,
+            section_statuses=section_statuses,
+            category_evidence=[self._category(category_id)],
+        )
+
+    def test_performance_100_with_unavailable_section_is_flagged(self) -> None:
+        violations = self._violations("performance", {"performance": "unavailable"})
+        assert any("performance" in v for v in violations)
+
+    def test_seo_100_with_unavailable_content_seo_section_is_flagged(self) -> None:
+        violations = self._violations("seo", {"content_seo": "unavailable"})
+        assert any("seo" in v for v in violations)
+
+    def test_best_practices_100_with_unavailable_diagnostics_is_flagged(self) -> None:
+        violations = self._violations("best_practices", {"site_diagnostics": "unavailable"})
+        assert any("best_practices" in v for v in violations)
+
+    def test_technical_quality_100_with_unavailable_diagnostics_is_flagged(self) -> None:
+        violations = self._violations("technical_quality", {"site_diagnostics": "unavailable"})
+        assert any("technical_quality" in v for v in violations)
+
+    def test_100_with_available_section_is_not_flagged(self) -> None:
+        violations = self._violations("performance", {"performance": "available"})
+        assert violations == []
+
+    def test_sub_100_score_is_not_flagged(self) -> None:
+        category = CategoryEvidence(
+            category_id="performance",
+            score=95,
+            included=True,
+            evidence_available=True,
+            dedicated_audit_available=False,
+            exclusion_reason=None,
+            limitation=None,
+        )
+        violations = check_invariants(
+            discovered=10,
+            eligible=5,
+            scheduled=5,
+            visited=5,
+            successful=5,
+            affected_eligible=3,
+            browser_tested=10,
+            browser_expected=15,
+            section_statuses={"performance": "unavailable"},
+            category_evidence=[category],
+        )
+        assert violations == []

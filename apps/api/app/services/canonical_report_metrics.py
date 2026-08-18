@@ -214,10 +214,19 @@ def check_invariants(
             f"browser_tested ({browser_tested}) > browser_expected ({browser_expected})"
         )
 
+    # M9: the false-100%-complete guard originally covered only the
+    # accessibility category; a perfect score claimed on unavailable
+    # evidence in any other category passed unchecked. Every score category
+    # now maps to the report section that carries its dedicated evidence
+    # (mirrors _category_has_dedicated_audit in report_delivery.py).
+    section_key_map = {
+        "accessibility": "accessibility",
+        "performance": "performance",
+        "seo": "content_seo",
+        "best_practices": "site_diagnostics",
+        "technical_quality": "site_diagnostics",
+    }
     for cat_ev in category_evidence:
-        section_key_map = {
-            "accessibility": "accessibility",
-        }
         section_key = section_key_map.get(cat_ev.category_id)
         if section_key and section_statuses.get(section_key) == "unavailable":
             if cat_ev.evidence_available and cat_ev.score == 100:

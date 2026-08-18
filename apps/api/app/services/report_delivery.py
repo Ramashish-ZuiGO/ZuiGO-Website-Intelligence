@@ -3053,6 +3053,30 @@ def _build_sections(
                 "actions": final_actions,
                 "ordering": "priority_score_descending_then_stable_id",
                 "priority_formula_version": "1.0.0",
+                # M7: honest provenance for the formula's six inputs --
+                # three are measured per-site, three come from a fixed
+                # per-finding-type catalogue and do not vary with this
+                # site's evidence.
+                "priority_input_provenance": {
+                    "measured_from_this_site": [
+                        "severity",
+                        "affected_page_count",
+                        "confidence_percent",
+                    ],
+                    "catalogue_constants_per_finding_type": [
+                        "estimated_score_impact",
+                        "implementation_effort",
+                        "business_impact",
+                    ],
+                    "statement": (
+                        "Priority scores combine site-measured inputs (severity, "
+                        "affected page count, evidence confidence) with "
+                        "catalogue values maintained per finding type "
+                        "(estimated score impact, implementation effort, "
+                        "business impact). Catalogue values reflect the finding "
+                        "type in general, not a measurement of this website."
+                    ),
+                },
             },
             evidence=action_refs,
             unavailable_reason=(

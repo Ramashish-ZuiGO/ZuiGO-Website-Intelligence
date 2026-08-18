@@ -31,6 +31,7 @@ from app.services.action_generation import generate_actions
 from app.services.priority import (
     PRIORITY_FORMULA_VERSION,
     calculate_priority_score,
+    reprice_for_affected_pages,
 )
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event
@@ -1209,3 +1210,78 @@ class TestActionPlanLifecycleSafety:
         response = client.get(f"/api/v1/websites/{website.id}/action-plan/summary")
         assert response.status_code == 200
         assert response.json()["generation_coverage"] is None
+
+
+class TestPriorityRepricing:
+    """M7 (docs/REPORT_QUALITY_INITIATIVE.md): actions are created page by
+    page with affected_page_count=1; the final reconciliation loop fixed the
+    stored COUNT but never repriced the stored priority score, so an issue
+    spread across many pages kept a single-page score (understated by up to
+    25 points) in the customer-facing ordering.
+    """
+
+    def test_reprice_helper_applies_real_page_count(self) -> None:
+        score_one, components_one = calculate_priority_score(
+            severity="high",
+            affected_page_count=1,
+            estimated_score_impact=50,
+            confidence_percent=100,
+            implementation_effort="medium",
+            business_impact="moderate",
+        )
+        repriced, updated = reprice_for_affected_pages(components_one, 50)
+        score_fifty, components_fifty = calculate_priority_score(
+            severity="high",
+            affected_page_count=50,
+            estimated_score_impact=50,
+            confidence_percent=100,
+            implementation_effort="medium",
+            business_impact="moderate",
+        )
+        assert repriced == score_fifty
+        assert updated["pages_score"] == components_fifty["pages_score"] == 25
+        assert repriced == score_one + 25
+
+    def test_reprice_with_one_page_is_a_noop(self) -> None:
+        score, components = calculate_priority_score(
+            severity="medium",
+            affected_page_count=1,
+            estimated_score_impact=20,
+            confidence_percent=90,
+            implementation_effort="low",
+            business_impact="minor",
+        )
+        repriced, updated = reprice_for_affected_pages(components, 1)
+        assert repriced == score
+        assert updated["pages_score"] == 0
+
+    def test_multi_page_group_priority_reflects_real_spread(self, db_session: Session) -> None:
+        project, website = create_website(db_session)
+        create_discovery_run(db_session, website)
+        exec_id = uuid.uuid4()
+        for index in range(5):
+            page = create_page(db_session, website, f"page{index}")
+            create_page_analysis_run(db_session, page, exec_id)
+
+        gen_exec = generate_actions(db_session, website.id, exec_id)
+        assert gen_exec.status == "completed"
+        groups = list(
+            db_session.query(ActionGroup)
+            .filter(
+                ActionGroup.generation_execution_id == gen_exec.id,
+                ActionGroup.affected_page_count >= 5,
+            )
+            .all()
+        )
+        assert groups, "expected at least one group spanning all 5 pages"
+        for group in groups:
+            # 5 pages puts the formula's pages component at 10, and both
+            # the stored components and the stored score must agree.
+            assert group.priority_components["pages_score"] == 10
+            expected = min(100, max(0, group.priority_components["raw_total"]))
+            assert group.priority_score == expected
+            for action in group.actions:
+                assert action.priority_components["pages_score"] == 10
+                assert action.priority_score == min(
+                    100, max(0, action.priority_components["raw_total"])
+                )

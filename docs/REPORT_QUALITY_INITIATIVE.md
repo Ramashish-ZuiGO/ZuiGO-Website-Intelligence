@@ -475,9 +475,29 @@ prioritized against each other; that's part of the discussion.
   surfaces with 5 affected pages and its manual test procedure, where the
   payload previously had `incomplete_count: 115` and zero items. Covered
   by TEMPLATE_VERSION 2.2.0.
-- **M7: Action Plan priority-scoring transparency.** Static per-finding-code
-  constants driving 2 of 3 priority inputs, undisclosed to the customer;
-  plus the Tier0 hardcoded `affected_page_count=1` timing bug.
+- **M7: Action Plan priority-scoring transparency — SHIPPED 2026-08-18.**
+  Two real fixes. (1) **The timing bug was bigger than the audit said**:
+  BOTH the main path and Tier0 (not just Tier0) create every action with
+  `affected_page_count=1` before the group's final spread is known, and
+  the reconciliation loop fixed the stored COUNT but never repriced the
+  stored SCORE — an issue affecting 50 pages kept a single-page priority,
+  understated by up to 25 points, distorting the customer-facing ordering.
+  Fixed via a new `reprice_for_affected_pages` helper in `priority.py`
+  (applies the SAME locked v1.0.0 formula with the corrected input — only
+  the pages component changes, every other stored component reused
+  verbatim; explicitly NOT a formula change) called from a shared
+  `_reconcile_group_page_counts` used by both generation paths, repricing
+  groups AND their items. (2) **Honest input provenance disclosed**: the
+  `priority_action_plan` section now carries `priority_input_provenance`
+  naming which formula inputs are measured from this site
+  (severity, affected_page_count, confidence_percent) and which are fixed
+  per-finding-type catalogue values (estimated_score_impact,
+  implementation_effort, business_impact) with a plain-language statement
+  that catalogue values are not measurements of this website. Tests: 3 new
+  (repricing equivalence against a fresh full-formula computation, 1-page
+  no-op, and a real 5-page generation proving stored components AND stored
+  scores agree at the real spread). Full suite 1154 passed. Covered by
+  TEMPLATE_VERSION 2.2.0.
 - **M8: Findings without a matching action code.** Decide: extend
   `FINDING_TO_ACTION_MAP` coverage, or explicitly disclose the gap.
 - **M9: `check_invariants` false-100%-complete guard.** Extend beyond

@@ -130,3 +130,27 @@ def calculate_priority_score(
     }
 
     return clamped, components
+
+
+def reprice_for_affected_pages(
+    components: dict[str, Any],
+    affected_page_count: int,
+) -> tuple[int, dict[str, Any]]:
+    """Recompute a stored priority with the real affected-page count.
+
+    Action items are created page-by-page before their group's final page
+    count is known, so the initial score uses affected_page_count=1. This
+    applies the SAME v1.0.0 formula with the corrected input -- only the
+    pages component changes; every other stored component is reused
+    verbatim. Not a formula change.
+    """
+    new_pages_score = _compute_affected_pages_score(affected_page_count)
+    updated = dict(components)
+    raw = (
+        int(components.get("raw_total", 0))
+        - int(components.get("pages_score", 0))
+        + new_pages_score
+    )
+    updated["pages_score"] = new_pages_score
+    updated["raw_total"] = raw
+    return max(0, min(100, raw)), updated

@@ -26,7 +26,7 @@ from app.models.browser_uat_tier0 import (
 )
 from app.models.page_analysis_run import PageAnalysisRun
 from app.models.website_page import WebsitePage
-from app.services.priority import calculate_priority_score
+from app.services.priority import calculate_priority_score, reprice_for_affected_pages
 
 PAGE_ANALYSIS_SOURCE = "page_analysis"
 TIER0_SOURCE = "browser_uat_tier0"
@@ -569,6 +569,31 @@ def _classify_confidence(confidence_percent: int) -> str:
     return "unavailable"
 
 
+def _reconcile_group_page_counts(groups_cache: dict[str, "ActionGroup"]) -> None:
+    """Reconcile each group's real page count AND reprice its priority.
+
+    M7 (docs/REPORT_QUALITY_INITIATIVE.md): actions are created page by page
+    with affected_page_count=1, before the group's final spread is known.
+    The count was already reconciled here, but the stored priority score
+    never was -- an issue affecting 50 pages kept the score of a
+    single-page issue, understating it by up to 25 points and distorting
+    the customer-facing priority ordering. Reprice group and items with the
+    same v1.0.0 formula using the corrected count.
+    """
+    for group in groups_cache.values():
+        real_count = len(group.actions)
+        group.affected_page_count = real_count
+        group.priority_score, group.priority_components = reprice_for_affected_pages(
+            group.priority_components, real_count
+        )
+        for action in group.actions:
+            action.priority_score, action.priority_components = reprice_for_affected_pages(
+                action.priority_components, real_count
+            )
+        statuses = {action.status for action in group.actions}
+        group.status = statuses.pop() if len(statuses) == 1 else "mixed"
+
+
 def generate_actions(
     db: Session,
     website_id: uuid.UUID,
@@ -680,13 +705,7 @@ def generate_actions(
             )
             total_generated += 1
 
-    for group in groups_cache.values():
-        group.affected_page_count = len(group.actions)
-        statuses = {a.status for a in group.actions}
-        if len(statuses) == 1:
-            group.status = statuses.pop()
-        else:
-            group.status = "mixed"
+    _reconcile_group_page_counts(groups_cache)
 
     execution.status = "completed"
     execution.completed_at = datetime.now(UTC)
@@ -1155,10 +1174,7 @@ def generate_tier0_actions(
             )
             total_generated += 1
 
-    for group in groups_cache.values():
-        group.affected_page_count = len(group.actions)
-        statuses = {action.status for action in group.actions}
-        group.status = statuses.pop() if len(statuses) == 1 else "mixed"
+    _reconcile_group_page_counts(groups_cache)
 
     execution.status = "completed"
     execution.completed_at = datetime.now(UTC)

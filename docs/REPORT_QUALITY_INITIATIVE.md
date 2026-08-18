@@ -566,9 +566,21 @@ prioritized against each other; that's part of the discussion.
 - **M12: Feedback collection.** Does not exist. New feature, needs its own
   design discussion (what feedback, on what — a report? a finding? an
   action item? general NPS?).
-- **M13: Limitation-ID stability & dual-representation cleanup.** The
-  `hash()`-based fallback ID and the two parallel limitation
-  representations (`SemanticLimitation` vs. `limitation_reasons`).
+- **M13: Limitation-ID stability & dual-representation cleanup — SHIPPED
+  2026-08-18.** (1) `_assign_limitation_id`'s fallback used Python's
+  `hash()`, which is salted per process — the SAME unmatched limitation
+  got a DIFFERENT opaque id on every report generation. Replaced with a
+  stable sha256 content digest (`other_<8 hex>`); no compatibility
+  concern since the old ids were never stable to begin with. (2)
+  `SemanticLimitation` gained an optional `kind` field carried through
+  `deduplicate_limitations` when the caller supplies it, plus a docstring
+  stating explicitly that the authoritative taxonomy lives in the
+  completion block's `limitation_reasons` (from `_completion_semantics`)
+  — so a renderer consuming the deduped list can no longer silently lose
+  the required/optional taxonomy, and the relationship between the two
+  representations is now documented at the type itself rather than being
+  tribal knowledge. 4 new tests (digest stability, distinctness, semantic
+  patterns unaffected, kind passthrough).
 - **M14: `MERGE_ACROSS_PAGES_FINDING_CODES` coverage audit.** Confirm
   whether any real finding code is currently mis-splitting across pages.
 - **M18: HTML/W3C Nu Checker integration.** From the historical doc — likely

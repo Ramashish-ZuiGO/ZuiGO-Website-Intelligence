@@ -4,6 +4,7 @@ import uuid
 
 from app.services.canonical_report_metrics import (
     CategoryEvidence,
+    _assign_limitation_id,
     build_canonical_metrics,
     check_invariants,
     compute_category_evidence,
@@ -829,3 +830,45 @@ class TestFalse100GuardCoversAllScoreCategories:
             category_evidence=[category],
         )
         assert violations == []
+
+
+class TestLimitationIdStability:
+    """M13 (docs/REPORT_QUALITY_INITIATIVE.md): the unmatched-message
+    fallback used Python's per-process-salted hash(), so the SAME
+    limitation got a DIFFERENT opaque id on every report generation.
+    """
+
+    def test_fallback_id_is_a_stable_content_digest(self) -> None:
+        import hashlib
+
+        message = "A wholly novel limitation matching no known pattern."
+        expected = f"other_{hashlib.sha256(message.encode('utf-8')).hexdigest()[:8]}"
+        assert _assign_limitation_id(message) == expected
+        assert _assign_limitation_id(message) == expected
+
+    def test_different_messages_get_different_fallback_ids(self) -> None:
+        first = _assign_limitation_id("Novel limitation alpha zzz.")
+        second = _assign_limitation_id("Novel limitation beta zzz.")
+        assert first != second
+        assert first.startswith("other_") and second.startswith("other_")
+
+    def test_known_patterns_still_get_semantic_ids(self) -> None:
+        assert (
+            _assign_limitation_id("Website discovery was incomplete this run.")
+            == "discovery_incomplete"
+        )
+
+    def test_kind_is_carried_through_deduplication(self) -> None:
+        result = deduplicate_limitations(
+            [
+                {
+                    "message": "Novel limitation with a taxonomy.",
+                    "source": "completion",
+                    "kind": "optional_infrastructure",
+                },
+                {"message": "Novel limitation without one.", "source": "coverage"},
+            ]
+        )
+        by_message = {item.message: item for item in result}
+        assert by_message["Novel limitation with a taxonomy."].kind == "optional_infrastructure"
+        assert by_message["Novel limitation without one."].kind is None

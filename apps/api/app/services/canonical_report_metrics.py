@@ -6,6 +6,7 @@ canonical values rather than recomputing metrics independently.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from typing import Any
 
@@ -60,9 +61,21 @@ class CanonicalReportMetrics:
 
 @dataclass(frozen=True)
 class SemanticLimitation:
+    """Deduplicated limitation for renderer consumption.
+
+    M13: this is a PRESENTATION-side dedup of free-text limitation
+    strings; the authoritative machine-readable taxonomy
+    (required/optional/optional_infrastructure/not_applicable) lives in
+    the completion block's limitation_reasons built by
+    _completion_semantics. ``kind`` is carried through here when the
+    caller supplies it so the taxonomy is never silently lost by
+    consuming this list instead.
+    """
+
     limitation_id: str
     message: str
     source: str
+    kind: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -91,7 +104,12 @@ def _assign_limitation_id(message: str) -> str:
     for lid, pattern in _LIMITATION_PATTERNS.items():
         if pattern.casefold() in lower:
             return lid
-    return f"other_{hash(message) & 0xFFFF:04x}"
+    # M13: Python's hash() is salted per process (PYTHONHASHSEED), so the
+    # previous hash()-based fallback gave the SAME unmatched limitation a
+    # DIFFERENT opaque id on every report generation. A content digest is
+    # stable across runs, processes, and machines.
+    digest = hashlib.sha256(message.encode("utf-8")).hexdigest()[:8]
+    return f"other_{digest}"
 
 
 def deduplicate_limitations(
@@ -108,6 +126,7 @@ def deduplicate_limitations(
                 limitation_id=lid,
                 message=message,
                 source=item.get("source", "unknown"),
+                kind=item.get("kind"),
             )
     return list(seen_ids.values())
 

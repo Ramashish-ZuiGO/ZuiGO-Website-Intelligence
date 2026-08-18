@@ -572,3 +572,44 @@ def test_uat_model_supports_future_real_branded_evidence_without_schema_change()
     assert completion["status"] == "complete"
     assert completion["verified_browser_count"] == 3
     assert completion["unverified_browsers"] == []
+
+
+def test_uncollected_signals_are_omitted_and_disclosed_not_faked_empty() -> None:
+    """M10 (docs/REPORT_QUALITY_INITIATIVE.md): interaction_failures,
+    accessibility_differences, and screenshot_artifact_reference were
+    hardcoded empty in every real engine result -- an empty list reads as
+    "checked, nothing found" when no check ever ran. Signals the harness
+    does not collect must be absent from per-page results and explicitly
+    disclosed at the payload level.
+    """
+
+    def runner(engine, page, viewport, _profile):
+        del engine, page, viewport
+        return {
+            "state": "tested",
+            "navigation_success": True,
+            "render_success": True,
+            "critical_element_available": True,
+            "console_errors": [],
+            "javascript_errors": [],
+            "failed_resources": [],
+            "layout_overflow": False,
+            "viewport_problems": [],
+            "duration_ms": 100,
+        }
+
+    result = run_compatibility_analysis(_pages(1), runner=runner)
+
+    disclosed = {item["signal"] for item in result["signals_not_collected"]}
+    assert disclosed == {
+        "interaction_failures",
+        "accessibility_differences",
+        "screenshot_artifact_reference",
+    }
+    for entry in result["signals_not_collected"]:
+        assert entry["statement"]
+
+    # A result with no interaction/accessibility signal keys must still
+    # classify as compatible -- absence means not-checked, not failure.
+    row = result["matrix"][0]
+    assert row["result"] == "compatible"

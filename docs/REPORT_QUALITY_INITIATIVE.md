@@ -525,10 +525,26 @@ prioritized against each other; that's part of the discussion.
   already attaches a "dedicated audit evidence was unavailable" limitation
   for ALL categories live; the gap was the checker lagging behind the live
   behavior, not the report lying to customers.
-- **M10: Two more hardcoded-empty Browser UAT fields**
-  (`interaction_failures`/`accessibility_differences` — already known;
-  `screenshot_artifact_reference` — newly found). Decide: implement real
-  detection, or formally document as a known limitation like the iPad gap.
+- **M10: Hardcoded-empty Browser UAT fields — SHIPPED 2026-08-18
+  (documented-limitation path chosen).** `interaction_failures: []`,
+  `accessibility_differences: []`, `screenshot_artifact_reference: None`
+  were hardcoded into every real engine-test result — and an empty list
+  reads as "checked, nothing found" when no check ever ran, a quiet
+  violation of the no-fabricated-evidence discipline. Decision: real
+  cross-engine interaction testing, accessibility-tree diffing, and
+  screenshot capture/storage are each substantial new capabilities (own
+  design questions on scope/baseline/storage), not proportionate to build
+  inside this cleanup — chose the audit's own alternative of formal
+  disclosure. What shipped: the three keys are REMOVED from real per-page
+  results (absence = not-checked), and a new machine-readable
+  `signals_not_collected` block in the compatibility payload names each
+  signal with a plain statement of what is not exercised. The classifier
+  reads these signals defensively (`.get`), so it still honours real
+  values if a future harness provides them — capability retained, tested
+  by the existing stub-runner tests which fabricate values deliberately.
+  The demo/presentation runner keeps its synthetic values (clearly demo
+  data, exercises the classifier). New test pins: all three signals
+  disclosed, absence classifies as compatible (not-checked ≠ failure).
 - **M16: Performance live-endpoint raw-label/epoch-timestamp audit.** From
   the historical-doc cross-check (§4.5) — the report snapshot has no lab
   metrics, so this data comes from a separate live endpoint

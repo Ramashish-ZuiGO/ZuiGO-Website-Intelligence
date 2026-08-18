@@ -543,6 +543,32 @@ def run_compatibility_analysis(
             "eligible_page_count": len(matrix),
             "compatibility_percentage": overall_percentage,
         },
+        # M10: signals the current engine harness does NOT collect. Their
+        # absence from per-page results means "not checked", never
+        # "checked and clean".
+        "signals_not_collected": [
+            {
+                "signal": "interaction_failures",
+                "statement": (
+                    "Cross-engine interactive behaviour (clicking, form "
+                    "submission) is not exercised by the current harness."
+                ),
+            },
+            {
+                "signal": "accessibility_differences",
+                "statement": (
+                    "Cross-engine accessibility-tree differences are not "
+                    "compared by the current harness; accessibility evidence "
+                    "comes from the dedicated axe-core audits instead."
+                ),
+            },
+            {
+                "signal": "screenshot_artifact_reference",
+                "statement": (
+                    "Per-engine screenshots are not captured or stored by the current harness."
+                ),
+            },
+        ],
         "limitations": [
             ("Results reflect Playwright engine-level evidence, not branded browser verification."),
             (
@@ -898,10 +924,15 @@ def _run_playwright_observation(
                 "viewport_problems": list(responsive_result.get("viewport_problems") or []),
                 "nav_visible_item_count": responsive_result.get("nav_visible_item_count"),
                 "has_navigation_toggle": responsive_result.get("has_navigation_toggle"),
-                "interaction_failures": [],
-                "accessibility_differences": [],
+                # M10: interaction_failures/accessibility_differences/
+                # screenshot_artifact_reference were hardcoded empty here,
+                # which read as "checked, nothing found" when no check ever
+                # ran. Signals this harness does not collect are omitted
+                # entirely and disclosed in the payload-level
+                # signals_not_collected list; the classifier reads them
+                # defensively so it still honours them if a future harness
+                # provides real values.
                 "duration_ms": round((time.monotonic() - started) * 1000, 2),
-                "screenshot_artifact_reference": None,
                 "validated_network_target_count": len(validated_targets),
             }
         finally:

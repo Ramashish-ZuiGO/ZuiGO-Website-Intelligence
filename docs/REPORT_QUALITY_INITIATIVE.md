@@ -545,12 +545,33 @@ prioritized against each other; that's part of the discussion.
   The demo/presentation runner keeps its synthetic values (clearly demo
   data, exercises the classifier). New test pins: all three signals
   disclosed, absence classifies as compatible (not-checked ≠ failure).
-- **M16: Performance live-endpoint raw-label/epoch-timestamp audit.** From
-  the historical-doc cross-check (§4.5) — the report snapshot has no lab
-  metrics, so this data comes from a separate live endpoint
-  (`/analysis-runs/{id}/performance`) not yet audited. Confirm whether raw
-  internal keys (`LAB_FCP` etc.) and epoch timestamps still reach the
-  customer, and whether Field/Lab/Timing data is duplicated across tabs.
+- **M16: Performance live-endpoint raw-label/epoch-timestamp audit —
+  SHIPPED 2026-08-18. The historical doc's complaint reproduced exactly.**
+  Verified against the real endpoint and real DB: 21 navigation-timing
+  metric ids (`connectStart`, `domainLookupStart`, ...) returned raw
+  absolute epoch-millisecond values (e.g. `1786965360316.0`) with null
+  display values, and 5 Lighthouse ids (`lab_fcp` etc.) returned unrounded
+  milliseconds — all rendered verbatim by
+  `PerformanceIntelligence.tsx` (`{s.metric_id}` uppercase-styled →
+  "LAB_FCP", `{s.raw_value}` raw). **Two additional real bugs found during
+  the audit:** (1) the `/websites/{id}/performance/comparison` endpoint's
+  `snapshots` array returned EVERY row ever recorded for the website
+  across all executions — stale runs mixed indistinguishably with current
+  evidence; fixed to return only each evidence type's latest execution
+  rows. (2) Post-M15, the lab tab dumped every page's metrics into one
+  unattributed grid (50+ identically-labeled tiles). Frontend rewrite
+  (first module under the new direct-frontend-ownership decision, not an
+  Antigravity handoff): human metric labels ("First Contentful Paint",
+  "DNS lookup start"), formatted values (`3.89 s`, CLS `0.038`),
+  navigation-relative timing offsets (`+15 ms`, computed against each
+  page/form-factor group's own `navigationStart`; zero-valued events shown
+  as "Not recorded", never as a time), per-page grouping with URL paths as
+  headings, per-form-factor labels. Lab tab is now the default (real data
+  first; CrUX field tab keeps its honest empty state pending M19).
+  Live-verified in the real browser against the real dev stack: logged in,
+  loaded the real fluidcontrols project, confirmed via DOM inspection —
+  labels, formatted values, and relative offsets all rendering; frontend
+  lint/typecheck/build all clean.
 - **M17: Pages tab UI functionality audit.** From §4.5 — confirm whether
   "View finding detail" buttons are genuinely non-functional and whether
   raw UUIDs/unreadable long-decimal percentages still appear as primary

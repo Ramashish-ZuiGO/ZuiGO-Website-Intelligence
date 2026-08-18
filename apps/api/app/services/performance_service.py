@@ -311,6 +311,24 @@ def compare_performance(db: Session, website_id: uuid.UUID) -> dict:
     has_disagreement = len(disagreements) > 0
     explanation = " ".join(disagreements) if has_disagreement else "Field and Lab conditions align."
 
+    # M16: "snapshots" previously returned EVERY row ever recorded for the
+    # website across all executions, so the frontend mixed stale runs'
+    # evidence indistinguishably with the current run's. Each evidence type
+    # now contributes only its own latest execution's rows.
+    diagnostic_execution_id = next(
+        (s.execution_id for s in snapshots if s.evidence_type == "diagnostic"), None
+    )
+    latest_diagnostic = (
+        [s for s in snapshots if s.execution_id == diagnostic_execution_id]
+        if diagnostic_execution_id
+        else []
+    )
+    current_snapshots = [
+        *latest_field,
+        *latest_lab,
+        *[s for s in latest_diagnostic if s.evidence_type == "diagnostic"],
+    ]
+
     return {
         "disagreement": has_disagreement,
         "explanation": explanation,
@@ -320,5 +338,7 @@ def compare_performance(db: Session, website_id: uuid.UUID) -> dict:
         "lab_evidence": [
             {c.name: getattr(s, c.name) for c in s.__table__.columns} for s in latest_lab
         ],
-        "snapshots": [{c.name: getattr(s, c.name) for c in s.__table__.columns} for s in snapshots],
+        "snapshots": [
+            {c.name: getattr(s, c.name) for c in s.__table__.columns} for s in current_snapshots
+        ],
     }

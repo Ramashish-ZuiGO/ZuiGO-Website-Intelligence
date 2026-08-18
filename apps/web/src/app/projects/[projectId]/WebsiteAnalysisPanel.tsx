@@ -372,7 +372,7 @@ export function WebsiteAnalysisPanel({
       <SectionErrorBoundary sectionName="Performance Intelligence">
         <div className="mt-8">
           <PerformanceIntelligence
-            data={performanceData.snapshots as unknown as { id: string; metric_id: string; evidence_type: string; raw_value: number }[]}
+            data={performanceData.snapshots as unknown as { id: string; metric_id: string; evidence_type: string; raw_value: number; url_or_origin?: string; form_factor?: string; evidence_source?: string }[]}
             disagreement={performanceData.disagreement}
             explanation={performanceData.explanation}
           />

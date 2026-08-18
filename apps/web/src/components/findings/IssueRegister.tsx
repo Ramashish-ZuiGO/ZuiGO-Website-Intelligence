@@ -120,7 +120,7 @@ export function IssueRegister({ findings }: IssueRegisterProps) {
     {
       key: "actions",
       header: "",
-      render: (row) => (
+      render: () => (
         <div className="flex justify-end text-z-ink-muted transition-colors opacity-50 hover:opacity-100">
           <span className="sr-only">View details</span>
           <ChevronRight className="h-5 w-5" />

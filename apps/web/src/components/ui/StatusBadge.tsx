@@ -11,6 +11,8 @@ const STATUS_CONFIG: Record<string, { color: string, icon: React.ElementType }> 
   present: { color: "success", icon: CheckCircle2 },
   detected: { color: "success", icon: CheckCircle2 },
   current: { color: "success", icon: CheckCircle2 },
+  resolved: { color: "success", icon: CheckCircle2 },
+  active: { color: "success", icon: CheckCircle2 },
 
   partial: { color: "warning", icon: AlertTriangle },
   incomplete: { color: "warning", icon: AlertTriangle },
@@ -19,15 +21,20 @@ const STATUS_CONFIG: Record<string, { color: string, icon: React.ElementType }> 
   high: { color: "warning", icon: AlertTriangle },
   medium: { color: "warning", icon: AlertTriangle },
   inconclusive: { color: "warning", icon: AlertTriangle },
+  in_progress: { color: "warning", icon: AlertTriangle },
+  reopened: { color: "warning", icon: AlertTriangle },
 
   failed: { color: "danger", icon: XCircle },
   missing: { color: "danger", icon: XCircle },
   weak: { color: "danger", icon: XCircle },
   high_observable_risk: { color: "danger", icon: XCircle },
   critical: { color: "danger", icon: XCircle },
+  unlinked: { color: "danger", icon: XCircle },
 
   low: { color: "info", icon: Info },
   informational: { color: "info", icon: Info },
+  info: { color: "info", icon: Info },
+  open: { color: "info", icon: Info },
   running: { color: "info", icon: Loader2 },
 
   unavailable: { color: "neutral", icon: Minus },
@@ -35,6 +42,11 @@ const STATUS_CONFIG: Record<string, { color: string, icon: React.ElementType }> 
   queued: { color: "neutral", icon: Minus },
   cancelled: { color: "neutral", icon: Minus },
   not_detected: { color: "neutral", icon: Minus },
+  acknowledged: { color: "neutral", icon: Minus },
+  ignored: { color: "neutral", icon: Minus },
+  mixed: { color: "neutral", icon: Minus },
+  skipped: { color: "neutral", icon: Minus },
+  inactive: { color: "neutral", icon: Minus },
 };
 
 function formatLabel(status: string): string {

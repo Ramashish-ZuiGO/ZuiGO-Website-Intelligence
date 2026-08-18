@@ -15,6 +15,7 @@ import { MetricInfoButton } from "@/components/metrics/MetricInfoButton";
 import { ScoreValue } from "@/components/metrics/ScoreValue";
 import { PercentageValue } from "@/components/metrics/PercentageValue";
 import { SiteDiagnosticsReference } from "@/components/diagnostics/SiteDiagnosticsPanel";
+import { StatusBadge } from "@/components/ui/StatusBadge";
 
 interface PageAnalysisPanelProps {
   websiteId: string;
@@ -30,29 +31,6 @@ function AnalysisLevelBadge({ level }: { level: number }) {
       }`}
     >
       L{level}
-    </span>
-  );
-}
-
-function StatusBadge({ status }: { status: string }) {
-  const colors: Record<string, string> = {
-    completed: "bg-emerald-100 text-emerald-800",
-    partial: "bg-amber-100 text-amber-800",
-    failed: "bg-red-100 text-red-800",
-    skipped: "bg-slate-100 text-slate-600",
-    pending: "bg-slate-100 text-slate-400",
-    running: "bg-blue-100 text-blue-800",
-    // Severity values, kept distinct from the workflow-status values above --
-    // a recommendation's severity is not a process outcome, and must never
-    // render as "completed"/"failed" (M12 audit finding).
-    critical: "bg-red-100 text-red-800",
-    high: "bg-orange-100 text-orange-800",
-    medium: "bg-amber-100 text-amber-800",
-    low: "bg-blue-100 text-blue-800",
-  };
-  return (
-    <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-bold ${colors[status] ?? "bg-slate-100 text-slate-600"}`}>
-      {status}
     </span>
   );
 }

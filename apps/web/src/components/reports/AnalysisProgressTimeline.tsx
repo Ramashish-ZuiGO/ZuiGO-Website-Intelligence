@@ -5,6 +5,8 @@ import type { WorkflowProgress } from "@/components/reports/types";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { ConceptInfoButton } from "@/components/metrics/ConceptInfoButton";
 import { MetricStat } from "@/components/ui/MetricStat";
+import { ENGINE_LABELS } from "@/lib/browser-engines";
+import { AGENT_LABELS } from "@/lib/agent-labels";
 import { AlertCircle, AlertTriangle, RotateCcw, XCircle, LayoutDashboard, Search, Eye, Activity, ShieldCheck, CheckSquare, Zap, FileText, PauseCircle, Loader2 } from "lucide-react";
 
 // Agent to icon mapping for ZuiGO styling
@@ -17,25 +19,6 @@ const AGENT_ICONS: Record<string, React.ElementType> = {
   evidence_validation_agent: ShieldCheck,
   remediation_agent: CheckSquare,
   report_agent: FileText,
-};
-
-const AGENT_LABELS: Record<string, string> = {
-  discovery_agent: "Discovery Agent",
-  performance_agent: "Performance Agent",
-  accessibility_agent: "Accessibility Agent",
-  site_diagnostics_agent: "Site Diagnostics Agent",
-  repository_intelligence_agent: "Repository Intelligence Agent",
-  evidence_validation_agent: "Evidence Validation Agent",
-  remediation_agent: "Remediation Agent",
-  report_agent: "Report Agent",
-};
-
-// Internal engine diagnostics only. These are never branded browsers:
-// Chromium is not Chrome/Edge verification and WebKit is not Safari.
-const ENGINE_LABELS: Record<string, string> = {
-  chromium: "Chromium Engine",
-  firefox: "Firefox Engine",
-  webkit: "WebKit Engine",
 };
 
 // Customer-readable names for the primary running view. Falls back to the

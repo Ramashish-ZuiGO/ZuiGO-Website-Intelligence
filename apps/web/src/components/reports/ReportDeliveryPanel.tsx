@@ -17,6 +17,8 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { MetricStat } from "@/components/ui/MetricStat";
 import { AnalysisProgressTimeline } from "@/components/reports/AnalysisProgressTimeline";
 import { QUALITY_STYLES, type ReportQuality } from "@/lib/report-quality";
+import { ENGINE_LABELS } from "@/lib/browser-engines";
+import { AGENT_LABELS } from "@/lib/agent-labels";
 
 const PAGE_SIZE = 5;
 const FINDINGS_PAGE_SIZE = 20;
@@ -28,22 +30,6 @@ const TERMINAL_STATUSES = [
   "cancelled",
   "unavailable",
 ];
-const AGENT_LABELS: Record<string, string> = {
-  discovery_agent: "Discovery Agent",
-  performance_agent: "Performance Agent",
-  accessibility_agent: "Accessibility Agent",
-  site_diagnostics_agent: "Site Diagnostics Agent",
-  repository_intelligence_agent: "Repository Intelligence Agent",
-  evidence_validation_agent: "Evidence Validation Agent",
-  remediation_agent: "Remediation Agent",
-  report_agent: "Report Agent",
-};
-const ENGINE_LABELS: Record<string, string> = {
-  chromium: "Chromium engine",
-  firefox: "Firefox engine",
-  webkit: "WebKit engine (internal signal only)",
-};
-
 interface ReportDeliveryPanelProps {
   projectId?: string;
   websiteId: string;
@@ -167,21 +153,6 @@ function findingsFromReport(report: DeliveredReport): DetailedReportFinding[] {
   return [...findings.values()];
 }
 
-function TruncatedUrl({ url, maxLen = 60 }: { url: string; maxLen?: number }) {
-  const isLink = url.startsWith("http://") || url.startsWith("https://");
-  const display = url.length > maxLen ? url.slice(0, maxLen - 1) + "…" : url;
-  const inner = isLink ? (
-    <a href={url} target="_blank" rel="noopener noreferrer" className="break-all text-blue-600 hover:underline" title={url}>
-      {display}
-    </a>
-  ) : (
-    <span className="break-all" title={url.length > maxLen ? url : undefined}>
-      {display}
-    </span>
-  );
-  return inner;
-}
-
 function FindingDetail({ finding }: { finding: DetailedReportFinding }) {
   const fields = [
     [
@@ -280,10 +251,10 @@ function FindingDetail({ finding }: { finding: DetailedReportFinding }) {
             {finding.exact_occurrences.map((occurrence, index) => (
               <tr key={`${finding.finding_id}-${occurrence.normalized_url}-${index}`}>
                 <td className="border p-2">
-                  <TruncatedUrl url={String(occurrence.normalized_url)} />
+                  <UrlCell url={String(occurrence.normalized_url)} />
                   {occurrence.final_url !== occurrence.normalized_url && (
                     <span className="mt-1 block text-xs text-slate-500">
-                      → <TruncatedUrl url={String(occurrence.final_url)} maxLen={50} />
+                      → <UrlCell url={String(occurrence.final_url)} maxDisplay={50} />
                     </span>
                   )}
                 </td>
@@ -887,6 +858,8 @@ function ReportViewer({ report }: { report: DeliveredReport }) {
             <section className="rounded-xl border border-slate-200 p-5" id="browser-coverage">
               <h4 className="text-lg font-bold text-slate-900">Browser Compatibility</h4>
               <p className="mt-1 text-xs text-slate-500">
+                Engine-level internal evidence, not branded browser verification:
+                Chromium is not Chrome or Edge, and WebKit is not Safari.
                 Unavailable engines are not represented as passed or failed.
               </p>
               {browserCoverage.length > 0 ? (

@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useMemo, useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { apiRequest } from "@/lib/api";
 import type { ExtractedContent } from "@/lib/types";
+import { EmptyState } from "@/components/ui/EmptyState";
 
 type Tab =
   | "overview"
@@ -40,14 +41,6 @@ function StatCard({ label, value }: { label: string; value: number }) {
 
 function SectionHeading({ children }: { children: React.ReactNode }) {
   return <h3 className="text-base font-semibold text-slate-900 mb-3">{children}</h3>;
-}
-
-function EmptyState({ message }: { message: string }) {
-  return (
-    <div className="flex items-center justify-center py-12 text-slate-400 text-sm">
-      {message}
-    </div>
-  );
 }
 
 function normalizeContent(raw: ExtractedContent): ExtractedContent {
@@ -242,7 +235,7 @@ function OverviewTab({ content }: { content: ExtractedContent }) {
           </div>
         </div>
       ) : (
-        <EmptyState message="No content paragraphs extracted" />
+        <EmptyState title="No content paragraphs extracted" />
       )}
 
       {content.headings.length > 0 && (
@@ -281,7 +274,7 @@ function OverviewTab({ content }: { content: ExtractedContent }) {
 }
 
 function SectionsTab({ content }: { content: ExtractedContent }) {
-  if (content.sections.length === 0) return <EmptyState message="No sections extracted" />;
+  if (content.sections.length === 0) return <EmptyState title="No sections extracted" />;
   return (
     <div className="p-5">
       <div className="space-y-1">
@@ -301,7 +294,7 @@ function SectionsTab({ content }: { content: ExtractedContent }) {
 }
 
 function TablesTab({ content }: { content: ExtractedContent }) {
-  if (content.tables.length === 0) return <EmptyState message="No tables found on this page" />;
+  if (content.tables.length === 0) return <EmptyState title="No tables found on this page" />;
   return (
     <div className="p-5 space-y-6">
       {content.tables.map((table, ti) => (
@@ -347,7 +340,7 @@ function TablesTab({ content }: { content: ExtractedContent }) {
 }
 
 function FAQsTab({ content }: { content: ExtractedContent }) {
-  if (content.faqs.length === 0) return <EmptyState message="No FAQs found on this page" />;
+  if (content.faqs.length === 0) return <EmptyState title="No FAQs found on this page" />;
   return (
     <div className="p-5 space-y-3">
       {content.faqs.map((faq, i) => (
@@ -366,7 +359,7 @@ function FAQsTab({ content }: { content: ExtractedContent }) {
 }
 
 function ImagesTab({ content }: { content: ExtractedContent }) {
-  if (content.images.length === 0) return <EmptyState message="No meaningful images found" />;
+  if (content.images.length === 0) return <EmptyState title="No meaningful images found" />;
   return (
     <div className="p-5">
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -396,7 +389,7 @@ function ImagesTab({ content }: { content: ExtractedContent }) {
 }
 
 function LinksTab({ content }: { content: ExtractedContent }) {
-  if (content.important_links.length === 0) return <EmptyState message="No important links found" />;
+  if (content.important_links.length === 0) return <EmptyState title="No important links found" />;
   const internal = content.important_links.filter((l) => l.is_internal);
   const external = content.important_links.filter((l) => !l.is_internal);
   return (
@@ -432,7 +425,7 @@ function LinksTab({ content }: { content: ExtractedContent }) {
 }
 
 function DownloadsTab({ content }: { content: ExtractedContent }) {
-  if (content.downloadable_files.length === 0) return <EmptyState message="No downloadable files found" />;
+  if (content.downloadable_files.length === 0) return <EmptyState title="No downloadable files found" />;
   return (
     <div className="p-5">
       <div className="space-y-2">
@@ -455,7 +448,7 @@ function DownloadsTab({ content }: { content: ExtractedContent }) {
 function StructuredDataTab({ content }: { content: ExtractedContent }) {
   const { structured_data } = content;
   const hasData = Object.keys(structured_data).length > 0;
-  if (!hasData) return <EmptyState message="No structured data (JSON-LD, Open Graph, Microdata) found" />;
+  if (!hasData) return <EmptyState title="No structured data (JSON-LD, Open Graph, Microdata) found" />;
   return (
     <div className="p-5 space-y-4">
       {Object.entries(structured_data).map(([key, value]) => (
@@ -471,7 +464,7 @@ function StructuredDataTab({ content }: { content: ExtractedContent }) {
 }
 
 function RawTextTab({ content }: { content: ExtractedContent }) {
-  if (!content.main_content) return <EmptyState message="No text content extracted" />;
+  if (!content.main_content) return <EmptyState title="No text content extracted" />;
   return (
     <div className="p-5">
       <div className="bg-slate-50 border border-slate-200 rounded-lg p-5 max-h-[600px] overflow-y-auto">

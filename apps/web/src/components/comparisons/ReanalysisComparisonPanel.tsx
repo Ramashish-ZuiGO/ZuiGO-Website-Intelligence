@@ -4,12 +4,7 @@ import { useEffect, useState } from "react";
 
 import type { ReanalysisSettings } from "@/components/comparisons/types";
 import { analysisComparisonApi } from "@/lib/analysis-comparison-api";
-
-const ENGINE_LABELS = {
-  chromium: "Chromium",
-  firefox: "Firefox",
-  webkit: "WebKit",
-} as const;
+import { ENGINE_SHORT_LABELS } from "@/lib/browser-engines";
 
 interface ReanalysisComparisonPanelProps {
   analysisRunId: string;
@@ -42,7 +37,7 @@ export function ReanalysisComparisonPanel({
       });
   }, [analysisRunId, open, settings]);
 
-  function toggleEngine(engine: keyof typeof ENGINE_LABELS) {
+  function toggleEngine(engine: keyof typeof ENGINE_SHORT_LABELS) {
     setEngines((current) =>
       current.includes(engine)
         ? current.filter((item) => item !== engine)
@@ -128,11 +123,11 @@ export function ReanalysisComparisonPanel({
               <fieldset>
                 <legend className="font-semibold">Browser engines</legend>
                 <div className="mt-2 flex flex-wrap gap-4">
-                  {Object.entries(ENGINE_LABELS).map(([engine, label]) => (
+                  {Object.entries(ENGINE_SHORT_LABELS).map(([engine, label]) => (
                     <label className="flex items-center gap-2" key={engine}>
                       <input
-                        checked={engines.includes(engine as keyof typeof ENGINE_LABELS)}
-                        onChange={() => toggleEngine(engine as keyof typeof ENGINE_LABELS)}
+                        checked={engines.includes(engine as keyof typeof ENGINE_SHORT_LABELS)}
+                        onChange={() => toggleEngine(engine as keyof typeof ENGINE_SHORT_LABELS)}
                         type="checkbox"
                       />
                       {label}

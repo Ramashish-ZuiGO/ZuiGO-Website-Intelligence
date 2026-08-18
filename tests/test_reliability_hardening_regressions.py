@@ -78,14 +78,23 @@ def test_section_error_boundary_coverage_in_analysis_run_page() -> None:
 def test_browser_uat_labels_do_not_overclaim() -> None:
     page = (ROOT / "app/analysis-runs/[analysisRunId]/page.tsx").read_text(encoding="utf-8")
     panel = (ROOT / "components/reports/ReportDeliveryPanel.tsx").read_text(encoding="utf-8")
+    # Engine labels live in the shared lib/browser-engines.ts (FE-6 dedup);
+    # both files import "Chromium Engine" from there rather than defining
+    # their own copy.
+    engine_labels = (ROOT / "lib/browser-engines.ts").read_text(encoding="utf-8")
     assert "Opera" not in page
     assert "Opera" not in panel
     assert "Google Chrome" in page
     assert "Microsoft Edge" in page
     assert "Apple Safari" in page
-    assert "Chromium engine" in page
-    assert "Chromium engine" in panel
-    assert "internal signal" in panel
+    assert "Chromium Engine" in engine_labels
+    assert "ENGINE_LABELS" in page
+    assert "ENGINE_LABELS" in panel
+    # The webkit-is-not-Safari caveat now lives as an explicit disclaimer
+    # sentence in the Browser Compatibility section rather than a per-label
+    # "(internal signal only)" suffix.
+    assert "not branded browser verification" in panel
+    assert "WebKit is not Safari" in panel
 
 
 def test_verification_state_labels_in_browser_summary() -> None:

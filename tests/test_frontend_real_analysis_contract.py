@@ -47,7 +47,10 @@ def test_progress_uses_friendly_agents_and_honest_failure_states() -> None:
     progress = (ROOT / "components/reports/AnalysisProgressTimeline.tsx").read_text(
         encoding="utf-8"
     )
-    combined = panel + progress + report_page
+    # Agent labels live in the shared lib/agent-labels.ts (FE-6 dedup); both
+    # panels import from there rather than defining their own copy.
+    agent_labels = (ROOT / "lib/agent-labels.ts").read_text(encoding="utf-8")
+    combined = panel + progress + report_page + agent_labels
     for label in (
         "Discovery Agent",
         "Performance Agent",

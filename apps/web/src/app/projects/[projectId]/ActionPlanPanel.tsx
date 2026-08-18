@@ -17,42 +17,11 @@ import { ConceptInfoButton } from "@/components/metrics/ConceptInfoButton";
 import { MetricInfoButton } from "@/components/metrics/MetricInfoButton";
 import { ScoreValue } from "@/components/metrics/ScoreValue";
 import { SiteDiagnosticsReference } from "@/components/diagnostics/SiteDiagnosticsPanel";
+import { StatusBadge } from "@/components/ui/StatusBadge";
 
 interface ActionPlanPanelProps {
   websiteId: string;
   projectId?: string;
-}
-
-function SeverityBadge({ severity }: { severity: string }) {
-  const colors: Record<string, string> = {
-    critical: "bg-red-100 text-red-800",
-    high: "bg-orange-100 text-orange-800",
-    medium: "bg-amber-100 text-amber-800",
-    low: "bg-slate-100 text-slate-600",
-    informational: "bg-blue-100 text-blue-800",
-  };
-  return (
-    <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-bold ${colors[severity] ?? "bg-slate-100 text-slate-600"}`}>
-      {severity}
-    </span>
-  );
-}
-
-function StatusBadge({ status }: { status: string }) {
-  const colors: Record<string, string> = {
-    open: "bg-blue-100 text-blue-800",
-    acknowledged: "bg-slate-100 text-slate-700",
-    in_progress: "bg-amber-100 text-amber-800",
-    resolved: "bg-emerald-100 text-emerald-800",
-    ignored: "bg-slate-100 text-slate-400",
-    reopened: "bg-purple-100 text-purple-800",
-    mixed: "bg-striped text-slate-700",
-  };
-  return (
-    <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-bold ${colors[status] ?? "bg-slate-100 text-slate-600"}`}>
-      {(status ?? "unknown").replace("_", " ")}
-    </span>
-  );
 }
 
 function SummaryCard({
@@ -444,7 +413,7 @@ export function ActionPlanPanel({ websiteId, projectId }: ActionPlanPanelProps) 
                     >
                       <td className="max-w-56 p-2 font-semibold">{g.issue_title}</td>
                       <td className="p-2 capitalize">{g.category}</td>
-                      <td className="p-2"><SeverityBadge severity={g.severity} /></td>
+                      <td className="p-2"><StatusBadge status={g.severity} /></td>
                       <td className="p-2"><PriorityBar score={g.priority_score} /></td>
                       <td className="p-2">{g.affected_page_count}</td>
                       <td className="p-2">{g.responsible_area}</td>
@@ -502,7 +471,7 @@ export function ActionPlanPanel({ websiteId, projectId }: ActionPlanPanelProps) 
                 </div>
                 <div>
                   <dt className="text-slate-500">Severity</dt>
-                  <dd><SeverityBadge severity={selectedGroup.severity} /></dd>
+                  <dd><StatusBadge status={selectedGroup.severity} /></dd>
                 </div>
                 <div>
                   <dt className="text-slate-500">Priority</dt>
@@ -633,7 +602,7 @@ export function ActionPlanPanel({ websiteId, projectId }: ActionPlanPanelProps) 
                 </div>
                 <div>
                   <dt className="text-slate-500">Severity</dt>
-                  <dd><SeverityBadge severity={selectedAction.severity} /></dd>
+                  <dd><StatusBadge status={selectedAction.severity} /></dd>
                 </div>
                 <div>
                   <dt className="text-slate-500">Priority</dt>

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { ApiError, apiRequest } from "@/lib/api";
 import type { AnalysisReport, AnalysisFinding, AnalysisStatus, DiagnosticGroup } from "@/lib/types";
@@ -25,12 +25,12 @@ import { SectionErrorBoundary } from "@/components/SectionErrorBoundary";
 import { BrowserUatPanel } from "@/components/browser-uat/BrowserUatPanel";
 import type { WorkflowProgress } from "@/components/reports/types";
 import { analysisComparisonApi } from "@/lib/analysis-comparison-api";
+import { ENGINE_LABELS } from "@/lib/browser-engines";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { ScoreBar } from "@/components/ui/ScoreBadge";
 import { UrlCell } from "@/components/ui/UrlCell";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { MetricStat } from "@/components/ui/MetricStat";
-import { DataTable, Column } from "@/components/ui/DataTable";
 import { IssueRegister } from "@/components/findings/IssueRegister";
 import { ConceptInfoButton } from "@/components/metrics/ConceptInfoButton";
 // ---------------------------------------------------------------------------
@@ -749,12 +749,6 @@ const BRANDED_BROWSERS: {
   },
 ];
 
-const ENGINE_DISPLAY: Record<string, string> = {
-  chromium: "Chromium engine",
-  firefox: "Firefox engine",
-  webkit: "WebKit engine",
-};
-
 function BrowserSummary({
   diagnostics,
   viewMode,
@@ -804,7 +798,7 @@ function BrowserSummary({
                 className={`rounded-lg border p-4 ${isUnavailable ? "border-slate-200 bg-slate-50" : "border-slate-200 bg-white"}`}
               >
                 <p className="text-sm font-semibold text-slate-700">
-                  {ENGINE_DISPLAY[name] ?? formatLabel(name)}
+                  {ENGINE_LABELS[name] ?? formatLabel(name)}
                 </p>
                 {isUnavailable ? (
                   <p className="mt-1 text-sm text-slate-500">
@@ -870,7 +864,7 @@ function BrowserSummary({
                   />
                   <p className="mt-1 text-xs text-slate-400">
                     {hasEvidence && bb.verification_state !== "VERIFIED"
-                      ? `${ENGINE_DISPLAY[bb.related_engine] ?? bb.related_engine} evidence available in technical view`
+                      ? `${ENGINE_LABELS[bb.related_engine] ?? bb.related_engine} evidence available in technical view`
                       : !hasEvidence
                         ? "No branded-browser execution evidence retained"
                         : "Verified by branded channel"}
@@ -903,7 +897,7 @@ function BrowserSummary({
                 />
                 <p className="mt-1 text-xs text-slate-400">
                   {hasEvidence
-                    ? `${ENGINE_DISPLAY[bb.engine] ?? bb.engine} evidence available in technical view`
+                    ? `${ENGINE_LABELS[bb.engine] ?? bb.engine} evidence available in technical view`
                     : "No branded-browser execution evidence retained"}
                 </p>
               </div>

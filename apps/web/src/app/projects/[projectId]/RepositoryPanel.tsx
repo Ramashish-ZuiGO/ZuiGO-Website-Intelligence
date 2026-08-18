@@ -12,28 +12,10 @@ import type {
 
 import { ConceptInfoButton } from "@/components/metrics/ConceptInfoButton";
 import { ConfidenceBadge } from "@/components/metrics/ConfidenceBadge";
+import { StatusBadge } from "@/components/ui/StatusBadge";
 
 interface RepositoryPanelProps {
   projectId: string;
-}
-
-function StatusBadge({ status }: { status: string }) {
-  const colors: Record<string, string> = {
-    active: "bg-emerald-100 text-emerald-800",
-    inactive: "bg-slate-100 text-slate-500",
-    pending: "bg-amber-100 text-amber-800",
-    unlinked: "bg-red-100 text-red-800",
-    queued: "bg-blue-100 text-blue-800",
-    running: "bg-amber-100 text-amber-800",
-    completed: "bg-emerald-100 text-emerald-800",
-    partial: "bg-orange-100 text-orange-800",
-    failed: "bg-red-100 text-red-800",
-  };
-  return (
-    <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-bold ${colors[status] ?? "bg-slate-100 text-slate-600"}`}>
-      {(status ?? "unknown").replace("_", " ")}
-    </span>
-  );
 }
 
 

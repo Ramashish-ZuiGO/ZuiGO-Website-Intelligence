@@ -101,11 +101,16 @@ def test_internal_engines_never_promoted_to_branded_browsers() -> None:
     assert "not branded browser" in timeline
     assert "Chromium is not Chrome or Edge, and WebKit is not Safari" in timeline
     # Engine labels stay engine-branded; no branded-browser labels in the
-    # running experience.
-    assert '"Chromium Engine"' in timeline
+    # running experience. Labels live in the shared lib/browser-engines.ts
+    # (FE-6 dedup) rather than a local copy in this file.
+    engine_labels = (ROOT / "lib/browser-engines.ts").read_text(encoding="utf-8")
+    assert '"Chromium Engine"' in engine_labels
     assert "Google Chrome" not in timeline
     assert "Apple Safari" not in timeline
     assert "Microsoft Edge" not in timeline
+    assert "Google Chrome" not in engine_labels
+    assert "Apple Safari" not in engine_labels
+    assert "Microsoft Edge" not in engine_labels
 
 
 def test_recovery_actions_preserve_work_and_prevent_double_submit() -> None:

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useId, useMemo, useState } from "react";
 
 import { MetricInfoButton } from "@/components/metrics/MetricInfoButton";
 import { PercentageValue } from "@/components/metrics/PercentageValue";
+import { StatusBadge } from "@/components/ui/StatusBadge";
 import { apiRequest } from "@/lib/api";
 
 import type {
@@ -91,25 +92,6 @@ function safeEvidence(value: unknown): string {
   }
 }
 
-function StatusBadge({ value }: { value: string }) {
-  const colors: Record<string, string> = {
-    completed: "bg-emerald-100 text-emerald-900",
-    partial: "bg-amber-100 text-amber-900",
-    unavailable: "bg-slate-200 text-slate-900",
-    failed: "bg-red-100 text-red-900",
-    critical: "bg-red-100 text-red-900",
-    high: "bg-orange-100 text-orange-900",
-    medium: "bg-amber-100 text-amber-900",
-    low: "bg-blue-100 text-blue-900",
-    info: "bg-slate-100 text-slate-800",
-  };
-  return (
-    <span className={`rounded-full px-2 py-1 text-xs font-semibold ${colors[value] ?? "bg-slate-100 text-slate-800"}`}>
-      {label(value)}
-    </span>
-  );
-}
-
 function EvidenceBlock({ value }: { value: unknown }) {
   return (
     <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-slate-950 p-3 text-xs text-slate-100">
@@ -133,9 +115,9 @@ function FindingCards({
       {findings.map((finding) => (
         <li className="rounded-xl border border-slate-200 bg-white p-4" key={finding.id}>
           <div className="flex flex-wrap gap-2">
-            <StatusBadge value={finding.severity} />
-            <StatusBadge value={finding.scope} />
-            <StatusBadge value={finding.confidence} />
+            <StatusBadge status={finding.severity} />
+            <StatusBadge status={finding.scope} />
+            <StatusBadge status={finding.confidence} />
           </div>
           <h4 className="mt-3 font-semibold text-slate-950">{finding.title}</h4>
           <p className="mt-1 text-sm text-slate-700">{finding.description}</p>
@@ -196,9 +178,9 @@ function FindingDetail({
         </button>
       </div>
       <div className="mt-3 flex flex-wrap gap-2">
-        <StatusBadge value={finding.severity} />
-        <StatusBadge value={finding.scope} />
-        <StatusBadge value={finding.confidence} />
+        <StatusBadge status={finding.severity} />
+        <StatusBadge status={finding.scope} />
+        <StatusBadge status={finding.confidence} />
       </div>
       <dl className="mt-5 grid gap-4 text-sm md:grid-cols-2">
         <div className="md:col-span-2"><dt className="font-semibold">What was found</dt><dd className="mt-1">{finding.description}</dd></div>
@@ -272,7 +254,7 @@ function History({
                   <span className="font-semibold">{formatDate(execution.created_at ?? execution.completed_at)}</span>
                   <span className="ml-2 font-mono text-slate-500">{execution.execution_id.slice(0, 8)}</span>
                 </td>
-                <td><StatusBadge value={execution.status} /></td>
+                <td><StatusBadge status={execution.status} /></td>
                 <td>{execution.evidence_coverage_numerator}/{execution.evidence_coverage_denominator} ({Math.round(execution.evidence_coverage_ratio * 100)}%)</td>
                 <td>{execution.processed_page_count}/{execution.total_page_count}</td>
                 <td>{formatDate(execution.completed_at)}</td>
@@ -492,7 +474,7 @@ export function SiteDiagnosticsPanel({
           <section aria-labelledby="site-health-overview" className="mt-7">
             <div className="flex flex-wrap items-center gap-3">
               <h3 className="text-lg font-bold" id="site-health-overview">Site Health Overview</h3>
-              <StatusBadge value={execution.status} />
+              <StatusBadge status={execution.status} />
             </div>
             <p className="mt-1 text-sm text-slate-600">
               Profile {execution.selected_profile_id} v{execution.selected_profile_version} · Engine {execution.diagnostic_engine_version} · Rules {execution.rule_registry_version}

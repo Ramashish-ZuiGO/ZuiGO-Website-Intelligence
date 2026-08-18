@@ -752,6 +752,24 @@ prioritized against each other; that's part of the discussion.
   around or skip past silently. **No code change shipped; flagged for the
   user to decide whether to obtain a key.**
 
+  **UPDATE 2026-08-18, same day: the user added a real `CRUX_API_KEY` to
+  `.env` — M19 is now fully live.** Live-verified directly against the
+  real Google API:
+  `get_crux_provider().fetch_record(url="https://www.google.com/")`
+  returned `status: success` with real field metrics (LCP, INP, CLS, FCP,
+  TTFB, and more). This also surfaced a real, pre-existing test-isolation
+  bug: `test_crux_no_api_key` constructed `CruxProvider(api_key=None)`
+  BEFORE entering its `get_settings` patch context, so `__init__`'s own
+  `api_key or get_settings().crux_api_key` resolution used the REAL
+  settings (now truthy, thanks to the new key) instead of the mock,
+  falling through to a genuine outbound network call with an unmocked
+  `timeout=MagicMock()` and crashing inside httpx. Fixed by constructing
+  the provider inside the patch context, matching the other tests in the
+  file, with a comment explaining why the ordering matters now that a
+  real key exists in this environment. No source code change needed —
+  `CruxProvider`/`collect_performance_evidence` were already correct;
+  this was purely a test bug the real key exposed.
+
 Each module, once discussed, gets a decision-log entry below (mirroring the
 QA initiative's format) before implementation starts.
 

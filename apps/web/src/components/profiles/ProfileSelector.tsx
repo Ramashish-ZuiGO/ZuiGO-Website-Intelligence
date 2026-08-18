@@ -23,7 +23,10 @@ export function ProfileSelector({ websiteId, currentProfileId, onProfileChange }
         const data = await apiRequest<ProfileDefinition[]>("/api/v1/metadata/profiles");
         if (!cancelled) setProfiles(data);
       } catch (err) {
-        if (!cancelled) console.error("Failed to load profiles", err);
+        if (!cancelled) {
+          console.error("Failed to load profiles", err);
+          setErrorMsg(err instanceof Error ? err.message : "Failed to load evaluation profiles.");
+        }
       } finally {
         if (!cancelled) setIsLoading(false);
       }

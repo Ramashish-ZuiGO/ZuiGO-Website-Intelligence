@@ -85,13 +85,24 @@ function groupKey(s: PerformanceSnapshot): string {
 export function PerformanceIntelligence({
   data,
   disagreement,
-  explanation
+  explanation,
+  error
 }: {
   data: PerformanceSnapshot[],
   disagreement?: boolean,
-  explanation?: string
+  explanation?: string,
+  error?: string | null
 }) {
   const [activeTab, setActiveTab] = useState<'field' | 'lab' | 'diagnostic'>('lab');
+
+  if (error) {
+    return (
+      <section className="mt-5 rounded-lg border border-red-200 bg-red-50 p-4 shadow-sm" role="alert">
+        <h3 className="font-semibold text-slate-900">Performance Intelligence</h3>
+        <p className="mt-2 text-sm text-red-800">Unable to load performance evidence: {error}</p>
+      </section>
+    );
+  }
 
   if (!data || data.length === 0) {
     return (

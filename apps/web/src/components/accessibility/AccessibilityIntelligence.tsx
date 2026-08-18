@@ -35,7 +35,28 @@ export interface AccessibilityData {
   checklist: { items: ChecklistItem[] } | null;
 }
 
-export function AccessibilityIntelligence({ accessibilityData }: { accessibilityData: AccessibilityData | null }) {
+export function AccessibilityIntelligence({
+  accessibilityData,
+  error,
+}: {
+  accessibilityData: AccessibilityData | null;
+  error?: string | null;
+}) {
+  if (error) {
+    return (
+      <section className="mt-5 rounded-lg border border-red-200 bg-red-50 shadow-sm overflow-hidden" role="alert">
+        <div className="bg-red-100 px-4 py-3 border-b border-red-200">
+          <h3 className="font-semibold text-slate-900 flex items-center gap-2">
+            Accessibility Intelligence
+          </h3>
+        </div>
+        <div className="p-8 text-center text-red-800">
+          Unable to load accessibility evidence: {error}
+        </div>
+      </section>
+    );
+  }
+
   if (!accessibilityData || !accessibilityData.audit) {
     return (
       <section className="mt-5 rounded-lg border border-slate-200 bg-white shadow-sm overflow-hidden">

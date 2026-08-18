@@ -54,20 +54,34 @@ export function WebsiteAnalysisPanel({
 }: WebsiteAnalysisPanelProps) {
   const [history, setHistory] = useState<AnalysisRun[]>([]);
   const [performanceData, setPerformanceData] = useState<{snapshots: Record<string, unknown>[], disagreement?: boolean, explanation?: string}>({snapshots: []});
+  const [performanceError, setPerformanceError] = useState<string | null>(null);
   const [accessibilityData, setAccessibilityData] = useState<AccessibilityData | null>(null);
+  const [accessibilityError, setAccessibilityError] = useState<string | null>(null);
   useEffect(() => {
     if (websiteId) {
       apiRequest<{snapshots?: Record<string, unknown>[], disagreement?: boolean, explanation?: string}>(`/api/v1/websites/${websiteId}/performance/comparison`)
-        .then((res) => setPerformanceData({
-          snapshots: (res.snapshots || []) as Record<string, unknown>[],
-          disagreement: res.disagreement,
-          explanation: res.explanation
-        }))
-        .catch(console.error);
+        .then((res) => {
+          setPerformanceData({
+            snapshots: (res.snapshots || []) as Record<string, unknown>[],
+            disagreement: res.disagreement,
+            explanation: res.explanation
+          });
+          setPerformanceError(null);
+        })
+        .catch((requestError: unknown) => {
+          console.error(requestError);
+          setPerformanceError(requestError instanceof Error ? requestError.message : "Unable to load performance evidence.");
+        });
 
       apiRequest<AccessibilityData>(`/api/v1/websites/${websiteId}/accessibility`)
-        .then((res) => setAccessibilityData(res))
-        .catch(console.error);
+        .then((res) => {
+          setAccessibilityData(res);
+          setAccessibilityError(null);
+        })
+        .catch((requestError: unknown) => {
+          console.error(requestError);
+          setAccessibilityError(requestError instanceof Error ? requestError.message : "Unable to load accessibility evidence.");
+        });
     }
   }, [websiteId]);
 
@@ -375,6 +389,7 @@ export function WebsiteAnalysisPanel({
             data={performanceData.snapshots as unknown as { id: string; metric_id: string; evidence_type: string; raw_value: number; url_or_origin?: string; form_factor?: string; evidence_source?: string }[]}
             disagreement={performanceData.disagreement}
             explanation={performanceData.explanation}
+            error={performanceError}
           />
         </div>
       </SectionErrorBoundary>
@@ -383,6 +398,7 @@ export function WebsiteAnalysisPanel({
         <div className="mt-8">
           <AccessibilityIntelligence
             accessibilityData={accessibilityData}
+            error={accessibilityError}
           />
         </div>
       </SectionErrorBoundary>

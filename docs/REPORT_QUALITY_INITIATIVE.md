@@ -663,13 +663,42 @@ prioritized against each other; that's part of the discussion.
   render-blocking test code) deliberately NOT whitelisted — they must
   keep splitting. 3 new tests pin merge, accessibility-identity merge,
   and unlisted-code splitting. Covered by TEMPLATE_VERSION 2.2.0.
-- **M18: HTML/W3C Nu Checker integration.** From the historical doc — likely
-  genuinely absent today (not yet confirmed), a real new capability rather
-  than a fix. Doc's own correction worth keeping regardless of the rest:
-  there is no official universal W3C numeric score; any implementation
-  must expose real validator results (errors/warnings/line/column) and
-  keep a clearly-separate `ZuiGO HTML Quality Score` labeled as such, never
-  as "official W3C scoring."
+- **M18: HTML/W3C Nu Checker integration — SHIPPED 2026-08-18. The audit's
+  premise was wrong: this already existed and already worked, it just
+  never reached a report.** Investigated before building anything (same
+  discipline as M4): `worker_app/analysis/diagnostics.py`'s `collect_w3c`
+  makes a real POST to the public `validator.w3.org/nu/?out=json` service,
+  parses real errors/warnings with line/column via `parse_w3c_response`,
+  and a separate `html_standards_validation` computes an independent
+  lxml-based `ZuiGO HTML Standards Score` — already correctly labeled "not
+  an official W3C validation result" at the source, exactly matching the
+  historical doc's own correction. Both are called from the real
+  production path (`build_diagnostics` in `worker_app/tasks/analysis.py`)
+  and persisted to `AnalysisDiagnostic` — confirmed against the real
+  database: 51 real runs with real `standards_diagnostics` rows, 36 with
+  `html_standards_diagnostics`, real captured validator messages
+  (`"Duplicate attribute 'height'."`, `"A 'charset' attribute... found
+  after the first 1024 bytes"`) from real external validator calls. The
+  actual gap: `report_delivery.py` never queried `AnalysisDiagnostic` at
+  all — this real evidence was collected on every run and silently
+  discarded, never reaching any report, exactly the M6 pattern.
+  **`AnalysisDiagnostic` has a `UNIQUE(analysis_run_id, group_name)`
+  constraint** (only the main homepage run writes it; L2 pages pass an
+  empty diagnostics dict) — so this is genuinely homepage-only evidence.
+  Rather than silently expanding collection to call the free public W3C
+  service for every page (external-load/rate-limit implications needing
+  its own decision), shipped the honest version: a new `html_validation`
+  block in the `site_diagnostics` section content with explicit
+  `scope: "homepage_only"` and a plain-language scope statement, keeping
+  `official_w3c_validation` and `zuigo_derived_structural_score` as
+  separate, clearly-labeled keys (never merged into one number). New test
+  seeds real diagnostic rows and proves both scores surface distinctly
+  with the scope disclosure. Live-verified against the real docker stack:
+  regenerated the fluidcontrols.com report and confirmed 55 real W3C
+  errors and a real 98/100 ZuiGO structural score both present, correctly
+  separated. Covered by TEMPLATE_VERSION 2.2.0. Site-wide W3C validation
+  (calling the external validator per L2 page) is a genuinely separate
+  decision — flagged, not silently done.
 - **M19: CrUX API integration.** From the historical doc — likely genuinely
   absent today (not yet confirmed). Needs a Google Cloud API key
   (external dependency) if pursued; URL-level vs. origin-level-fallback

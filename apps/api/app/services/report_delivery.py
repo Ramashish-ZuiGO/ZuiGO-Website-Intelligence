@@ -23,6 +23,7 @@ from app.models import (
     AgentArtifact,
     AgentExecution,
     AgentRun,
+    AnalysisDiagnostic,
     AnalysisFinding,
     AnalysisRun,
     DiscoveryRun,
@@ -2201,6 +2202,45 @@ def _build_sections(
         .where(SiteDiagnosticExecution.analysis_run_id == run.id)
         .order_by(SiteDiagnosticExecution.created_at.desc(), SiteDiagnosticExecution.id.desc())
     )
+    # M18: real evidence from the public W3C Nu Checker (standards_diagnostics)
+    # and the separate, clearly-labeled ZuiGO-derived structural score
+    # (html_standards_diagnostics) are both already collected and persisted
+    # by the worker -- they simply never reached any report section.
+    # AnalysisDiagnostic has a UNIQUE(analysis_run_id, group_name)
+    # constraint, so this is homepage-only evidence (the main run's own
+    # id), never site-wide; the payload discloses that explicitly rather
+    # than implying broader coverage than exists.
+    html_validation_rows = {
+        row.group_name: row.payload
+        for row in db.scalars(
+            select(AnalysisDiagnostic).where(
+                AnalysisDiagnostic.analysis_run_id == run.id,
+                AnalysisDiagnostic.group_name.in_(
+                    ("standards_diagnostics", "html_standards_diagnostics")
+                ),
+            )
+        )
+    }
+    html_validation = (
+        {
+            "scope": "homepage_only",
+            "scope_statement": (
+                "This validation runs against the homepage only, not every page of the site."
+            ),
+            "official_w3c_validation": html_validation_rows.get("standards_diagnostics"),
+            "zuigo_derived_structural_score": html_validation_rows.get(
+                "html_standards_diagnostics"
+            ),
+            "label_statement": (
+                "official_w3c_validation reflects the real W3C Nu Html Checker "
+                "(validator.w3.org). zuigo_derived_structural_score is a "
+                "separate, ZuiGO-computed structural score and is never an "
+                "official W3C result."
+            ),
+        }
+        if html_validation_rows
+        else None
+    )
     diagnostic_findings = (
         list(
             db.scalars(
@@ -2938,6 +2978,7 @@ def _build_sections(
                     "failed_pages": diagnostics.failed_page_count if diagnostics else 0,
                 },
                 "findings": detailed_diagnostic_findings,
+                "html_validation": html_validation,
             },
             evidence=diagnostic_refs,
             unavailable_reason=(

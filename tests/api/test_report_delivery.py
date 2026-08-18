@@ -1566,3 +1566,63 @@ def test_manual_review_checklist_items_reach_the_accessibility_section(
         "https://report.test/contact",
     ]
     assert items["video-caption-manual-review"]["affected_page_urls"] == ["https://report.test/"]
+
+
+def test_w3c_validation_evidence_surfaces_and_stays_clearly_labeled(
+    report_api: tuple[
+        TestClient,
+        sessionmaker[Session],
+        uuid.UUID,
+        uuid.UUID,
+        uuid.UUID,
+        list[tuple[str, str, int]],
+    ],
+) -> None:
+    """M18 (docs/REPORT_QUALITY_INITIATIVE.md): the audit assumed W3C/HTML
+    validation was absent; it was already collected via a real call to the
+    public W3C Nu Checker plus a separate ZuiGO-derived structural score,
+    but neither ever reached any report section. AnalysisDiagnostic's
+    UNIQUE(analysis_run_id, group_name) constraint means this is
+    homepage-only evidence, so the payload must disclose that, and the two
+    scores must stay clearly distinguished (never presented as one
+    "official W3C" result).
+    """
+    from app.models import AnalysisDiagnostic
+
+    _client, factory, _project_id, _website_id, run_id, _dispatched = report_api
+    with factory() as db:
+        db.add_all(
+            [
+                AnalysisDiagnostic(
+                    analysis_run_id=run_id,
+                    group_name="standards_diagnostics",
+                    payload={
+                        "status": "available",
+                        "observations": {"error_count": 2, "warning_count": 5},
+                        "limitations": [
+                            "This is a ZuiGO-derived score, not an official W3C score."
+                        ],
+                    },
+                ),
+                AnalysisDiagnostic(
+                    analysis_run_id=run_id,
+                    group_name="html_standards_diagnostics",
+                    payload={
+                        "status": "available",
+                        "observations": {"standards_score": 82, "errors_count": 1},
+                        "validator_name": "ZuiGO HTML Standards",
+                    },
+                ),
+            ]
+        )
+        db.commit()
+
+    report = _generate_completed_report(factory, run_id, key="w3c-validation-report")
+    sections = {section.section_key: section.content for section in report.sections}
+    validation = sections["site_diagnostics"]["html_validation"]
+
+    assert validation["scope"] == "homepage_only"
+    assert "homepage only" in validation["scope_statement"]
+    assert validation["official_w3c_validation"]["observations"]["error_count"] == 2
+    assert validation["zuigo_derived_structural_score"]["observations"]["standards_score"] == 82
+    assert "official W3C" in validation["label_statement"]

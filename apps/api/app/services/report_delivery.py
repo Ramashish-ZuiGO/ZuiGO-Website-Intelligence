@@ -68,8 +68,11 @@ TEMPLATE_ID = "zuigo_evidence_report"
 # 2.2.0: M15 added deep-evidence coverage fields to page_coverage and merged
 # Level-2 per-page findings into the Performance section and register; M3
 # moved security-header findings from Repeated and Template Problems into
-# Security and Technical Findings. Older snapshots keep serving their frozen
-# stored artifacts via the version-aware download guard.
+# Security and Technical Findings; M5 removed the performance section's
+# embedded stale copy of the browser artifact blob (the fresh top-level
+# browser_compatibility block is the single source of truth). Older
+# snapshots keep serving their frozen stored artifacts via the
+# version-aware download guard.
 TEMPLATE_VERSION = "2.2.0"
 # Customer-facing product name for generated artifacts. Internal identifiers
 # (template ids, package names, historical snapshots) are not renamed.
@@ -2795,7 +2798,13 @@ def _build_sections(
                     for item in detailed_analysis_findings
                     if str(item["category"]).casefold() == "performance"
                 ],
-                "browser_compatibility": browser_compatibility,
+                # M5: the raw browser artifact blob was embedded here
+                # verbatim, carrying its own analysis-time browser_uat copy
+                # that contradicted the fresh top-level
+                # browser_compatibility block (built with live Tier 0
+                # evidence at report time). The top-level block is the
+                # single source of truth; this section keeps only the
+                # engine-test availability flag.
                 "browser_engine_tests": bool(browser_artifact),
             },
             evidence=[*result_ref, *browser_refs],

@@ -1423,3 +1423,33 @@ def test_security_header_findings_route_to_security_technical_not_repeated(
     # The register still carries the finding exactly once.
     register_codes = [item["finding_code"] for item in sections["page_level_findings"]["findings"]]
     assert register_codes.count("missing_security_header") == 1
+
+
+def test_performance_section_has_no_stale_browser_compatibility_duplicate(
+    report_api: tuple[
+        TestClient,
+        sessionmaker[Session],
+        uuid.UUID,
+        uuid.UUID,
+        uuid.UUID,
+        list[tuple[str, str, int]],
+    ],
+) -> None:
+    """M5 (docs/REPORT_QUALITY_INITIATIVE.md): the performance section
+    embedded the raw browser artifact blob verbatim, whose analysis-time
+    browser_uat copy contradicted the fresh top-level browser_compatibility
+    block in the same snapshot -- two answers to the same question in one
+    customer-downloadable JSON. The top-level block is the single source of
+    truth; the section keeps only the engine-test availability flag.
+    """
+    _client, factory, _project_id, _website_id, run_id, _dispatched = report_api
+    report = _generate_completed_report(factory, run_id, key="no-stale-duplicate")
+    snapshot = report.snapshot.snapshot_payload
+    section_map = {s["section_key"]: s for s in snapshot["sections"]}
+    performance_content = section_map["performance"]["content"]
+
+    assert "browser_compatibility" not in performance_content
+    assert "browser_engine_tests" in performance_content
+    # The single, authoritative copy still exists at the top level.
+    assert "browser_compatibility" in snapshot
+    assert "browser_uat" in snapshot["browser_compatibility"]

@@ -437,9 +437,23 @@ prioritized against each other; that's part of the discussion.
   full writeup below.**
 - **M4: `AnalysisFinding` pipeline — RESOLVED 2026-08-18: the audit claim
   was wrong; the pipeline is alive. See full writeup below.**
-- **M5: Performance section's stale duplicate `browser_compatibility`.**
-  Confirmed unused by current renderers but present in the downloadable
-  JSON — cleanup, not urgent, but a real single-source-of-truth violation.
+- **M5: Performance section's stale duplicate `browser_compatibility` —
+  SHIPPED 2026-08-18.** The section embedded the raw
+  `AgentArtifact.artifact_metadata` blob verbatim, whose analysis-time
+  `browser_uat` copy contradicted the fresh top-level
+  `browser_compatibility` block in the same snapshot (confirmed earlier
+  with a real report showing `PARTIALLY_VERIFIED` top-level vs.
+  `NOT_VERIFIED` in the embedded copy simultaneously). Fix: removed the
+  embedded blob from the section content — the top-level block (built with
+  live Tier 0 evidence at report time) is the single source of truth; the
+  section keeps only the `browser_engine_tests` availability flag, and the
+  engine-matrix DERIVATIONS (browser findings, evidence refs) still read
+  the artifact directly, which is correct frozen analysis-time evidence.
+  Verified no renderer/test/frontend consumer read the section's copy
+  before removing (grepped tests, apps/web, PDF/HTML builders). New
+  regression test pins the removal AND that the top-level block survives.
+  Covered by the same TEMPLATE_VERSION 2.2.0 bump as M15/M3. This finding
+  was §3 Finding 2, open since the initiative started — now closed.
 
 ### Tier 3 — real data being captured but not surfaced (completeness gaps)
 

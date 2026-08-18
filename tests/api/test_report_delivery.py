@@ -1333,3 +1333,93 @@ def test_artifacts_reconcile_with_canonical_totals(
     assert "TECHNICAL APPENDIX" in appendix_text
     pdf_bytes, _media, _name = render_additional_report_artifact("pdf", snapshot)
     assert pdf_bytes == artifacts["pdf"]
+
+
+def test_security_header_findings_route_to_security_technical_not_repeated(
+    report_api: tuple[
+        TestClient,
+        sessionmaker[Session],
+        uuid.UUID,
+        uuid.UUID,
+        uuid.UUID,
+        list[tuple[str, str, int]],
+    ],
+) -> None:
+    """M3 (docs/REPORT_QUALITY_INITIATIVE.md): security-header findings were
+    previously filed under repeated_issue_pattern and routed into "Repeated
+    and Template Problems" -- a tab literally titled "Security and Technical
+    Findings" showed zero security findings even when real ones existed.
+    """
+    _client, factory, _project_id, _website_id, run_id, _dispatched = report_api
+    with factory() as db:
+        diagnostic = db.scalar(
+            select(SiteDiagnosticExecution).where(SiteDiagnosticExecution.analysis_run_id == run_id)
+        )
+        assert diagnostic is not None
+        security_finding = SiteDiagnosticFinding(
+            execution_id=diagnostic.id,
+            rule_id="missing_security_header",
+            rule_version="1.0.0",
+            category="security",
+            severity="medium",
+            confidence="high",
+            scope="site",
+            title="Missing security header",
+            description="Pages respond without a recommended HTTP security header.",
+            why_it_matters="Missing headers weaken browser-side protections.",
+            affected_page_count=2,
+            total_eligible_page_count=51,
+            occurrence_count=2,
+            affected_ratio=2 / 51,
+            evidence_summary=(
+                "2 pages are missing the 'strict_transport_security' security header."
+            ),
+            evidence_references=[],
+            remediation_guidance="Configure the header at the server or CDN layer.",
+            responsible_role="Security engineering",
+            verification_guidance="Re-run the analysis and confirm the header is present.",
+        )
+        db.add(security_finding)
+        db.flush()
+        db.add_all(
+            [
+                SiteDiagnosticOccurrence(
+                    finding_id=security_finding.id,
+                    normalized_url=f"https://report.test/products/{index}",
+                    evidence_reference=f"security:hsts:{index}",
+                    occurrence_fingerprint=f"{index + 500:064x}",
+                    element_selector=None,
+                    location="response headers",
+                    context={
+                        "diagnostic_subtype": ("missing_security_header:strict_transport_security")
+                    },
+                    observed_value="strict_transport_security absent",
+                    expected_value="a profile-appropriate strict_transport_security policy",
+                    supporting_evidence={},
+                )
+                for index in range(2)
+            ]
+        )
+        db.commit()
+
+    report = _generate_completed_report(factory, run_id, key="security-routing")
+    sections = {section.section_key: section.content for section in report.sections}
+
+    security_titles = [item["issue_title"] for item in sections["security_technical"]["findings"]]
+    assert any("security header" in title.casefold() for title in security_titles), (
+        f"Security & Technical must show the real security finding, got: {security_titles}"
+    )
+    assert sections["security_technical"]["finding_count"] == len(
+        sections["security_technical"]["findings"]
+    )
+
+    repeated_titles = [
+        item["issue_title"] for item in sections["repeated_template_problems"]["findings"]
+    ]
+    assert not any("security header" in title.casefold() for title in repeated_titles), (
+        f"Security findings must not also render in Repeated problems: {repeated_titles}"
+    )
+
+    # The register still carries the finding exactly once.
+    register_codes = [item["finding_code"] for item in sections["page_level_findings"]["findings"]]
+    assert register_codes.count("missing_security_header") == 1

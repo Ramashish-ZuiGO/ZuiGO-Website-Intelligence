@@ -18,6 +18,12 @@ class DiagnosticCategoryEnum(StrEnum):
     NEAR_DUPLICATE = "near_duplicate"
     TECHNICAL_CONSISTENCY = "technical_consistency"
     EVIDENCE_AVAILABILITY = "evidence_availability"
+    # M3 (docs/REPORT_QUALITY_INITIATIVE.md): security-header findings were
+    # previously filed under REPEATED_PATTERN, which routed them into the
+    # "Repeated and Template Problems" report section instead of "Security
+    # and Technical Findings" -- a customer checking the security tab saw
+    # zero findings even when real ones existed elsewhere in the report.
+    SECURITY = "security"
 
 
 class DiagnosticSeverityEnum(StrEnum):
@@ -99,7 +105,10 @@ class DiagnosticRuleDefinition(BaseModel):
 
 
 class SiteDiagnosticRuleRegistry:
-    VERSION = "1.0.0"
+    # 1.1.0: added the security category rules (missing_security_header,
+    # inconsistent_security_header_policy) -- additive, no existing rule
+    # changed. This is NOT one of the locked formula versions in CLAUDE.md.
+    VERSION = "1.1.0"
     _rules: ClassVar[dict[str, DiagnosticRuleDefinition]] = {}
 
     @classmethod
@@ -201,6 +210,54 @@ _RULES = (
         verification="Re-analyze every page in the template cluster and compare signatures.",
         title="Shared template issue",
         description="An evidence-backed issue repeats across a deterministic template cluster.",
+    ),
+    _rule(
+        rule_id="missing_security_header",
+        category=DiagnosticCategoryEnum.SECURITY,
+        severity=DiagnosticSeverityEnum.MEDIUM,
+        scopes=(DiagnosticScopeEnum.PAGE, DiagnosticScopeEnum.SITE),
+        detection_method=(
+            "Inspect each analysed page's persisted HTTP response headers for the recommended "
+            "security headers."
+        ),
+        evidence=("page_id", "header", "evidence_reference"),
+        limitations=(
+            "Header requirements vary by site architecture; a header may be intentionally "
+            "omitted or added by an edge layer not visible to this analysis."
+        ),
+        remediation=(
+            "Configure the missing header at the web server, application, or CDN layer with a "
+            "policy appropriate for the site."
+        ),
+        role="Security engineering",
+        verification="Re-run the analysis and confirm the header is present on affected pages.",
+        title="Missing security header",
+        description="Pages respond without a recommended HTTP security header.",
+    ),
+    _rule(
+        rule_id="inconsistent_security_header_policy",
+        category=DiagnosticCategoryEnum.SECURITY,
+        severity=DiagnosticSeverityEnum.MEDIUM,
+        scopes=(DiagnosticScopeEnum.SITE,),
+        detection_method=(
+            "Compare persisted security-header values across comparable pages and flag headers "
+            "whose values disagree."
+        ),
+        evidence=("page_id", "header", "observed_value"),
+        limitations=(
+            "Differing header values can be intentional for specific routes; disagreement "
+            "signals a policy to review, not a proven defect."
+        ),
+        remediation=(
+            "Decide the intended site-wide policy for the header and apply it consistently, "
+            "documenting any deliberate per-route exceptions."
+        ),
+        role="Security engineering",
+        verification=(
+            "Re-run the analysis and confirm comparable pages report one consistent value."
+        ),
+        title="Inconsistent security header policy",
+        description="Comparable pages expose different values for the same security header.",
     ),
     _rule(
         rule_id="broken_internal_link",

@@ -2339,12 +2339,12 @@ class SiteDiagnosticsService:
             self._add_subtype_finding(
                 execution,
                 page_map,
-                rule_id="repeated_issue_pattern",
-                subtype=f"repeated_missing_security_header:{header}",
+                rule_id="missing_security_header",
+                subtype=f"missing_security_header:{header}",
                 observations=observations,
                 summary=(
-                    f"{len(observations)} pages repeat missing {header!r} evidence; the "
-                    "original page-analysis references are preserved."
+                    f"{len(observations)} pages are missing the {header!r} security header; "
+                    "the original page-analysis references are preserved."
                 ),
                 expected_value=f"a profile-appropriate {header} policy",
             )
@@ -2472,7 +2472,7 @@ class SiteDiagnosticsService:
                 self._add_subtype_finding(
                     execution,
                     page_map,
-                    rule_id="repeated_issue_pattern",
+                    rule_id="inconsistent_security_header_policy",
                     subtype=f"inconsistent_header_policy:{header}:{cohort}",
                     observations=observations,
                     summary=(

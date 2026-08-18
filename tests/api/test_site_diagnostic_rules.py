@@ -21,6 +21,7 @@ EXPECTED_RULE_IDS = (
     "excessive_click_depth",
     "inconsistent_language_declaration",
     "inconsistent_preferred_host",
+    "inconsistent_security_header_policy",
     "inconsistent_structured_data",
     "inconsistent_trailing_slash",
     "inconsistent_url_protocol",
@@ -31,6 +32,7 @@ EXPECTED_RULE_IDS = (
     "missing_canonical",
     "missing_h1",
     "missing_meta_description",
+    "missing_security_header",
     "missing_title",
     "multiple_h1",
     "near_duplicate_content_group",
@@ -54,11 +56,11 @@ def test_registry_is_versioned_unique_and_deterministic() -> None:
     rules = SiteDiagnosticRuleRegistry.get_all_rules()
     rule_ids = tuple(rule.id for rule in rules)
 
-    assert SiteDiagnosticRuleRegistry.VERSION == "1.0.0"
+    assert SiteDiagnosticRuleRegistry.VERSION == "1.1.0"
     assert re.fullmatch(r"\d+\.\d+\.\d+", SiteDiagnosticRuleRegistry.VERSION)
     assert rule_ids == EXPECTED_RULE_IDS
     assert rule_ids == tuple(sorted(rule_ids))
-    assert len(rule_ids) == len(set(rule_ids)) == 31
+    assert len(rule_ids) == len(set(rule_ids)) == 33
     assert all(rule.registry_version == SiteDiagnosticRuleRegistry.VERSION for rule in rules)
     assert all(re.fullmatch(r"\d+\.\d+\.\d+", rule.rule_version) for rule in rules)
 

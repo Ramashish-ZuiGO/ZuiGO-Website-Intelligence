@@ -1056,10 +1056,29 @@ def test_technical_consistency_aggregates_references_without_raw_report_copy(
         execution,
         "repeated_issue_pattern",
     )
-    assert any(
-        subtype.startswith("repeated_missing_security_header:") for subtype in repeated_subtypes
+    # M3: security-header findings moved from repeated_issue_pattern to
+    # dedicated security-category rules so they reach the Security &
+    # Technical report section instead of Repeated and Template Problems.
+    missing_header_subtypes = _finding_subtypes(
+        db_session,
+        execution,
+        "missing_security_header",
     )
-    assert any(subtype.startswith("inconsistent_header_policy:") for subtype in repeated_subtypes)
+    assert any(
+        subtype.startswith("missing_security_header:") for subtype in missing_header_subtypes
+    )
+    header_policy_subtypes = _finding_subtypes(
+        db_session,
+        execution,
+        "inconsistent_security_header_policy",
+    )
+    assert any(
+        subtype.startswith("inconsistent_header_policy:") for subtype in header_policy_subtypes
+    )
+    assert not any(
+        subtype.startswith(("repeated_missing_security_header:", "inconsistent_header_policy:"))
+        for subtype in repeated_subtypes
+    )
     assert any(subtype.startswith("repeated_console_error:") for subtype in repeated_subtypes)
     assert any(subtype.startswith("repeated_failed_resource:") for subtype in repeated_subtypes)
     assert any(subtype.startswith("repeated_large_resource:") for subtype in repeated_subtypes)

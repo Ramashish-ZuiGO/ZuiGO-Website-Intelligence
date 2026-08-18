@@ -426,10 +426,8 @@ prioritized against each other; that's part of the discussion.
 
 - **M15: Site-wide vs. homepage-only evidence audit — SHIPPED 2026-08-17,
   see full writeup below.**
-- **M3: Security & Technical section mislabeling.** Real security-header
-  findings are misclassified away from the section titled "Security and
-  Technical Findings." Smallest, most surgical fix in this tier — likely a
-  rule-classification correction, not a redesign.
+- **M3: Security & Technical section mislabeling — SHIPPED 2026-08-18, see
+  full writeup below.**
 - **M4: `AnalysisFinding` pipeline is dead in production.** Bigger
   question: was this table meant to be actively written by a specific
   agent that was never wired up, or is it now redundant now that
@@ -804,6 +802,66 @@ window to elapse and confirmed real recovery (`200` again, container stayed
 
 **Tests:** 20 new (`test_rate_limiting.py`). Full suite: 1148 passed, 1
 skipped (was 1128 before M2). `ruff check`/`ruff format --check` both clean.
+
+### M3 — SHIPPED 2026-08-18
+
+**The mislabeling was real and structural:** security-header findings
+(missing HSTS/CSP/X-Frame-Options etc., genuinely computed from
+`page.security_observations`) were created under
+`rule_id="repeated_issue_pattern"` → category `repeated_pattern`, and the
+report's `security_technical` section only ever read analysis findings +
+browser-engine rows — site diagnostics NEVER routed there. So a tab
+literally titled "Security and Technical Findings" structurally showed zero
+security findings even when real ones existed in the same report, while the
+findings themselves carried the vague generic title "Repeated issue
+pattern."
+
+**Root-cause fix, not a report-side patch alone:**
+1. New `DiagnosticCategoryEnum.SECURITY` and two dedicated registry rules —
+   `missing_security_header` and `inconsistent_security_header_policy` —
+   with honest, specific titles/descriptions/remediation/limitations text
+   (rule text drives the customer-facing finding content directly). The
+   `category` DB column is a plain `String(100)` — no migration needed.
+   Registry `VERSION` bumped 1.0.0 → 1.1.0 (additive; NOT one of the locked
+   formula versions).
+2. Both real call sites in `site_diagnostics_service.py` switched to the
+   new rules; the missing-header subtype renamed
+   `repeated_missing_security_header:{header}` →
+   `missing_security_header:{header}` to match.
+3. `report_delivery.py`: security-category diagnostics now route into
+   `technical_findings` (the Security & Technical section) and are excluded
+   from `repeated_findings` (whose scope catch-all would otherwise render
+   them twice). Section status/unavailable-reason now accounts for
+   diagnostics as an evidence source. `_friendly_finding_title` accepts both
+   the new and old subtype prefixes, since regenerating a report for a
+   pre-M3 execution still reads the old stored subtype strings.
+4. `TEMPLATE_VERSION` bumped 2.1.0 → 2.2.0 per the locked invariant
+   ("bump whenever renderer output changes meaningfully") — covering BOTH
+   M15's payload additions (missed at the time, caught now) and M3's
+   section rerouting. Old snapshots keep serving their frozen artifacts via
+   the version-aware download guard.
+
+**Honest immutable-evidence consequence, verified live, not assumed:**
+already-stored findings from pre-M3 diagnostics executions keep their
+original `repeated_issue_pattern` rule id — report regeneration does NOT
+retroactively relabel old evidence (same discipline as every other
+immutability decision in this project). Only new analysis runs produce the
+new security-category findings. Live-verified against the real docker stack
+(both images rebuilt): regenerated a real report for the existing
+fluidcontrols.com run — `template_version: 2.2.0` propagated, all sections
+built cleanly, and the pre-M3 data behaved exactly as designed (no
+fabricated relabeling; that run's diagnostics genuinely contained no
+security-header findings to move).
+
+**Tests:** new report-level integration test
+(`test_security_header_findings_route_to_security_technical_not_repeated`)
+seeds a real `missing_security_header` diagnostic finding and proves it
+renders in Security & Technical, does NOT double-render in Repeated
+problems, and appears exactly once in the Complete Findings Register.
+Diagnostics-service test updated to pin the new rule ids (and to assert the
+old subtypes are gone from `repeated_issue_pattern`); rule-registry test
+updated for the 2 new rules (33 total) and version 1.1.0. Full suite: 1149
+passed, 1 skipped. Ruff clean.
 
 ## 6. Non-negotiable constraints for this initiative
 

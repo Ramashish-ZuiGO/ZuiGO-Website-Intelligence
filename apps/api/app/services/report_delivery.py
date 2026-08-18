@@ -65,7 +65,12 @@ from app.services.scoring_formula import FORMULA_ID, FORMULA_VERSION
 
 REPORT_VERSION = "1.1.0"
 TEMPLATE_ID = "zuigo_evidence_report"
-TEMPLATE_VERSION = "2.1.0"
+# 2.2.0: M15 added deep-evidence coverage fields to page_coverage and merged
+# Level-2 per-page findings into the Performance section and register; M3
+# moved security-header findings from Repeated and Template Problems into
+# Security and Technical Findings. Older snapshots keep serving their frozen
+# stored artifacts via the version-aware download guard.
+TEMPLATE_VERSION = "2.2.0"
 # Customer-facing product name for generated artifacts. Internal identifiers
 # (template ids, package names, historical snapshots) are not renamed.
 CUSTOMER_PRODUCT_NAME = "ZuiGO WebIQ"
@@ -1193,7 +1198,10 @@ def _finding_sort_key(item: dict[str, Any]) -> tuple[int, str, str]:
 
 
 def _friendly_finding_title(code: str, fallback: str) -> str:
-    if code.startswith("repeated_missing_security_header:"):
+    # Both prefixes: "missing_security_header:" is current (M3);
+    # "repeated_missing_security_header:" still appears when regenerating
+    # reports for executions whose findings predate the M3 rule rename.
+    if code.startswith(("missing_security_header:", "repeated_missing_security_header:")):
         header = code.partition(":")[2]
         header_names = {
             "content_security_policy": "Content Security Policy",
@@ -2430,6 +2438,13 @@ def _build_sections(
         if str(item["category"]).casefold()
         in {"security", "best_practices", "best-practices", "technical", "performance"}
     ]
+    # M3: security-category site diagnostics (missing/inconsistent security
+    # headers) belong in the "Security and Technical Findings" section, not
+    # in "Repeated and Template Problems" where the repeated_issue_pattern
+    # rule previously filed them.
+    technical_findings.extend(
+        item for item in detailed_diagnostic_findings if item["category"] == "security"
+    )
     technical_findings.extend(browser_findings)
     content_findings = [
         item
@@ -2455,8 +2470,11 @@ def _build_sections(
     repeated_findings = [
         item
         for item in detailed_diagnostic_findings
-        if item["category"] == "repeated_pattern"
-        or item["scope"] in {"section", "template", "site"}
+        if item["category"] != "security"
+        and (
+            item["category"] == "repeated_pattern"
+            or item["scope"] in {"section", "template", "site"}
+        )
     ]
     overall_score = (
         score.overall_score if score else (run.score.overall_score if run.score else None)
@@ -2891,7 +2909,7 @@ def _build_sections(
         ),
         section(
             "security_technical",
-            status="available" if run.result else "unavailable",
+            status="available" if run.result or diagnostics else "unavailable",
             content={
                 "finding_count": len(technical_findings),
                 "findings": technical_findings,
@@ -2906,7 +2924,9 @@ def _build_sections(
                     for reference in item["evidence_references"]
                 ],
             ],
-            unavailable_reason=None if run.result else "Technical evidence was not analysed.",
+            unavailable_reason=(
+                None if run.result or diagnostics else "Technical evidence was not analysed."
+            ),
         ),
         section(
             "content_seo",

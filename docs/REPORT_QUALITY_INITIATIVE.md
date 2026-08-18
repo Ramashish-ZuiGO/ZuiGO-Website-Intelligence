@@ -581,8 +581,29 @@ prioritized against each other; that's part of the discussion.
   representations is now documented at the type itself rather than being
   tribal knowledge. 4 new tests (digest stability, distinctness, semantic
   patterns unaffected, kind passthrough).
-- **M14: `MERGE_ACROSS_PAGES_FINDING_CODES` coverage audit.** Confirm
-  whether any real finding code is currently mis-splitting across pages.
+- **M14: `MERGE_ACROSS_PAGES_FINDING_CODES` coverage audit — SHIPPED
+  2026-08-18. The suspected mis-splitting was real and severe.** Confirmed
+  against the real fluidcontrols.com report, not assumed: the same
+  constant-titled issue appeared as up to ELEVEN separate "unique"
+  findings (axe's `aria-hidden-body` ×11, `heading-order` ×9,
+  `color-contrast` ×7, plus post-M15 the per-page Lighthouse codes)
+  because per-page observed values — metric numbers, HTML excerpts —
+  always differ, so the observed-signature dimension structurally
+  prevented cross-page merging. Fix: (1) whitelisted the 17 worker
+  page-analysis codes (all constant-titled) for cross-page merging;
+  (2) accessibility-type findings now merge by axe RULE identity (the
+  rule set is open, so type-based, not enumerable) — their per-page HTML
+  excerpts are occurrence detail, not identity. The resource-kind
+  dimension stays in the key (element-backed vs page-level evidence still
+  distinguishes). Severity escalates to the worst merged occurrence, per
+  the existing contract. **Live-verified on a real regenerated report:
+  282 → 188 unique findings; aria-hidden-body 11 → 2 (remaining split is
+  the legitimate resource-kind dimension); every remaining duplicate
+  title pair verified as genuinely distinct (per-section/per-group
+  findings).** Codes with page-specific titles (e.g. the L2
+  render-blocking test code) deliberately NOT whitelisted — they must
+  keep splitting. 3 new tests pin merge, accessibility-identity merge,
+  and unlisted-code splitting. Covered by TEMPLATE_VERSION 2.2.0.
 - **M18: HTML/W3C Nu Checker integration.** From the historical doc — likely
   genuinely absent today (not yet confirmed), a real new capability rather
   than a fix. Doc's own correction worth keeping regardless of the rest:

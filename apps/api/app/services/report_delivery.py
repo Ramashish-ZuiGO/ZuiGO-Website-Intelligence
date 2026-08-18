@@ -184,6 +184,13 @@ SEVERITY_ORDER = {
 # not a distinct issue per page -- _group_detailed_findings suppresses
 # observed_signature for these so they merge into one Complete Findings
 # Register entry across every affected page, same as browser_engine_compatibility.
+# M14: codes whose identity is page-invariant merge into ONE unique finding
+# with per-page occurrences (the unique-finding vs occurrence contract).
+# Confirmed against a real report before extending: the same
+# constant-titled issue (e.g. "Largest Contentful Paint is high",
+# axe's aria-hidden-body) appeared as up to 11 separate "unique" findings
+# purely because per-page observed values (metric numbers, HTML excerpts)
+# differ. Codes with page-specific titles must NOT be listed here.
 MERGE_ACROSS_PAGES_FINDING_CODES = frozenset(
     {
         "browser_engine_compatibility",
@@ -191,6 +198,26 @@ MERGE_ACROSS_PAGES_FINDING_CODES = frozenset(
         "tier0_clipped_elements",
         "tier0_overlapping_elements",
         "tier0_small_tap_targets",
+        # Worker page-analysis codes (generate_findings) -- titles constant.
+        "css_mime_type_failure",
+        "failed_network_requests",
+        "first_party_javascript_failure",
+        "high_cls",
+        "high_lcp",
+        "high_total_blocking_time",
+        "images_missing_alt",
+        "javascript_runtime_errors",
+        "missing_canonical_url",
+        "missing_h1",
+        "missing_html_language",
+        "missing_meta_description",
+        "missing_page_title",
+        "multiple_h1",
+        "non_https_website",
+        "poor_lighthouse_accessibility",
+        "poor_lighthouse_best_practices",
+        "poor_lighthouse_performance",
+        "poor_lighthouse_seo",
     }
 )
 SAFE_FILENAME_PATTERN = re.compile(r"[^a-z0-9._-]+")
@@ -1430,8 +1457,13 @@ def _group_detailed_findings(
                 }
             )
         )
+        # Accessibility findings merge by axe rule identity: the rule id is
+        # an open set (any axe rule), and their occurrences embed per-page
+        # HTML excerpts as observed values, so without this they can
+        # structurally never merge across pages.
         merges_across_pages = (
             str(finding.get("finding_code", "")).casefold() in MERGE_ACROSS_PAGES_FINDING_CODES
+            or str(finding.get("finding_type", "")).casefold() == "accessibility"
         )
         key = (
             str(

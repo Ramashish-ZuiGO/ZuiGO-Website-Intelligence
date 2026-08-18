@@ -872,3 +872,69 @@ class TestLimitationIdStability:
         by_message = {item.message: item for item in result}
         assert by_message["Novel limitation with a taxonomy."].kind == "optional_infrastructure"
         assert by_message["Novel limitation without one."].kind is None
+
+
+class TestCrossPageMergeContract:
+    """M14 (docs/REPORT_QUALITY_INITIATIVE.md): page-invariant finding
+    codes and axe accessibility rules must merge into one unique finding
+    with per-page occurrences. Confirmed against a real report: the same
+    constant-titled issue appeared as up to 11 separate "unique" findings
+    because per-page observed values (metric numbers, HTML excerpts)
+    always differ.
+    """
+
+    @staticmethod
+    def _payload(code: str, finding_type: str, url: str, observed: str) -> dict:
+        return {
+            "finding_id": f"{code}:{url}",
+            "rule_signature": code,
+            "finding_code": code,
+            "finding_type": finding_type,
+            "issue_title": "Constant title",
+            "category": "performance",
+            "scope": "page",
+            "severity": "high",
+            "exact_occurrences": [{"normalized_url": url, "observed_value": observed}],
+            "evidence_references": [],
+            "related_finding_ids": [],
+        }
+
+    def test_high_lcp_merges_across_pages_despite_differing_values(self) -> None:
+        from app.services.report_delivery import _group_detailed_findings
+
+        grouped = _group_detailed_findings(
+            [
+                self._payload("HIGH_LCP", "page_analysis", "https://a.test/", "LCP 4.2s"),
+                self._payload("HIGH_LCP", "page_analysis", "https://a.test/b", "LCP 3.1s"),
+                self._payload("HIGH_LCP", "page_analysis", "https://a.test/c", "LCP 5.0s"),
+            ]
+        )
+        assert len(grouped) == 1
+        assert grouped[0]["occurrence_count"] == 3
+
+    def test_accessibility_rules_merge_by_rule_identity(self) -> None:
+        from app.services.report_delivery import _group_detailed_findings
+
+        grouped = _group_detailed_findings(
+            [
+                self._payload(
+                    "aria-hidden-body", "accessibility", "https://a.test/", "<body class='x'>"
+                ),
+                self._payload(
+                    "aria-hidden-body", "accessibility", "https://a.test/b", "<body class='y'>"
+                ),
+            ]
+        )
+        assert len(grouped) == 1
+        assert grouped[0]["occurrence_count"] == 2
+
+    def test_unlisted_codes_still_split_on_observed_values(self) -> None:
+        from app.services.report_delivery import _group_detailed_findings
+
+        grouped = _group_detailed_findings(
+            [
+                self._payload("custom_code", "page_analysis", "https://a.test/", "value one"),
+                self._payload("custom_code", "page_analysis", "https://a.test/b", "value two"),
+            ]
+        )
+        assert len(grouped) == 2

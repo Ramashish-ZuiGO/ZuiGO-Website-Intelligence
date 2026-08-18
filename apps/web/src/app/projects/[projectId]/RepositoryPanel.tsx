@@ -19,13 +19,11 @@ interface RepositoryPanelProps {
 }
 
 
-const PROVIDER_OPTIONS = [
-  { value: "local", label: "Local" },
-  { value: "github", label: "GitHub" },
-  { value: "gitlab", label: "GitLab" },
-  { value: "bitbucket", label: "Bitbucket" },
-  { value: "azure_devops", label: "Azure DevOps" },
-];
+// Only local filesystem repositories are actually implemented -- the
+// backend's create_connection route only branches on provider == "local";
+// nothing anywhere scans, clones, or authenticates against a remote
+// provider. There is no real choice for a user to make here.
+const REPOSITORY_PROVIDER = "local";
 
 export function RepositoryPanel({ projectId }: RepositoryPanelProps) {
   const [connection, setConnection] = useState<RepositoryConnection | null>(null);
@@ -160,7 +158,7 @@ export function RepositoryPanel({ projectId }: RepositoryPanelProps) {
           method: "POST",
           body: JSON.stringify({
             project_id: projectId,
-            provider: formData.get("provider"),
+            provider: REPOSITORY_PROVIDER,
             display_name: formData.get("display_name"),
             local_root: formData.get("local_root"),
             remote_url: formData.get("remote_url") || null,
@@ -302,18 +300,11 @@ export function RepositoryPanel({ projectId }: RepositoryPanelProps) {
       {!connection && (
         <div className="mt-4 rounded-xl border bg-white p-4">
           <h4 className="font-semibold">Connect Repository</h4>
+          <p className="mt-1 text-xs text-slate-500">
+            Connects to a local filesystem clone of your repository. Remote-hosted
+            providers (GitHub, GitLab, etc.) are not yet supported.
+          </p>
           <form className="mt-4 grid gap-4 sm:grid-cols-2" onSubmit={(e) => void createConnection(e)}>
-            <label className="grid gap-1.5 text-sm font-medium">
-              Provider
-              <select
-                aria-label="Repository provider"
-                className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                defaultValue="local"
-                name="provider"
-              >
-                {PROVIDER_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-              </select>
-            </label>
             <label className="grid gap-1.5 text-sm font-medium">
               Display name
               <input

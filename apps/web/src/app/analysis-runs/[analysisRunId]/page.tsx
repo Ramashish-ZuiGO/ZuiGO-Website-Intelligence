@@ -1282,7 +1282,19 @@ export default function AnalysisReportPage() {
   };
   const diagnostics = Object.entries(report.diagnostics);
   const copyright = report.diagnostics.policy_diagnostics?.copyright;
-  if (copyright) diagnostics.splice(3, 0, ["copyright_diagnostics", copyright]);
+  if (copyright) {
+    // Copyright lives nested under policy_diagnostics on the backend, not
+    // as its own top-level key -- promote it to sit right after its parent
+    // (Policies and Legal Metadata) rather than a hardcoded index, which
+    // would silently misplace it if the diagnostics object's key order or
+    // count ever changes.
+    const policyIndex = diagnostics.findIndex(([key]) => key === "policy_diagnostics");
+    diagnostics.splice(
+      policyIndex === -1 ? diagnostics.length : policyIndex + 1,
+      0,
+      ["copyright_diagnostics", copyright],
+    );
+  }
   const auditBreakdown = Array.isArray(
     report.lighthouse_metrics.lighthouse_audit_breakdown,
   )
@@ -1803,7 +1815,7 @@ export default function AnalysisReportPage() {
                <SectionErrorBoundary sectionName="Methodology">
                  <section className="rounded-xl border border-z-border bg-z-surface p-6">
                    <h2 className="text-lg font-bold text-z-ink mb-4">Methodology</h2>
-                   <dl className="grid gap-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
+                   <dl className="grid gap-4 text-sm sm:grid-cols-2 lg:grid-cols-3">
                      <div className="bg-z-surface border border-z-border p-4 rounded-lg">
                        <dt className="text-z-ink-secondary font-semibold mb-1">Scoring formula</dt>
                        <dd className="font-mono text-xs">v{report.score.formula_version}</dd>

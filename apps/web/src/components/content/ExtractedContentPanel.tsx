@@ -181,8 +181,10 @@ export default function ExtractedContentPanel({ analysisRunId }: { analysisRunId
           {tabs.map((tab) => (
             <button
               key={tab.id}
+              id={`extracted-content-tab-${tab.id}`}
               role="tab"
               aria-selected={activeTab === tab.id}
+              aria-controls={`extracted-content-tabpanel-${tab.id}`}
               onClick={() => setActiveTab(tab.id)}
               className={`px-3 py-2 text-sm font-medium rounded-t-lg whitespace-nowrap transition-colors ${
                 activeTab === tab.id
@@ -202,7 +204,13 @@ export default function ExtractedContentPanel({ analysisRunId }: { analysisRunId
       </div>
 
       {/* Tab Content */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm">
+      <div
+        className="bg-white rounded-xl border border-slate-200 shadow-sm"
+        id={`extracted-content-tabpanel-${activeTab}`}
+        role="tabpanel"
+        aria-labelledby={`extracted-content-tab-${activeTab}`}
+        tabIndex={0}
+      >
         {activeTab === "overview" && <OverviewTab content={content} />}
         {activeTab === "sections" && <SectionsTab content={content} />}
         {activeTab === "tables" && <TablesTab content={content} />}

@@ -136,6 +136,7 @@ export function DataTable<T>({
           <input
             type="search"
             placeholder={searchPlaceholder}
+            aria-label={caption ? `Search ${caption}` : searchPlaceholder.replace(/[.…]+$/, "") || "Search table"}
             value={search}
             onChange={(e) => {
               setSearch(e.target.value);
@@ -156,17 +157,33 @@ export function DataTable<T>({
                 <th
                   key={col.key}
                   scope="col"
-                  className={`${cellPadding} text-xs font-semibold uppercase tracking-wide text-slate-500 ${col.headerClassName ?? ""} ${col.sortable ? "cursor-pointer select-none hover:text-slate-700" : ""}`}
-                  onClick={col.sortable ? () => handleSort(col.key) : undefined}
+                  aria-sort={
+                    !col.sortable
+                      ? undefined
+                      : sortKey !== col.key
+                        ? "none"
+                        : sortDir === "asc"
+                          ? "ascending"
+                          : "descending"
+                  }
+                  className={`${cellPadding} text-xs font-semibold uppercase tracking-wide text-slate-500 ${col.headerClassName ?? ""}`}
                 >
-                  <span className="inline-flex items-center gap-1">
-                    {col.header}
-                    {col.sortable && sortKey === col.key && (
-                      <span aria-hidden="true">
-                        {sortDir === "asc" ? "↑" : "↓"}
-                      </span>
-                    )}
-                  </span>
+                  {col.sortable ? (
+                    <button
+                      className="inline-flex items-center gap-1 hover:text-slate-700"
+                      onClick={() => handleSort(col.key)}
+                      type="button"
+                    >
+                      {col.header}
+                      {sortKey === col.key && (
+                        <span aria-hidden="true">
+                          {sortDir === "asc" ? "↑" : "↓"}
+                        </span>
+                      )}
+                    </button>
+                  ) : (
+                    <span className="inline-flex items-center gap-1">{col.header}</span>
+                  )}
                 </th>
               ))}
             </tr>
@@ -177,7 +194,19 @@ export function DataTable<T>({
                 <tr
                   key={keyExtractor(row, safePage * pageSize + index)}
                   className={`transition-colors hover:bg-slate-50 ${onRowClick ? "cursor-pointer" : ""}`}
-                  onClick={() => onRowClick?.(row)}
+                  onClick={onRowClick ? () => onRowClick(row) : undefined}
+                  onKeyDown={
+                    onRowClick
+                      ? (event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            onRowClick(row);
+                          }
+                        }
+                      : undefined
+                  }
+                  role={onRowClick ? "button" : undefined}
+                  tabIndex={onRowClick ? 0 : undefined}
                 >
                   {columns.map((col) => (
                     <td

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { ProfileDefinition } from "@/components/metrics/types";
 import { apiRequest } from "@/lib/api";
 
@@ -11,6 +11,7 @@ interface ProfileSelectorProps {
 }
 
 export function ProfileSelector({ websiteId, currentProfileId, onProfileChange }: ProfileSelectorProps) {
+  const selectId = useId();
   const [profiles, setProfiles] = useState<ProfileDefinition[]>([]);
   const [selected, setSelected] = useState(currentProfileId);
   const [isLoading, setIsLoading] = useState(true);
@@ -61,9 +62,9 @@ export function ProfileSelector({ websiteId, currentProfileId, onProfileChange }
 
   return (
     <div className="flex flex-col gap-2">
-      <label htmlFor="profile-select" className="text-sm font-semibold text-slate-700">Evaluation Profile</label>
+      <label htmlFor={selectId} className="text-sm font-semibold text-slate-700">Evaluation Profile</label>
       <select
-        id="profile-select"
+        id={selectId}
         value={selected}
         onChange={handleChange}
         className="w-[280px] rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-slate-500 focus:outline-none"

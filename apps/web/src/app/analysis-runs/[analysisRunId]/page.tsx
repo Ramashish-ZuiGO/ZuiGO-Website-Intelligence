@@ -1433,10 +1433,14 @@ export default function AnalysisReportPage() {
 
       {/* Secondary Sticky Navigation */}
       <div className="sticky top-0 z-40 -mx-4 px-4 sm:mx-0 sm:px-0 mb-8 bg-z-surface/95 backdrop-blur-md border-b border-z-border overflow-x-auto custom-scrollbar">
-         <nav className="flex space-x-1 min-w-max" aria-label="Tabs">
+         <nav className="flex space-x-1 min-w-max" aria-label="Tabs" role="tablist">
             {TABS.map(tab => (
               <button
                 key={tab.id}
+                id={`tab-${tab.id}`}
+                role="tab"
+                aria-selected={activeTab === tab.id}
+                aria-controls={`tabpanel-${tab.id}`}
                 onClick={() => setActiveTab(tab.id as TabId)}
                 className={`whitespace-nowrap flex-shrink-0 px-4 py-3 text-sm font-bold border-b-2 transition-colors ${
                   activeTab === tab.id
@@ -1453,7 +1457,7 @@ export default function AnalysisReportPage() {
       <div className="min-h-[600px] mb-20">
          {/* OVERVIEW TAB */}
          {activeTab === 'overview' && (
-           <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
+           <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300" id="tabpanel-overview" role="tabpanel" aria-labelledby="tab-overview" tabIndex={0}>
              {/* Category Scores */}
               <section className="rounded-xl border border-z-border bg-z-surface p-6">
                 <h2 className="text-lg font-bold text-z-ink">Category Scores</h2>
@@ -1546,14 +1550,14 @@ export default function AnalysisReportPage() {
 
          {/* FINDINGS TAB */}
          {activeTab === 'findings' && (
-            <div className="animate-in fade-in slide-in-from-bottom-2 duration-300 h-full min-h-[600px]">
+            <div className="animate-in fade-in slide-in-from-bottom-2 duration-300 h-full min-h-[600px]" id="tabpanel-findings" role="tabpanel" aria-labelledby="tab-findings" tabIndex={0}>
               <IssueRegister findings={safeFindings} />
             </div>
          )}
 
          {/* PERFORMANCE TAB */}
          {activeTab === 'performance' && (
-            <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
+            <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300" id="tabpanel-performance" role="tabpanel" aria-labelledby="tab-performance" tabIndex={0}>
                <SectionErrorBoundary sectionName="Performance Intelligence">
                  <PerformanceIntelligence data={performanceData as unknown as React.ComponentProps<typeof PerformanceIntelligence>['data']} />
                </SectionErrorBoundary>
@@ -1605,7 +1609,7 @@ export default function AnalysisReportPage() {
 
          {/* ACCESSIBILITY TAB */}
          {activeTab === 'accessibility' && (
-            <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
+            <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300" id="tabpanel-accessibility" role="tabpanel" aria-labelledby="tab-accessibility" tabIndex={0}>
                <SectionErrorBoundary sectionName="Accessibility Intelligence">
                   <AccessibilityIntelligence accessibilityData={accessibilityData} />
                </SectionErrorBoundary>
@@ -1625,7 +1629,7 @@ export default function AnalysisReportPage() {
 
          {/* SEO & CONTENT TAB */}
          {activeTab === 'seo' && (
-            <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
+            <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300" id="tabpanel-seo" role="tabpanel" aria-labelledby="tab-seo" tabIndex={0}>
                <SectionErrorBoundary sectionName="Extracted Content">
                  <section className="rounded-xl border border-z-border bg-z-surface p-6">
                    <h2 className="text-lg font-bold text-z-ink">Extracted Content</h2>
@@ -1639,7 +1643,7 @@ export default function AnalysisReportPage() {
 
          {/* SECURITY & TECHNICAL TAB */}
          {activeTab === 'technical' && (
-            <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
+            <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300" id="tabpanel-technical" role="tabpanel" aria-labelledby="tab-technical" tabIndex={0}>
                <SectionErrorBoundary sectionName="Verified Diagnostics">
                   <section className="rounded-xl border border-z-border bg-z-surface p-6">
                     <h2 className="text-lg font-bold text-z-ink mb-4">Verified Diagnostics</h2>
@@ -1716,7 +1720,7 @@ export default function AnalysisReportPage() {
 
          {/* BROWSER & RESPONSIVE TAB */}
          {activeTab === 'browser' && (
-            <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
+            <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300" id="tabpanel-browser" role="tabpanel" aria-labelledby="tab-browser" tabIndex={0}>
                <SectionErrorBoundary sectionName="Browser Compatibility">
                  <section className="rounded-xl border border-z-border bg-z-surface p-6">
                    <h2 className="text-lg font-bold text-z-ink mb-2">Browser UAT & Responsive Verification</h2>
@@ -1737,7 +1741,7 @@ export default function AnalysisReportPage() {
 
          {/* PAGES TAB */}
          {activeTab === 'pages' && (
-            <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
+            <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300" id="tabpanel-pages" role="tabpanel" aria-labelledby="tab-pages" tabIndex={0}>
                <SectionErrorBoundary sectionName="Pages Analysis">
                  <section className="rounded-xl border border-z-border bg-z-surface p-6">
                    <h2 className="text-lg font-bold text-z-ink mb-4">Discovered Pages Analysis</h2>
@@ -1749,7 +1753,7 @@ export default function AnalysisReportPage() {
 
          {/* ACTION PLAN TAB */}
          {activeTab === 'actions' && (
-            <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
+            <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300" id="tabpanel-actions" role="tabpanel" aria-labelledby="tab-actions" tabIndex={0}>
                <section className="rounded-xl border border-z-border bg-z-surface p-6">
                  <h2 className="text-lg font-bold text-z-ink mb-4">Priority Action Plan</h2>
                  {topActions.length > 0 ? (
@@ -1787,7 +1791,7 @@ export default function AnalysisReportPage() {
 
          {/* EVIDENCE & LIMITATIONS TAB */}
          {activeTab === 'evidence' && (
-            <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
+            <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300" id="tabpanel-evidence" role="tabpanel" aria-labelledby="tab-evidence" tabIndex={0}>
                <SectionErrorBoundary sectionName="Agent Execution">
                   <AgentExecutionPanel analysisRunId={analysisRunId} />
                </SectionErrorBoundary>

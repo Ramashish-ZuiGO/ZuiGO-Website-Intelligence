@@ -205,6 +205,7 @@ export default function Home() {
                             {option.label}
                           </span>
                         </div>
+                        <span className="text-xs">{option.description}</span>
                       </label>
                     ))}
                   </div>

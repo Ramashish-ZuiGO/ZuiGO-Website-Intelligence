@@ -66,7 +66,6 @@ export function ProfileSelector({ websiteId, currentProfileId, onProfileChange }
         id="profile-select"
         value={selected}
         onChange={handleChange}
-        disabled={isLoading}
         className="w-[280px] rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-slate-500 focus:outline-none"
       >
         <option value="" disabled>Select a profile</option>

@@ -61,6 +61,20 @@ class Settings(BaseSettings):
     # against stale connections.
     db_pool_recycle_seconds: int = Field(default=-1, ge=-1, le=86_400)
 
+    # M2 (docs/REPORT_QUALITY_INITIATIVE.md): abuse protection. In-memory,
+    # per-process counters -- correct for this deployment's single uvicorn
+    # worker process (no --workers flag); would need a shared store (Redis is
+    # already a dependency) if the API ever scales to multiple processes.
+    # Upper bound is high enough to let the test suite set an effectively
+    # unlimited value (tests/conftest.py) without tripping across its
+    # thousands of requests through the shared app singleton.
+    rate_limit_general_per_minute: int = Field(default=120, ge=1, le=10_000_000)
+    # Applies specifically to endpoints that trigger a real, expensive
+    # Playwright/Lighthouse analysis run (each can take up to an hour) --
+    # much stricter than the general limit.
+    rate_limit_expensive_per_minute: int = Field(default=5, ge=1, le=10_000_000)
+    max_request_body_bytes: int = Field(default=5_000_000, ge=1_024, le=100_000_000)
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @property

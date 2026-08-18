@@ -420,9 +420,7 @@ prioritized against each other; that's part of the discussion.
 - **M1: Authentication & tenant isolation.** Currently zero. Scope
   decision needed: how much is actually required for this deployment
   (single-operator tool vs. multi-tenant SaaS?) before designing anything.
-- **M2: Abuse protection.** Rate limiting + request-size limiting on the
-  public analyze-website endpoint. Directly compounds with M1 — an
-  anonymous, unlimited caller can trigger real expensive analysis runs.
+- **M2: Abuse protection — SHIPPED 2026-08-18, see full writeup below.**
 
 ### Tier 2 — customer-facing correctness (the report says something wrong or misleading)
 
@@ -746,6 +744,67 @@ the real, severe gap. The Performance live endpoint's raw-label/epoch-
 timestamp formatting (M16) and the Pages tab's dead-button/raw-UUID claims
 (M17) remain separate, unverified, un-fixed items.
 
+### M2 — SHIPPED 2026-08-18
+
+**What shipped:** zero rate limiting or request-size limiting existed
+anywhere in the API — combined with the (fixed) zero-auth gap, a caller
+could trigger unbounded real Playwright/Lighthouse runs or send arbitrarily
+large bodies. New `apps/api/app/middleware/rate_limiting.py`:
+1. `RateLimitMiddleware` — general per-client-IP limit (default 120/min)
+   across all endpoints, plus a much stricter limit (default 5/min) for
+   endpoints that dispatch a real, potentially hour-long analysis run
+   (`POST /workflow-executions`, `/discovery-runs`, `/resume`, `/retry`,
+   `/reanalyse` — enumerated by reading every real dispatch call site, not
+   guessed). In-memory fixed-window counters, correct for this deployment's
+   single uvicorn worker process (no `--workers` flag); would need a shared
+   store (Redis is already a dependency) if the API ever scales to multiple
+   processes — documented as a comment, not silently assumed forever.
+2. `RequestSizeLimitMiddleware` — rejects bodies over 5MB by default.
+   Checks `Content-Length` first (rejects the common case without reading
+   any body); for chunked/no-Content-Length requests, buffers up to the
+   limit and replays to the wrapped app (correct here since these are small
+   JSON payloads, never uploads).
+
+**Real bug caught before shipping, not after:** both middlewares are raw
+ASGI, and registering them AFTER `CORSMiddleware` (outside it) would mean
+their 429/413 responses carry no CORS headers — a legitimate browser caller
+getting rate-limited would see a misleading CORS error instead of the real
+error. Caught by re-reading the EXACT same reasoning already documented in
+`main.py`'s existing comment for `UnexpectedErrorEnvelopeMiddleware`
+("Registered before CORSMiddleware so it sits INSIDE the CORS layer") —
+applied the identical fix before ever running the app, then wrote a
+dedicated test (`test_rate_limited_response_still_carries_cors_headers`)
+proving it.
+
+**Real test-suite conflict found and solved correctly, not hacked around:**
+Starlette's `TestClient` reports a fixed pseudo-client address for every
+request, and the ~20 existing test files all share the one `app` module
+singleton — meaning the full suite's thousands of requests would share ONE
+rate-limit bucket and start failing with real 429s. Solved the same way
+`tests/conftest.py` already handles the analogous M1 auth problem: env-var
+defaults (`RATE_LIMIT_GENERAL_PER_MINUTE`/`RATE_LIMIT_EXPENSIVE_PER_MINUTE`
+set to 1,000,000 in `tests/conftest.py`) relax the shared app's limits so
+the general suite never trips them, while a dedicated new test module
+(`tests/api/test_rate_limiting.py`, 20 tests) builds small standalone
+Starlette apps with real low thresholds to prove the actual mechanism —
+limiter unit behavior, the expensive-endpoint path matcher, 429 responses
+with the correct error envelope, the CORS-header regression test above, and
+both request-size-limit code paths (Content-Length rejection and buffered
+chunked-body rejection).
+
+**Live-verified against the real docker stack** (image rebuilt first): a
+scripted burst of 125 real requests against the running container's
+`/health` genuinely returned `429 RATE_LIMIT_EXCEEDED` with the correct
+error envelope after crossing the general threshold; waited for the 60s
+window to elapse and confirmed real recovery (`200` again, container stayed
+`Up ... (healthy)` throughout — Docker's own healthcheck polls only every
+10s, well under the limit, so it was never at risk). A real oversized
+(6MB) login request against the running container returned a genuine
+`413 REQUEST_BODY_TOO_LARGE`.
+
+**Tests:** 20 new (`test_rate_limiting.py`). Full suite: 1148 passed, 1
+skipped (was 1128 before M2). `ruff check`/`ruff format --check` both clean.
+
 ## 6. Non-negotiable constraints for this initiative
 
 Inherited from `CLAUDE.md`, restated here for portability:
@@ -778,6 +837,21 @@ Inherited from `CLAUDE.md`, restated here for portability:
    it as a standing review criterion, not a one-time module.
 
 ## 7. Decision log
+
+- **2026-08-18 — Process changed: continuous execution, no more per-module
+  approval gates.** User: "we are going very slow and manual process... u
+  have to decide the next plan right now and u have to start the
+  implementation then without interruption." Asked 3 clarifying questions
+  up front (scope, frontend ownership, git cadence) per the user's own
+  instruction to ask what's needed then proceed uninterrupted. Decisions:
+  (1) scope is every remaining module except M12 (feedback collection,
+  stays deferred per the earlier explicit instruction); (2) Claude now
+  edits `apps/web` directly for this initiative's modules instead of
+  writing Antigravity handoff specs; (3) commit + push both branches
+  automatically after each module's tests pass, no per-module approval
+  gate. Full reasoning in memory (`feedback_continuous_autonomous_execution`
+  in the cross-session memory system) since this is a durable process
+  change, not specific to this document.
 
 - **2026-08-16 — Initiative started:** user reported the Browser UAT tab
   looked broken (screenshot), which led to finding and fixing the

@@ -30,6 +30,16 @@ os.environ.setdefault(
     "ADMIN_PASSWORD_HASH", "$2b$12$r0nu6RSqzlpFX6KdKHLvIOZ3zw9hVnth5QoQAqloy4qH1JChdG/KC"
 )
 os.environ.setdefault("JWT_SECRET_KEY", "test-jwt-secret-key-that-is-at-least-32-bytes-long")
+# M2's RateLimitMiddleware shares in-memory counters across every request
+# made through the module-level `app` singleton, and Starlette's TestClient
+# reports a fixed pseudo-client address for all requests -- without this,
+# the full suite's thousands of requests would share one rate-limit bucket
+# and start failing with real 429s. The middleware itself is still exercised
+# on every request; only the threshold is raised so the general suite never
+# trips it. tests/api/test_rate_limiting.py exercises the real, low
+# production defaults directly against isolated middleware instances.
+os.environ.setdefault("RATE_LIMIT_GENERAL_PER_MINUTE", "1000000")
+os.environ.setdefault("RATE_LIMIT_EXPENSIVE_PER_MINUTE", "1000000")
 
 from collections.abc import Iterator
 

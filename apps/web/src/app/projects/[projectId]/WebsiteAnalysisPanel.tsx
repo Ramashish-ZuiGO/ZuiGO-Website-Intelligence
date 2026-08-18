@@ -241,7 +241,7 @@ export function WebsiteAnalysisPanel({
           <p className="text-sm font-semibold text-slate-700">Latest analysis</p>
           <p className="mt-1 text-sm text-slate-600">
             {statusLabel}
-            {latestRun ? ` · ${latestRun.progress_percent}%` : ""}
+            {latestRun ? ` · ${Math.round(latestRun.progress_percent)}%` : ""}
           </p>
           {latestRun?.current_step && (
             <p className="mt-1 text-sm text-slate-500">{latestRun.current_step}</p>
@@ -280,7 +280,7 @@ export function WebsiteAnalysisPanel({
       </div>
 
       {latestRun && (
-        <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-200" aria-label={`Analysis progress ${latestRun.progress_percent}%`}>
+        <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-200" aria-label={`Analysis progress ${Math.round(latestRun.progress_percent)}%`}>
           <div className="h-full bg-emerald-600 transition-all" style={{ width: `${latestRun.progress_percent}%` }} />
         </div>
       )}
@@ -347,7 +347,7 @@ export function WebsiteAnalysisPanel({
                   <span className="sr-only">Compare</span>
                 </label>
                 <span className="font-semibold capitalize">{run.status}</span>
-                <span className="text-slate-500"> · {run.progress_percent}% · {new Date(run.created_at).toLocaleString()}</span>
+                <span className="text-slate-500"> · {Math.round(run.progress_percent)}% · {new Date(run.created_at).toLocaleString()}</span>
                 {run.status === "completed" && (
                   <a
                     className="ml-3 inline-block font-semibold text-slate-900 underline"

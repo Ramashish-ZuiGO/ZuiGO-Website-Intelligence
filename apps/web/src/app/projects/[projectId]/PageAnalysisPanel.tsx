@@ -131,7 +131,7 @@ export function PageAnalysisPanel({ websiteId }: PageAnalysisPanelProps) {
                 onClick={() => setActiveTab(tab)}
                 type="button"
               >
-                {tab.charAt(0).toUpperCase() + tab.slice(1).replace("_", " ")}
+                {tab.charAt(0).toUpperCase() + tab.slice(1).replaceAll("_", " ")}
               </button>
             ))}
           </div>
@@ -317,7 +317,7 @@ export function PageAnalysisPanel({ websiteId }: PageAnalysisPanelProps) {
                         <p className="text-xs text-slate-500">{pageTitle || "—"}</p>
                         {Object.entries(statuses).map(([level, info]) => (
                           <div className="mt-2 rounded-lg bg-red-50 p-2 text-sm" key={level}>
-                            <p className="font-semibold capitalize">{level.replace("_", " ")}</p>
+                            <p className="font-semibold capitalize">{level.replaceAll("_", " ")}</p>
                             <p className="text-red-700">
                               <StatusBadge status={info.status} />
                               {" "}

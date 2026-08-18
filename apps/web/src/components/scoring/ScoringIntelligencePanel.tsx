@@ -11,6 +11,7 @@ import type {
 } from "@/components/scoring/types";
 import { ApiError } from "@/lib/api";
 import { scoringApi } from "@/lib/scoring-api";
+import { formatPercent, formatScore } from "@/lib/format";
 
 const PAGE_SIZE = 10;
 
@@ -29,10 +30,6 @@ function errorText(error: unknown): string {
     return `${error.message}${request}`;
   }
   return error instanceof Error ? error.message : "Score data could not be loaded.";
-}
-
-function scoreText(value: number | null): string {
-  return value === null ? "Unavailable" : `${value}/100`;
 }
 
 function Trend({ trend }: { trend: Record<string, unknown> }) {
@@ -184,7 +181,7 @@ export function ScoringIntelligencePanel({
             <div className="mt-3 grid gap-3 sm:grid-cols-4">
               <div className="rounded-xl bg-slate-950 p-4 text-white">
                 <p className="text-xs uppercase">Overall score</p>
-                <p className="mt-1 text-4xl font-bold">{scoreText(execution.overall_score)}</p>
+                <p className="mt-1 text-4xl font-bold">{formatScore(execution.overall_score)}</p>
               </div>
               <div className="rounded-xl bg-slate-50 p-4">
                 <p className="text-xs text-slate-500">Status</p>
@@ -193,7 +190,7 @@ export function ScoringIntelligencePanel({
               <div className="rounded-xl bg-slate-50 p-4">
                 <p className="text-xs text-slate-500">Confidence</p>
                 <p className="mt-1 font-bold">
-                  {execution.confidence_percent === null ? "Unavailable" : `${execution.confidence_percent}%`}
+                  {formatPercent(execution.confidence_percent)}
                   {" · "}{execution.confidence_classification}
                 </p>
               </div>
@@ -202,9 +199,7 @@ export function ScoringIntelligencePanel({
                 <p className="mt-1 font-bold">
                   {execution.evidence_coverage_numerator}/{execution.evidence_coverage_denominator}
                   {" · "}
-                  {execution.evidence_coverage_percentage === null
-                    ? "Unavailable"
-                    : `${execution.evidence_coverage_percentage.toFixed(1)}%`}
+                  {formatPercent(execution.evidence_coverage_percentage)}
                 </p>
               </div>
             </div>
@@ -216,13 +211,15 @@ export function ScoringIntelligencePanel({
                 <li className="rounded-xl border p-4" key={category.category_id}>
                   <div className="flex justify-between gap-3">
                     <strong className="capitalize">{category.category_id.replaceAll("_", " ")}</strong>
-                    <span>{scoreText(category.final_score)}</span>
+                    <span>{formatScore(category.final_score)}</span>
                   </div>
                   <p className="mt-1 text-sm capitalize">Band: {category.band.replaceAll("_", " ")}</p>
                   {category.included ? (
                     <p className="mt-1 text-xs text-slate-600">
-                      Weight {(category.configured_weight * 100).toFixed(0)}%;
-                      normalized {((category.normalized_weight ?? 0) * 100).toFixed(2)}%;
+                      Weight {formatPercent(category.configured_weight * 100)};
+                      normalized {formatPercent((category.normalized_weight ?? 0) * 100)};
+                      {/* contribution is a formula amount, not a percentage -- keeps its
+                          own higher precision for reproducibility transparency. */}
                       contribution {category.contribution?.toFixed(3)}
                     </p>
                   ) : (
@@ -244,7 +241,7 @@ export function ScoringIntelligencePanel({
                     <th className="p-2 font-mono">{item.metric_id}</th>
                     <td>{String(item.raw_value.value ?? "Unavailable")}</td>
                     <td>{item.normalized_value ?? "Unavailable"}</td>
-                    <td>{item.normalized_weight === null ? "Excluded" : `${(item.normalized_weight * 100).toFixed(2)}%`}</td>
+                    <td>{item.normalized_weight === null ? "Excluded" : formatPercent(item.normalized_weight * 100)}</td>
                     <td>{item.contribution?.toFixed(3) ?? "Unavailable"}</td>
                     <td className="capitalize">{item.inclusion_status}</td>
                   </tr>
@@ -289,7 +286,7 @@ export function ScoringIntelligencePanel({
             <label className="text-xs">Profile<select className="ml-1 rounded border p-1" onChange={(event) => { setProfileFilter(event.target.value); setOffset(0); }} value={profileFilter}><option value="">All</option>{profiles.map((profile) => <option key={profile.profile_id} value={profile.profile_id}>{profile.name}</option>)}</select></label>
           </div>
         </div>
-        {history.length === 0 ? <p className="mt-3 text-sm text-slate-600">No historical scoring executions match these filters.</p> : <ul className="mt-3 space-y-2">{history.map((item) => <li className="rounded-lg bg-slate-50 p-3 text-sm" key={item.execution_id}><strong>{scoreText(item.overall_score)}</strong> · {new Date(item.created_at).toLocaleString()} · {item.scoring_profile_id} v{item.scoring_profile_version}<div className="mt-2"><Trend trend={item.trend ?? { state: "unavailable" }} /></div></li>)}</ul>}
+        {history.length === 0 ? <p className="mt-3 text-sm text-slate-600">No historical scoring executions match these filters.</p> : <ul className="mt-3 space-y-2">{history.map((item) => <li className="rounded-lg bg-slate-50 p-3 text-sm" key={item.execution_id}><strong>{formatScore(item.overall_score)}</strong> · {new Date(item.created_at).toLocaleString()} · {item.scoring_profile_id} v{item.scoring_profile_version}<div className="mt-2"><Trend trend={item.trend ?? { state: "unavailable" }} /></div></li>)}</ul>}
         <div className="mt-3 flex justify-between text-sm"><button disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))} type="button">Previous</button><span>{historyTotal === 0 ? 0 : offset + 1}-{Math.min(offset + PAGE_SIZE, historyTotal)} of {historyTotal}</span><button disabled={offset + PAGE_SIZE >= historyTotal} onClick={() => setOffset(offset + PAGE_SIZE)} type="button">Next</button></div>
       </section>
     </section>

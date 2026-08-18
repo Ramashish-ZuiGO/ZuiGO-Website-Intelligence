@@ -347,7 +347,7 @@ function FAQsTab({ content }: { content: ExtractedContent }) {
         <details key={i} className="group border border-slate-200 rounded-lg">
           <summary className="flex items-center justify-between px-4 py-3 cursor-pointer text-sm font-medium text-slate-800 hover:bg-slate-50 rounded-lg">
             <span>{faq.question}</span>
-            <Badge variant="muted">{faq.source.replace("_", " ")}</Badge>
+            <Badge variant="muted">{faq.source.replaceAll("_", " ")}</Badge>
           </summary>
           <div className="px-4 pb-4 text-sm text-slate-600 leading-relaxed border-t border-slate-100 pt-3">
             {faq.answer}

@@ -57,14 +57,14 @@ function formatLabValue(metricId: string, value: number): string {
     return value.toFixed(3);
   }
   if (value >= 1000) {
-    return `${(value / 1000).toFixed(2)} s`;
+    return `${(value / 1000).toFixed(1)} s`;
   }
   return `${Math.round(value)} ms`;
 }
 
 function formatOffset(deltaMs: number): string {
   if (deltaMs >= 1000) {
-    return `+${(deltaMs / 1000).toFixed(2)} s`;
+    return `+${(deltaMs / 1000).toFixed(1)} s`;
   }
   return `+${Math.round(deltaMs)} ms`;
 }

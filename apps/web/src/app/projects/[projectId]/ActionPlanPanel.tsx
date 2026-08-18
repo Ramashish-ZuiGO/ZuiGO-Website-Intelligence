@@ -741,7 +741,7 @@ export function ActionPlanPanel({ websiteId, projectId }: ActionPlanPanelProps) 
                       onClick={() => void updateStatus(selectedAction.id, s)}
                       type="button"
                     >
-                      {s.replace("_", " ")}
+                      {s.replaceAll("_", " ")}
                     </button>
                   ))}
               </div>

@@ -2,10 +2,11 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+from app.models.agent_platform import AgentExecution
 from app.models.analysis_run import AnalysisRun
 from app.models.performance import PerformanceSnapshot
 from app.models.website import Website
@@ -69,8 +70,25 @@ def get_website_performance_comparison(website_id: uuid.UUID, db: DatabaseSessio
 @router.get("/analysis-runs/{run_id}/performance")
 def get_analysis_run_performance(run_id: uuid.UUID, db: DatabaseSession) -> dict:
     run = get_analysis_run_or_raise(db, run_id)
+    # FE-9: real field-performance (CrUX) evidence is collected once per
+    # page-analysis execution (worker_app/tasks/page_analysis.py), tagged by
+    # execution_id rather than analysis_run_id -- page analysis runs BEFORE
+    # the main AnalysisRun exists, so it never had a real analysis_run_id to
+    # tag rows with. This mirrors the same real pattern report_delivery.py
+    # already uses for L2 accessibility/lighthouse evidence (M15). Without
+    # this, field rows exist in the database but this endpoint -- the one
+    # the frontend Performance panel actually calls -- would never find them.
+    filters = [PerformanceSnapshot.analysis_run_id == run.id]
+    workflow = db.scalar(select(AgentExecution).where(AgentExecution.analysis_run_id == run.id))
+    page_execution_id = (
+        workflow.structured_input.get("page_analysis_execution_id") if workflow else None
+    )
+    if page_execution_id:
+        filters.append(PerformanceSnapshot.execution_id == uuid.UUID(str(page_execution_id)))
     snapshots = db.scalars(
-        select(PerformanceSnapshot).where(PerformanceSnapshot.analysis_run_id == run.id)
+        select(PerformanceSnapshot)
+        .where(PerformanceSnapshot.website_id == run.website_id, or_(*filters))
+        .order_by(PerformanceSnapshot.created_at.desc())
     ).all()
     return {"data": [{c.name: getattr(s, c.name) for c in s.__table__.columns} for s in snapshots]}
 

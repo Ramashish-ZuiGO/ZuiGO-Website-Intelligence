@@ -24,6 +24,7 @@ from app.models import (
     FindingSeverity,
     FindingSource,
     PageAnalysisRun,
+    PerformanceSnapshot,
     Project,
     ReportExecution,
     SiteDiagnosticExecution,
@@ -757,6 +758,123 @@ def test_deep_evidence_covers_l2_pages_not_just_the_homepage(
         assert l2_finding_titles == {
             f"Render-blocking resource on {page.normalized_url}" for page in l2_pages
         }
+
+
+def test_field_performance_evidence_reaches_the_performance_section(
+    report_api: tuple[
+        TestClient,
+        sessionmaker[Session],
+        uuid.UUID,
+        uuid.UUID,
+        uuid.UUID,
+        list[tuple[str, str, int]],
+    ],
+) -> None:
+    """FE-9: real Chrome UX Report field data, collected once per
+    page-analysis execution by worker_app/tasks/page_analysis.py, must
+    reach the performance section -- kept strictly separate from lab
+    findings, per M19's field/lab design principle.
+
+    Real bug this proves fixed: collect_performance_evidence had exactly
+    one caller anywhere in the codebase (a manual HTTP route with zero
+    real callers of its own), so CrUX field data never reached a real
+    customer report even with a working API key.
+    """
+    _client, factory, _project_id, website_id, run_id, _dispatched = report_api
+    with factory() as db:
+        workflow = db.scalar(select(AgentExecution).where(AgentExecution.analysis_run_id == run_id))
+        assert workflow is not None
+        now = datetime.now(UTC)
+        page_execution_id = uuid.uuid4()
+
+        db.add(
+            PerformanceSnapshot(
+                execution_id=page_execution_id,
+                website_id=website_id,
+                url_or_origin="https://report.test/",
+                evidence_source="crux",
+                evidence_type="field",
+                scope="url",
+                form_factor="desktop",
+                metric_id="field_lcp",
+                raw_value=2100.0,
+                percentile=75.0,
+                availability_status="available",
+                created_at=now,
+            )
+        )
+        workflow.structured_input = {
+            **workflow.structured_input,
+            "page_analysis_execution_id": str(page_execution_id),
+        }
+        db.commit()
+
+        generated, created = generate_report(
+            db,
+            run_id,
+            idempotency_key="field-evidence-report",
+        )
+
+        assert created is True
+        payload = generated.snapshot.snapshot_payload
+        performance_section = next(
+            item for item in payload["sections"] if item["section_key"] == "performance"
+        )
+        content = performance_section["content"]
+        assert content["field_evidence_available"] is True
+        assert content["field_evidence_unavailable_reason"] is None
+        assert content["field_evidence"] == [
+            {
+                "metric_id": "field_lcp",
+                "url_or_origin": "https://report.test/",
+                "scope": "url",
+                "form_factor": "desktop",
+                "percentile": 75.0,
+                "raw_value": 2100.0,
+                "collection_period_start": None,
+                "collection_period_end": None,
+            }
+        ]
+        # Field evidence must never blend into the lab findings/scores above
+        # it in the same section -- both stay independently readable.
+        assert content["field_and_lab_are_distinct"] is True
+
+
+def test_field_performance_evidence_absent_is_typed_unavailable_not_zero(
+    report_api: tuple[
+        TestClient,
+        sessionmaker[Session],
+        uuid.UUID,
+        uuid.UUID,
+        uuid.UUID,
+        list[tuple[str, str, int]],
+    ],
+) -> None:
+    """Locked invariant #7 (CLAUDE.md): unavailable evidence must be typed
+    unavailable, never silently omitted or presented as a clean zero. The
+    base report_api fixture has no page_analysis_execution_id at all
+    (matching a real report generated before CrUX collection ran, or a
+    website with no CrUX field data), so field evidence must come back
+    explicitly unavailable with a real reason, not an empty list with no
+    explanation.
+    """
+    _client, factory, _project_id, _website_id, run_id, _dispatched = report_api
+    with factory() as db:
+        generated, created = generate_report(
+            db,
+            run_id,
+            idempotency_key="field-evidence-unavailable-report",
+        )
+
+        assert created is True
+        payload = generated.snapshot.snapshot_payload
+        performance_section = next(
+            item for item in payload["sections"] if item["section_key"] == "performance"
+        )
+        content = performance_section["content"]
+        assert content["field_evidence_available"] is False
+        assert content["field_evidence"] == []
+        assert content["field_evidence_unavailable_reason"]
 
 
 def test_html_pdf_json_artifacts_checksums_safety_and_repeatability(

@@ -5,6 +5,7 @@ import pytest
 from app.db.base import Base  # noqa: F401
 from app.db.session import get_db
 from app.main import app
+from app.models.agent_platform import AgentExecution
 from app.models.analysis_run import AnalysisRun
 from app.models.performance import PerformanceSnapshot
 from app.models.project import Project
@@ -111,6 +112,65 @@ def test_get_analysis_run_performance(client: TestClient, db_session):
     assert len(data["data"]) == 1
     assert data["data"][0]["metric_id"] == "field_inp"
     assert data["data"][0]["raw_value"] == 300
+
+
+def test_get_analysis_run_performance_finds_execution_tagged_field_evidence(
+    client: TestClient, db_session
+):
+    """FE-9: real field-performance (CrUX) evidence is collected once per
+    page-analysis execution (worker_app/tasks/page_analysis.py) and tagged
+    by execution_id, not analysis_run_id -- page analysis runs BEFORE the
+    main AnalysisRun exists, so it never had a real analysis_run_id to tag
+    rows with (same real constraint M15 already solved for L2 accessibility/
+    lighthouse evidence). This is the endpoint the frontend Performance
+    panel actually calls; without resolving execution_id via the workflow's
+    structured_input, it would never find real field rows that exist in the
+    database.
+    """
+    proj = Project(id=uuid.uuid4(), name="T")
+    db_session.add(proj)
+    website = Website(id=uuid.uuid4(), url="https://example.com", project_id=proj.id)
+    db_session.add(website)
+    run = AnalysisRun(id=uuid.uuid4(), website_id=website.id)
+    db_session.add(run)
+    db_session.commit()
+
+    page_execution_id = uuid.uuid4()
+    workflow = AgentExecution(
+        execution_id=uuid.uuid4(),
+        workflow_id="full_website_analysis",
+        workflow_version="1.0.0",
+        project_id=proj.id,
+        analysis_run_id=run.id,
+        input_fingerprint="a" * 64,
+        idempotency_key="perf-route-workflow",
+        structured_input={"page_analysis_execution_id": str(page_execution_id)},
+    )
+    db_session.add(workflow)
+
+    snap = PerformanceSnapshot(
+        execution_id=page_execution_id,
+        website_id=website.id,
+        analysis_run_id=None,
+        url_or_origin="https://example.com",
+        evidence_source="crux",
+        evidence_type="field",
+        scope="url",
+        form_factor="desktop",
+        metric_id="field_lcp",
+        availability_status="available",
+        raw_value=2100,
+    )
+    db_session.add(snap)
+    db_session.commit()
+
+    response = client.get(f"/api/v1/analysis-runs/{run.id}/performance")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["data"]) == 1
+    assert data["data"][0]["metric_id"] == "field_lcp"
+    assert data["data"][0]["raw_value"] == 2100
+    assert data["data"][0]["analysis_run_id"] is None
 
 
 def test_collect_performance_evidence_route(client: TestClient, db_session):

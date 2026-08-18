@@ -30,6 +30,7 @@ from app.models import (
     DiscoveryRunPage,
     ManualReviewChecklist,
     PageAnalysisRun,
+    PerformanceSnapshot,
     ReportArtifact,
     ReportExecution,
     ReportSection,
@@ -78,7 +79,7 @@ TEMPLATE_ID = "zuigo_evidence_report"
 # browser_compatibility block is the single source of truth). Older
 # snapshots keep serving their frozen stored artifacts via the
 # version-aware download guard.
-TEMPLATE_VERSION = "2.2.0"
+TEMPLATE_VERSION = "2.3.0"
 # Customer-facing product name for generated artifacts. Internal identifiers
 # (template ids, package names, historical snapshots) are not renamed.
 CUSTOMER_PRODUCT_NAME = "ZuiGO WebIQ"
@@ -2349,6 +2350,29 @@ def _build_sections(
         if page_url and page_url not in entry["affected_page_urls"]:
             entry["affected_page_urls"].append(page_url)
     manual_review_checklist = list(manual_review_items.values())
+    # FE-9: real-user field performance evidence (CrUX), collected once per
+    # page-analysis execution in worker_app/tasks/page_analysis.py rather
+    # than per-page -- it is origin/URL-scoped, not per-page lab data. Kept
+    # strictly separate from the lab findings in the performance section
+    # below, per M19's field/lab design principle: never blended together.
+    field_performance_snapshots = (
+        list(
+            db.scalars(
+                select(PerformanceSnapshot)
+                .where(
+                    PerformanceSnapshot.execution_id == uuid.UUID(str(page_execution_id)),
+                    PerformanceSnapshot.website_id == run.website_id,
+                    PerformanceSnapshot.evidence_type == "field",
+                )
+                .order_by(PerformanceSnapshot.metric_id, PerformanceSnapshot.form_factor)
+            )
+        )
+        if page_execution_id
+        else []
+    )
+    field_performance_refs = [
+        _evidence("performance_snapshot", item.id) for item in field_performance_snapshots
+    ]
     action_generation = db.scalar(
         select(ActionGenerationExecution)
         .where(ActionGenerationExecution.website_id == run.website_id)
@@ -2918,8 +2942,41 @@ def _build_sections(
                 # single source of truth; this section keeps only the
                 # engine-test availability flag.
                 "browser_engine_tests": bool(browser_artifact),
+                # FE-9: real Chrome UX Report field data, kept separate from
+                # the lab findings above -- never blended into one number.
+                "field_evidence_available": bool(field_performance_snapshots),
+                "field_evidence": [
+                    {
+                        "metric_id": item.metric_id,
+                        "url_or_origin": item.url_or_origin,
+                        "scope": item.scope,
+                        "form_factor": item.form_factor,
+                        "percentile": item.percentile,
+                        "raw_value": item.raw_value,
+                        "collection_period_start": (
+                            item.collection_period_start.isoformat()
+                            if item.collection_period_start
+                            else None
+                        ),
+                        "collection_period_end": (
+                            item.collection_period_end.isoformat()
+                            if item.collection_period_end
+                            else None
+                        ),
+                    }
+                    for item in field_performance_snapshots
+                ],
+                "field_evidence_unavailable_reason": (
+                    None
+                    if field_performance_snapshots
+                    else (
+                        "No Chrome UX Report field data is available for this URL or"
+                        " origin (insufficient real-user traffic), or field-performance"
+                        " collection did not run for this execution."
+                    )
+                ),
             },
-            evidence=[*result_ref, *browser_refs],
+            evidence=[*result_ref, *browser_refs, *field_performance_refs],
             unavailable_reason=(
                 None if run.result or browser_artifact else "Performance evidence was not analysed."
             ),

@@ -512,6 +512,29 @@ def run_page_analysis(discovery_run_id: str, page_analysis_execution_id: str) ->
                     exception,
                 )
 
+        # FE-9: CrUX field-performance evidence is origin/URL-scoped, not
+        # per-page, so it is collected once per execution here rather than
+        # once per L2 page (which would burn a rate-limited external API's
+        # quota N times for identical origin-level data). Guarded like the
+        # per-page evidence calls above so a CrUX failure never blocks page
+        # analysis; runs even when zero L2 pages were selected, since field
+        # data is independent of lab-page selection.
+        try:
+            from app.models.website import Website
+            from app.services.performance_service import collect_performance_evidence
+
+            website_row = session.get(Website, website_id)
+            if website_row is not None:
+                collect_performance_evidence(
+                    session, execution_id=execution_uuid, website=website_row
+                )
+        except Exception as exception:
+            logger.warning(
+                "page_analysis_crux_evidence_failed website_id=%s error=%s",
+                website_id,
+                exception,
+            )
+
         selected_page_ids = [page["id"] for page in eligible_pages]
         persisted_l1 = (
             list(

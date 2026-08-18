@@ -1453,3 +1453,116 @@ def test_performance_section_has_no_stale_browser_compatibility_duplicate(
     # The single, authoritative copy still exists at the top level.
     assert "browser_compatibility" in snapshot
     assert "browser_uat" in snapshot["browser_compatibility"]
+
+
+def test_manual_review_checklist_items_reach_the_accessibility_section(
+    report_api: tuple[
+        TestClient,
+        sessionmaker[Session],
+        uuid.UUID,
+        uuid.UUID,
+        uuid.UUID,
+        list[tuple[str, str, int]],
+    ],
+) -> None:
+    """M6 (docs/REPORT_QUALITY_INITIATIVE.md): per-item manual-review
+    checklist rows are captured in the DB at audit ingestion but the report
+    only emitted a bare incomplete_count -- "Manual review required: 10"
+    with zero actual items anywhere in the payload.
+    """
+    from app.models import ManualReviewChecklist
+
+    _client, factory, _project_id, website_id, run_id, _dispatched = report_api
+    with factory() as db:
+        now = datetime.now(UTC)
+        audit_one = AccessibilityAudit(
+            execution_id=uuid.uuid4(),
+            website_id=website_id,
+            analysis_run_id=run_id,
+            normalized_url="https://report.test/",
+            provider="axe-core",
+            status="completed",
+            violation_count=1,
+            incomplete_count=2,
+            pass_count=10,
+            inapplicable_count=5,
+            started_at=now,
+            completed_at=now,
+        )
+        audit_two = AccessibilityAudit(
+            execution_id=uuid.uuid4(),
+            website_id=website_id,
+            analysis_run_id=run_id,
+            normalized_url="https://report.test/contact",
+            provider="axe-core",
+            status="completed",
+            violation_count=0,
+            incomplete_count=1,
+            pass_count=12,
+            inapplicable_count=4,
+            started_at=now,
+            completed_at=now,
+        )
+        db.add_all([audit_one, audit_two])
+        db.flush()
+        db.add_all(
+            [
+                ManualReviewChecklist(
+                    audit_id=audit_one.id,
+                    checklist_id="color-contrast-manual-review",
+                    title="Manual Review Required: Elements must meet contrast ratio",
+                    reason="Automated tool returned incomplete result",
+                    applicable_wcag_criterion="wcag2aa, wcag143",
+                    required_evidence="Manual verification",
+                    suggested_test_procedure="Check contrast with a manual tool.",
+                    status="not_reviewed",
+                    automated_evidence_references={"rule_id": "color-contrast"},
+                    limitation_statement="Automated tools cannot fully verify this rule.",
+                ),
+                # Same rule incomplete on a second page: must deduplicate
+                # into ONE checklist item listing both affected pages.
+                ManualReviewChecklist(
+                    audit_id=audit_two.id,
+                    checklist_id="color-contrast-manual-review",
+                    title="Manual Review Required: Elements must meet contrast ratio",
+                    reason="Automated tool returned incomplete result",
+                    applicable_wcag_criterion="wcag2aa, wcag143",
+                    required_evidence="Manual verification",
+                    suggested_test_procedure="Check contrast with a manual tool.",
+                    status="not_reviewed",
+                    automated_evidence_references={"rule_id": "color-contrast"},
+                    limitation_statement="Automated tools cannot fully verify this rule.",
+                ),
+                ManualReviewChecklist(
+                    audit_id=audit_one.id,
+                    checklist_id="video-caption-manual-review",
+                    title="Manual Review Required: Video elements must have captions",
+                    reason="Automated tool returned incomplete result",
+                    applicable_wcag_criterion="wcag2a, wcag122",
+                    required_evidence="Manual verification",
+                    suggested_test_procedure="Play each video and verify captions.",
+                    status="not_reviewed",
+                    automated_evidence_references={"rule_id": "video-caption"},
+                    limitation_statement="Automated tools cannot fully verify this rule.",
+                ),
+            ]
+        )
+        db.commit()
+
+    report = _generate_completed_report(factory, run_id, key="manual-review-items")
+    sections = {section.section_key: section.content for section in report.sections}
+    accessibility = sections["accessibility"]
+
+    assert accessibility["manual_review_item_count"] == 2
+    items = {item["checklist_id"]: item for item in accessibility["manual_review_checklist"]}
+    assert set(items) == {"color-contrast-manual-review", "video-caption-manual-review"}
+
+    contrast = items["color-contrast-manual-review"]
+    assert contrast["title"].startswith("Manual Review Required: Elements must meet")
+    assert contrast["suggested_test_procedure"] == "Check contrast with a manual tool."
+    assert contrast["applicable_wcag_criterion"] == "wcag2aa, wcag143"
+    assert sorted(contrast["affected_page_urls"]) == [
+        "https://report.test/",
+        "https://report.test/contact",
+    ]
+    assert items["video-caption-manual-review"]["affected_page_urls"] == ["https://report.test/"]

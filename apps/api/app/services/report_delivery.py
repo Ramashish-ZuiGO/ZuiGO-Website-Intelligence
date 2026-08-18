@@ -26,6 +26,7 @@ from app.models import (
     AnalysisRun,
     DiscoveryRun,
     DiscoveryRunPage,
+    ManualReviewChecklist,
     PageAnalysisRun,
     ReportArtifact,
     ReportExecution,
@@ -2237,6 +2238,42 @@ def _build_sections(
     nodes_by_finding: dict[uuid.UUID, list[AccessibilityNode]] = {}
     for node in accessibility_nodes:
         nodes_by_finding.setdefault(node.finding_id, []).append(node)
+    # M6: per-item manual-review checklist rows are captured at audit
+    # ingestion but were never queried here -- the report only carried a
+    # bare incomplete_count with no actual checklist content. Deduplicate
+    # by checklist_id across audited pages, collecting the affected URLs.
+    manual_review_rows = (
+        list(
+            db.scalars(
+                select(ManualReviewChecklist)
+                .where(ManualReviewChecklist.audit_id.in_(audit_by_id))
+                .order_by(ManualReviewChecklist.checklist_id, ManualReviewChecklist.created_at)
+            )
+        )
+        if audit_by_id
+        else []
+    )
+    manual_review_items: dict[str, dict[str, Any]] = {}
+    for row in manual_review_rows:
+        audit = audit_by_id.get(row.audit_id)
+        page_url = audit.normalized_url if audit else None
+        entry = manual_review_items.get(row.checklist_id)
+        if entry is None:
+            entry = {
+                "checklist_id": row.checklist_id,
+                "title": row.title,
+                "reason": row.reason,
+                "applicable_wcag_criterion": row.applicable_wcag_criterion,
+                "required_evidence": row.required_evidence,
+                "suggested_test_procedure": row.suggested_test_procedure,
+                "status": row.status,
+                "limitation_statement": row.limitation_statement,
+                "affected_page_urls": [],
+            }
+            manual_review_items[row.checklist_id] = entry
+        if page_url and page_url not in entry["affected_page_urls"]:
+            entry["affected_page_urls"].append(page_url)
+    manual_review_checklist = list(manual_review_items.values())
     action_generation = db.scalar(
         select(ActionGenerationExecution)
         .where(ActionGenerationExecution.website_id == run.website_id)
@@ -2832,6 +2869,8 @@ def _build_sections(
                 ),
                 "automated_checks_establish_compliance": False,
                 "manual_review_required": True,
+                "manual_review_item_count": len(manual_review_checklist),
+                "manual_review_checklist": manual_review_checklist,
                 "findings": detailed_accessibility_findings,
             },
             evidence=accessibility_refs,

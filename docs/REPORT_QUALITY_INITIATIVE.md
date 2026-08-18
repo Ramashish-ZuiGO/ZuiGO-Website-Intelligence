@@ -457,8 +457,24 @@ prioritized against each other; that's part of the discussion.
 
 ### Tier 3 — real data being captured but not surfaced (completeness gaps)
 
-- **M6: Accessibility manual-review checklist.** Real per-item data exists
-  in the DB, never reaches the report.
+- **M6: Accessibility manual-review checklist — SHIPPED 2026-08-18.** Real
+  per-item `ManualReviewChecklist` rows (written at axe-core ingestion for
+  every incomplete rule) were never queried by `_build_sections`; the
+  report emitted only a bare `incomplete_count` — the exact
+  "Manual review required: 10 / expanded: 0 items" complaint from the
+  user's historical planning doc, independently confirmed twice. Fix:
+  `report_delivery.py` now queries the checklist rows for this run's
+  audits and adds `manual_review_checklist` (deduplicated by
+  `checklist_id` across pages, each item carrying title/reason/WCAG
+  criterion/required evidence/suggested test procedure/status/limitation
+  statement plus the real `affected_page_urls`) and
+  `manual_review_item_count` to the accessibility section. New test seeds
+  the same rule incomplete on two pages plus a second rule and proves
+  dedup + page attribution. Live-verified on the real stack: regenerated
+  the fluidcontrols.com report — a real color-contrast checklist item now
+  surfaces with 5 affected pages and its manual test procedure, where the
+  payload previously had `incomplete_count: 115` and zero items. Covered
+  by TEMPLATE_VERSION 2.2.0.
 - **M7: Action Plan priority-scoring transparency.** Static per-finding-code
   constants driving 2 of 3 priority inputs, undisclosed to the customer;
   plus the Tier0 hardcoded `affected_page_count=1` timing bug.

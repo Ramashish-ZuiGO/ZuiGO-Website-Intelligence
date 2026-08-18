@@ -256,18 +256,23 @@ content, discarding real captured data the customer never sees.
 
 ### Batch: SEO & Content / Security & Technical / Browser UAT — DONE
 
-**Major cross-cutting finding: `AnalysisFinding` is never populated in
-production.** Grepping the entire repo, `AnalysisFinding(` is only ever
-constructed inside `tests/` — no worker or service module writes to that
-table in real runs; `report_delivery.py`/`action_generation.py` only READ
-it. This means every section that partially depends on `AnalysisFinding`
-(SEO & Content's `content_findings` half, Security & Technical's
-analysis-finding half, Action Plan's main per-page loop) silently gets
-`[]` from that source in every real analysis, always — not a bug that
-sometimes fires, a code path that NEVER fires today. Not fabrication (empty
-lists are honest), but a substantial, previously-invisible gap: an entire
-intended evidence pipeline (the one implied by the product's own agent
-architecture) contributes nothing to real reports.
+**Major cross-cutting finding — RETRACTED 2026-08-18 (see M4 below): the
+original claim "`AnalysisFinding` is never populated in production" was
+WRONG.** The audit grepped for the ORM constructor `AnalysisFinding(`,
+which indeed only appears in `tests/` — but the worker writes this table
+via SQLAlchemy **Core** (`insert(analysis_findings)` in
+`worker_app/tasks/analysis.py`'s `persist_results`), which that grep can
+never find. Verified against the real production database 2026-08-18: 253
+real rows across 67 analysis runs, earliest 2026-07-29 — weeks BEFORE this
+audit was written. The downstream sub-claims derived from this premise
+(SEO & Content's analysis half "always empty", Security & Technical's
+analysis half "always empty", Action Plan's per-page loop "never fires")
+are all false too; real categories in production are performance (138),
+seo (46), accessibility (37), technical (32). The genuinely true residual:
+`generate_findings` produces no "security"-category findings — real
+security evidence lives in site diagnostics, which is exactly the routing
+M3 fixed. Kept here, corrected rather than deleted, so a future reader
+doesn't re-derive the same wrong conclusion from the same misleading grep.
 
 **Security & Technical — confirmed customer-facing mislabeling.** Because
 `AnalysisFinding` is always empty, `security_technical` is populated ONLY by
@@ -303,8 +308,10 @@ already documented, not re-flagged.
 Full findings list, roughly by severity:
 
 1. **Zero auth/tenant isolation** anywhere in the API — critical for "live."
-2. **`AnalysisFinding` never populated in production** — an entire intended
-   evidence pipeline silently contributes nothing to real reports.
+2. ~~**`AnalysisFinding` never populated in production**~~ — RETRACTED
+   2026-08-18, the claim was wrong (Core inserts missed by an
+   ORM-constructor grep; 253 real rows verified in the production DB).
+   See M4's resolution.
 3. **"Security & Technical" tab structurally misses real security findings**
    (misclassified into a different section) — direct customer-facing
    mislabeling on a section customers would specifically check for security
@@ -428,12 +435,8 @@ prioritized against each other; that's part of the discussion.
   see full writeup below.**
 - **M3: Security & Technical section mislabeling — SHIPPED 2026-08-18, see
   full writeup below.**
-- **M4: `AnalysisFinding` pipeline is dead in production.** Bigger
-  question: was this table meant to be actively written by a specific
-  agent that was never wired up, or is it now redundant now that
-  `SiteDiagnosticFinding`/`AccessibilityFinding` cover real findings some
-  other way? Needs understanding intent before deciding whether to wire it
-  up or formally retire it — a decide-first, then-implement module.
+- **M4: `AnalysisFinding` pipeline — RESOLVED 2026-08-18: the audit claim
+  was wrong; the pipeline is alive. See full writeup below.**
 - **M5: Performance section's stale duplicate `browser_compatibility`.**
   Confirmed unused by current renderers but present in the downloadable
   JSON — cleanup, not urgent, but a real single-source-of-truth violation.
@@ -802,6 +805,41 @@ window to elapse and confirmed real recovery (`200` again, container stayed
 
 **Tests:** 20 new (`test_rate_limiting.py`). Full suite: 1148 passed, 1
 skipped (was 1128 before M2). `ruff check`/`ruff format --check` both clean.
+
+### M4 — RESOLVED 2026-08-18 (audit correction, no code change needed)
+
+**The module's premise was false.** The audit claimed `AnalysisFinding` is
+never written in production ("only ever constructed inside tests"), and
+framed M4 as deciding whether to wire the pipeline up or retire it. Real
+investigation before deciding anything:
+
+1. **The grep was the bug.** The audit searched for the ORM constructor
+   `AnalysisFinding(` — but the worker writes the table via SQLAlchemy Core
+   (`insert(analysis_findings)`), inside `persist_results`
+   (`worker_app/tasks/analysis.py`). An ORM-constructor grep structurally
+   cannot find Core writes. Worth remembering as an audit-methodology
+   lesson: greping for `Model(` proves nothing about tables written via
+   Core `insert()`/`bulk_insert_mappings`.
+2. **The real production flow does populate it, and always has:** the real
+   journey's primary stage (`run_real_primary_analysis_stage` →
+   `run_analysis.run()` → `generate_findings` + `persist_results`) writes
+   the main run's findings; since M15, the Level-2 loop writes per-page
+   findings through the same `persist_results`.
+3. **Verified against the real database, not code-reading alone:** 253
+   rows across 67 analysis runs, earliest 2026-07-29 (predating the audit
+   itself by ~3 weeks). Categories: performance 138, seo 46,
+   accessibility 37, technical 32. The M15 live report also proved the
+   read path end-to-end (31 performance findings from these rows).
+4. **The one residual truth extracted from the wrong claim:**
+   `generate_findings` emits no "security"-category findings, so the
+   security half of the Security & Technical section could never be fed
+   from analysis findings — real security evidence comes from site
+   diagnostics, which is precisely what M3 rerouted. No further wiring
+   needed.
+
+**Outcome: no code change. The audit document's Finding #2 corrected in
+place (retraction noted, original kept for methodology context), and the
+downstream sub-claims it contaminated corrected with it.**
 
 ### M3 — SHIPPED 2026-08-18
 

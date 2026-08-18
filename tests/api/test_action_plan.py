@@ -1285,3 +1285,39 @@ class TestPriorityRepricing:
                 assert action.priority_score == min(
                     100, max(0, action.priority_components["raw_total"])
                 )
+
+
+class TestActionMapCoverage:
+    """M8 (docs/REPORT_QUALITY_INITIATIVE.md): a finding code missing from
+    FINDING_TO_ACTION_MAP silently never becomes an action item even though
+    it appears in the Findings Register. Coverage was verified complete
+    against the real database (14 distinct production codes, all mapped);
+    this guard keeps future codes from reopening the gap silently.
+    """
+
+    def test_every_generatable_finding_code_has_an_action_mapping(self) -> None:
+        import re
+        from pathlib import Path
+
+        import worker_app.analysis.findings as findings_module
+        from app.services.action_generation import FINDING_TO_ACTION_MAP
+
+        source = Path(findings_module.__file__).read_text(encoding="utf-8")
+        emitted_codes = set(re.findall(r'"([A-Z][A-Z0-9_]{3,})"', source))
+        assert emitted_codes, "expected to find finding codes in findings.py"
+        unmapped = emitted_codes - set(FINDING_TO_ACTION_MAP)
+        assert not unmapped, (
+            f"finding codes with no FINDING_TO_ACTION_MAP entry -- these would "
+            f"appear in the Findings Register but never become actions: {sorted(unmapped)}"
+        )
+
+    def test_tier0_recommendation_codes_are_mapped(self) -> None:
+        from app.services.action_generation import FINDING_TO_ACTION_MAP
+
+        tier0_codes = {code for code in FINDING_TO_ACTION_MAP if code.startswith("TIER0_")}
+        assert tier0_codes == {
+            "TIER0_CLIPPED_ELEMENTS",
+            "TIER0_HORIZONTAL_OVERFLOW",
+            "TIER0_OVERLAPPING_ELEMENTS",
+            "TIER0_SMALL_TAP_TARGETS",
+        }

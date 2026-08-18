@@ -498,8 +498,20 @@ prioritized against each other; that's part of the discussion.
   no-op, and a real 5-page generation proving stored components AND stored
   scores agree at the real spread). Full suite 1154 passed. Covered by
   TEMPLATE_VERSION 2.2.0.
-- **M8: Findings without a matching action code.** Decide: extend
-  `FINDING_TO_ACTION_MAP` coverage, or explicitly disclose the gap.
+- **M8: Findings without a matching action code — SHIPPED 2026-08-18.**
+  Investigated before deciding: every finding code the worker can actually
+  emit (17, enumerated from `generate_findings`' source) AND every code in
+  the real production database (14 distinct, checked directly) is already
+  in `FINDING_TO_ACTION_MAP` — the gap is currently EMPTY, so "extend the
+  map" would have been fixing a non-problem. What shipped instead: (1) a
+  guard test asserting every emittable code has a mapping, so a future
+  code can never silently reopen the gap (plus a Tier0 mapping pin); (2)
+  honest disclosure in the `priority_action_plan` section —
+  `findings_without_action_mapping` / `findings_with_insufficient_evidence`
+  (real counters the generation execution already tracked but the report
+  never surfaced) with a statement that unmapped findings stay in the
+  Complete Findings Register and are never silently dropped. Covered by
+  TEMPLATE_VERSION 2.2.0.
 - **M9: `check_invariants` false-100%-complete guard.** Extend beyond
   accessibility to all score categories.
 - **M10: Two more hardcoded-empty Browser UAT fields**

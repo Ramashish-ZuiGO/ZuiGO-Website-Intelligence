@@ -3053,6 +3053,20 @@ def _build_sections(
                 "actions": final_actions,
                 "ordering": "priority_score_descending_then_stable_id",
                 "priority_formula_version": "1.0.0",
+                # M8: findings whose codes have no action mapping are
+                # counted, not silently dropped -- they remain in the
+                # Complete Findings Register even when no action exists.
+                "findings_without_action_mapping": (
+                    action_generation.unsupported_finding_count if action_generation else 0
+                ),
+                "findings_with_insufficient_evidence": (
+                    action_generation.insufficient_evidence_count if action_generation else 0
+                ),
+                "unmapped_findings_statement": (
+                    "Findings without a matching action mapping stay in the "
+                    "Complete Findings Register; they are counted here and "
+                    "never silently dropped from the analysis."
+                ),
                 # M7: honest provenance for the formula's six inputs --
                 # three are measured per-site, three come from a fixed
                 # per-finding-type catalogue and do not vary with this

@@ -9,6 +9,14 @@ CLS_NEEDS_IMPROVEMENT = 0.1
 TBT_POOR_MS = 600
 TBT_NEEDS_IMPROVEMENT_MS = 200
 
+# Matches worker_app/analysis/page_analysis.py's TITLE_MIN_LENGTH/MAX_LENGTH
+# and META_DESCRIPTION_MIN_LENGTH/MAX_LENGTH -- the ranges Google typically
+# renders/truncates search-result snippets at.
+TITLE_MIN_LENGTH = 30
+TITLE_MAX_LENGTH = 60
+META_DESCRIPTION_MIN_LENGTH = 70
+META_DESCRIPTION_MAX_LENGTH = 160
+
 
 def finding(
     code: str,
@@ -117,6 +125,98 @@ def generate_findings(
             "The homepage contains multiple H1 headings.",
             "low",
             {"h1_count": playwright_data.get("h1_count")},
+        ),
+        (
+            bool(playwright_data.get("page_title"))
+            and len(playwright_data["page_title"]) < TITLE_MIN_LENGTH,
+            "TITLE_TOO_SHORT",
+            "seo",
+            "Page title is too short",
+            f"The page title is under {TITLE_MIN_LENGTH} characters, likely too terse for a"
+            " useful search-result snippet.",
+            "low",
+            {
+                "page_title": playwright_data.get("page_title"),
+                "title_length": len(playwright_data["page_title"])
+                if playwright_data.get("page_title")
+                else None,
+            },
+        ),
+        (
+            bool(playwright_data.get("page_title"))
+            and len(playwright_data["page_title"]) > TITLE_MAX_LENGTH,
+            "TITLE_TOO_LONG",
+            "seo",
+            "Page title is too long",
+            f"The page title is over {TITLE_MAX_LENGTH} characters and is likely to be"
+            " truncated in search results.",
+            "low",
+            {
+                "page_title": playwright_data.get("page_title"),
+                "title_length": len(playwright_data["page_title"])
+                if playwright_data.get("page_title")
+                else None,
+            },
+        ),
+        (
+            bool(playwright_data.get("meta_description"))
+            and len(playwright_data["meta_description"]) < META_DESCRIPTION_MIN_LENGTH,
+            "META_DESCRIPTION_TOO_SHORT",
+            "seo",
+            "Meta description is too short",
+            f"The meta description is under {META_DESCRIPTION_MIN_LENGTH} characters,"
+            " likely too terse for a useful search-result snippet.",
+            "low",
+            {
+                "meta_description": playwright_data.get("meta_description"),
+                "meta_description_length": len(playwright_data["meta_description"])
+                if playwright_data.get("meta_description")
+                else None,
+            },
+        ),
+        (
+            bool(playwright_data.get("meta_description"))
+            and len(playwright_data["meta_description"]) > META_DESCRIPTION_MAX_LENGTH,
+            "META_DESCRIPTION_TOO_LONG",
+            "seo",
+            "Meta description is too long",
+            f"The meta description is over {META_DESCRIPTION_MAX_LENGTH} characters and is"
+            " likely to be truncated in search results.",
+            "low",
+            {
+                "meta_description": playwright_data.get("meta_description"),
+                "meta_description_length": len(playwright_data["meta_description"])
+                if playwright_data.get("meta_description")
+                else None,
+            },
+        ),
+        (
+            not all(
+                key in (playwright_data.get("open_graph_tags") or {})
+                for key in ("title", "description", "image")
+            ),
+            "MISSING_OPEN_GRAPH_TAGS",
+            "seo",
+            "Missing Open Graph tags",
+            "The homepage is missing one or more core Open Graph tags (og:title,"
+            " og:description, og:image), so links shared on social platforms will show"
+            " a blank or default preview.",
+            "medium",
+            {
+                "open_graph_tags_present": sorted(
+                    (playwright_data.get("open_graph_tags") or {}).keys()
+                )
+            },
+        ),
+        (
+            not playwright_data.get("twitter_card"),
+            "MISSING_TWITTER_CARD",
+            "seo",
+            "Missing Twitter Card tag",
+            "The homepage has no twitter:card meta tag, so links shared on X/Twitter"
+            " will not render a rich preview.",
+            "low",
+            {"twitter_card": playwright_data.get("twitter_card")},
         ),
         (
             (playwright_data.get("images_missing_alt") or 0) > 0,

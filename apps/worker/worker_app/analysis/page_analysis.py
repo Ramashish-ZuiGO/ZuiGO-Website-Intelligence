@@ -30,6 +30,22 @@ MAX_REDIRECTS = 5
 MAX_RESPONSE_BYTES = 2_000_000
 REQUEST_TIMEOUT = 15
 
+# Google typically renders/truncates titles and meta descriptions around
+# these character ranges in search results; outside them the snippet is
+# either unhelpfully terse or gets cut off.
+TITLE_MIN_LENGTH = 30
+TITLE_MAX_LENGTH = 60
+META_DESCRIPTION_MIN_LENGTH = 70
+META_DESCRIPTION_MAX_LENGTH = 160
+
+
+def _length_status(length: int, min_length: int, max_length: int) -> str:
+    if length < min_length:
+        return "too_short"
+    if length > max_length:
+        return "too_long"
+    return "ideal"
+
 
 _OPENER = urllib.request.build_opener()
 # Remove the default redirect handler so we get raw 3xx responses
@@ -84,6 +100,26 @@ def _extract_meta_description(html: str) -> str | None:
             re.I,
         )
     return match.group(1).strip()[:500] if match else None
+
+
+def _extract_open_graph_tags(html: str) -> dict[str, str]:
+    tags: dict[str, str] = {}
+    for match in re.finditer(
+        r'<meta[^>]+property=["\']og:([a-zA-Z:_-]+)["\'][^>]+content=["\']([^"\']*)["\']',
+        html,
+        re.I,
+    ):
+        tags[match.group(1).lower()] = match.group(2).strip()[:500]
+    return tags
+
+
+def _extract_twitter_card(html: str) -> str | None:
+    match = re.search(
+        r'<meta[^>]+name=["\']twitter:card["\'][^>]+content=["\']([^"\']*)["\']',
+        html,
+        re.I,
+    )
+    return match.group(1).strip()[:100] if match else None
 
 
 def _extract_heading_structure(html: str) -> list[dict[str, Any]]:
@@ -172,6 +208,8 @@ def _basic_seo_signals(
     canonical: str | None,
     headings: list[dict[str, Any]],
     h1_count: int,
+    open_graph_tags: dict[str, str],
+    twitter_card: str | None,
 ) -> dict[str, Any]:
     return {
         "has_title": title is not None,
@@ -180,6 +218,23 @@ def _basic_seo_signals(
         "h1_count": h1_count,
         "multiple_h1": h1_count > 1,
         "no_h1": h1_count == 0,
+        "title_length": len(title) if title else None,
+        "title_length_status": (
+            _length_status(len(title), TITLE_MIN_LENGTH, TITLE_MAX_LENGTH) if title else None
+        ),
+        "meta_description_length": len(meta_description) if meta_description else None,
+        "meta_description_length_status": (
+            _length_status(
+                len(meta_description), META_DESCRIPTION_MIN_LENGTH, META_DESCRIPTION_MAX_LENGTH
+            )
+            if meta_description
+            else None
+        ),
+        "has_open_graph_core_tags": all(
+            key in open_graph_tags for key in ("title", "description", "image")
+        ),
+        "open_graph_tags_present": sorted(open_graph_tags.keys()),
+        "has_twitter_card": twitter_card is not None,
     }
 
 
@@ -232,6 +287,8 @@ def analyze_page_level_1(
             "redirect_chain": [],
             "page_title": None,
             "meta_description": None,
+            "open_graph_tags": {},
+            "twitter_card": None,
             "heading_structure": [],
             "robots_directives": {},
             "content_type": None,
@@ -362,6 +419,8 @@ def analyze_page_level_1(
     h1_count = len(re.findall(r"<h1[^>]*>", html, re.I))
     title = _extract_title(html) if html else None
     meta_description = _extract_meta_description(html) if html else None
+    open_graph_tags = _extract_open_graph_tags(html) if html else {}
+    twitter_card = _extract_twitter_card(html) if html else None
     headings = _extract_heading_structure(html) if html else []
     internal_links, external_links = _extract_links(html, final_url or safe_url) if html else (0, 0)
     image_count, missing_alt = _extract_images(html) if html else (0, 0)
@@ -384,6 +443,8 @@ def analyze_page_level_1(
         "redirect_chain": redirect_chain,
         "page_title": title,
         "meta_description": meta_description,
+        "open_graph_tags": open_graph_tags,
+        "twitter_card": twitter_card,
         "heading_structure": headings,
         "robots_directives": robots_dirs,
         "content_type": content_type,
@@ -398,7 +459,13 @@ def analyze_page_level_1(
             missing_alt, language, headings
         ),
         "basic_seo_signals": _basic_seo_signals(
-            title, meta_description, canonical_url, headings, h1_count
+            title,
+            meta_description,
+            canonical_url,
+            headings,
+            h1_count,
+            open_graph_tags,
+            twitter_card,
         ),
         "security_observations": _security_observations(response_headers, final_url or safe_url),
         "evidence": {

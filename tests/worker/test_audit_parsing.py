@@ -132,6 +132,64 @@ def test_deterministic_findings_use_only_verified_values() -> None:
     assert all(item["confidence_percent"] == 100 for item in findings)
 
 
+def test_social_and_length_seo_findings_fire_independently_of_missing_findings() -> None:
+    playwright_data = {
+        "final_url": "https://example.com/",
+        "page_title": "Hi",  # present but far under TITLE_MIN_LENGTH
+        "meta_description": "B" * 200,  # present but over META_DESCRIPTION_MAX_LENGTH
+        "canonical_url": "https://example.com/",
+        "html_language": "en",
+        "h1_count": 1,
+        "image_count": 0,
+        "images_missing_alt": 0,
+        "page_javascript_errors": [],
+        "failed_network_requests": [],
+        "https_usage": True,
+        "open_graph_tags": {"title": "t", "description": "d"},  # missing og:image
+        "twitter_card": None,
+    }
+    findings = generate_findings(playwright_data, {})
+    codes = {item["finding_code"] for item in findings}
+    # Title/description are present, so the "missing" findings must NOT fire --
+    # only the length-specific ones should.
+    assert "MISSING_PAGE_TITLE" not in codes
+    assert "MISSING_META_DESCRIPTION" not in codes
+    assert "TITLE_TOO_SHORT" in codes
+    assert "TITLE_TOO_LONG" not in codes
+    assert "META_DESCRIPTION_TOO_LONG" in codes
+    assert "META_DESCRIPTION_TOO_SHORT" not in codes
+    assert "MISSING_OPEN_GRAPH_TAGS" in codes
+    assert "MISSING_TWITTER_CARD" in codes
+
+
+def test_ideal_length_and_complete_social_tags_produce_no_seo_length_findings() -> None:
+    playwright_data = {
+        "final_url": "https://example.com/",
+        "page_title": "A" * 45,
+        "meta_description": "B" * 120,
+        "canonical_url": "https://example.com/",
+        "html_language": "en",
+        "h1_count": 1,
+        "image_count": 0,
+        "images_missing_alt": 0,
+        "page_javascript_errors": [],
+        "failed_network_requests": [],
+        "https_usage": True,
+        "open_graph_tags": {"title": "t", "description": "d", "image": "i"},
+        "twitter_card": "summary_large_image",
+    }
+    findings = generate_findings(playwright_data, {})
+    codes = {item["finding_code"] for item in findings}
+    assert not codes & {
+        "TITLE_TOO_SHORT",
+        "TITLE_TOO_LONG",
+        "META_DESCRIPTION_TOO_SHORT",
+        "META_DESCRIPTION_TOO_LONG",
+        "MISSING_OPEN_GRAPH_TAGS",
+        "MISSING_TWITTER_CARD",
+    }
+
+
 def test_failed_request_classification() -> None:
     class Request:
         failure = "net::ERR_ABORTED"

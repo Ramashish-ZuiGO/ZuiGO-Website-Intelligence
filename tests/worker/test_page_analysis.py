@@ -14,7 +14,9 @@ from worker_app.analysis.page_analysis import (
     _extract_images,
     _extract_links,
     _extract_meta_description,
+    _extract_open_graph_tags,
     _extract_title,
+    _extract_twitter_card,
     _security_observations,
     analyze_page_level_1,
 )
@@ -31,6 +33,25 @@ class TestPageAnalysisHelpers:
         html = '<meta name="description" content="Test description">'
         assert _extract_meta_description(html) == "Test description"
         assert _extract_meta_description("<html></html>") is None
+
+    def test_extract_open_graph_tags(self) -> None:
+        html = (
+            '<meta property="og:title" content="A Title">'
+            '<meta property="og:description" content="A Description">'
+            '<meta property="og:image" content="https://example.com/img.png">'
+        )
+        tags = _extract_open_graph_tags(html)
+        assert tags == {
+            "title": "A Title",
+            "description": "A Description",
+            "image": "https://example.com/img.png",
+        }
+        assert _extract_open_graph_tags("<html></html>") == {}
+
+    def test_extract_twitter_card(self) -> None:
+        html = '<meta name="twitter:card" content="summary_large_image">'
+        assert _extract_twitter_card(html) == "summary_large_image"
+        assert _extract_twitter_card("<html></html>") is None
 
     def test_extract_heading_structure(self) -> None:
         html = "<h1>Main</h1><h2>Sub</h2><h3>Detail</h3>"
@@ -80,12 +101,44 @@ class TestPageAnalysisHelpers:
         assert result["meta_robots"] == "noindex"
 
     def test_basic_seo_signals(self) -> None:
-        signals = _basic_seo_signals("Title", "Desc", "https://example.com/", [], 0)
+        signals = _basic_seo_signals("Title", "Desc", "https://example.com/", [], 0, {}, None)
         assert signals["has_title"]
         assert signals["has_meta_description"]
         assert signals["has_canonical"]
         assert signals["no_h1"]
         assert not signals["multiple_h1"]
+        assert signals["title_length"] == 5
+        assert signals["title_length_status"] == "too_short"
+        assert signals["meta_description_length"] == 4
+        assert signals["meta_description_length_status"] == "too_short"
+        assert not signals["has_open_graph_core_tags"]
+        assert signals["open_graph_tags_present"] == []
+        assert not signals["has_twitter_card"]
+
+    def test_basic_seo_signals_ideal_lengths_and_social_tags(self) -> None:
+        title = "A" * 45
+        description = "B" * 120
+        signals = _basic_seo_signals(
+            title,
+            description,
+            "https://example.com/",
+            [],
+            1,
+            {"title": "t", "description": "d", "image": "i"},
+            "summary_large_image",
+        )
+        assert signals["title_length_status"] == "ideal"
+        assert signals["meta_description_length_status"] == "ideal"
+        assert signals["has_open_graph_core_tags"]
+        assert signals["open_graph_tags_present"] == ["description", "image", "title"]
+        assert signals["has_twitter_card"]
+
+    def test_basic_seo_signals_too_long(self) -> None:
+        title = "A" * 90
+        description = "B" * 200
+        signals = _basic_seo_signals(title, description, None, [], 1, {}, None)
+        assert signals["title_length_status"] == "too_long"
+        assert signals["meta_description_length_status"] == "too_long"
 
     def test_basic_accessibility_signals(self) -> None:
         signals = _basic_accessibility_signals(5, None, [{"level": 2, "text": "H2"}])

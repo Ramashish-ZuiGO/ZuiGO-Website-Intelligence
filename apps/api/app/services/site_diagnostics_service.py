@@ -11,6 +11,7 @@ from typing import Any, Final
 from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 from uuid import UUID
 
+from datasketch import MinHash, MinHashLSH
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -40,6 +41,16 @@ EXACT_CONTENT_SIGNATURE_METHOD: Final[str] = "sha256-normalized-text-v1"
 NEAR_DUPLICATE_SIMILARITY_METHOD: Final[str] = "token-set-jaccard-v1"
 NEAR_DUPLICATE_SIMILARITY_THRESHOLD: Final[float] = 0.85
 MINIMUM_AFFECTED_PAGE_COUNT: Final[int] = 2
+# AT-3: above this many near-duplicate candidates, full pairwise Jaccard
+# comparison (O(n^2)) becomes expensive -- discovery allows up to 10,000
+# pages per site. Below this size, nothing changes: the existing exact
+# algorithm runs unmodified. Above it, MinHash/LSH narrows which pairs are
+# even worth an exact check; the final similarity decision below always
+# still uses exact _jaccard() on the real token sets, so results are
+# identical except for a small, disclosed, well-established LSH
+# false-negative probability (tuned low via NEAR_DUPLICATE_LSH_NUM_PERM).
+NEAR_DUPLICATE_LSH_PREFILTER_PAGE_COUNT: Final[int] = 300
+NEAR_DUPLICATE_LSH_NUM_PERMUTATIONS: Final[int] = 128
 WORKFLOW_ID: Final[str] = "site_diagnostics"
 WORKFLOW_VERSION: Final[str] = "2.0.0"
 DIAGNOSTIC_ENGINE_VERSION: Final[str] = "2.0.0"
@@ -291,6 +302,41 @@ def _jaccard(left: frozenset[str], right: frozenset[str]) -> float:
     if not union:
         return 0.0
     return len(left & right) / len(union)
+
+
+def _minhash_for_tokens(tokens: frozenset[str]) -> MinHash:
+    minhash = MinHash(num_perm=NEAR_DUPLICATE_LSH_NUM_PERMUTATIONS)
+    for token in tokens:
+        minhash.update(token.encode("utf8"))
+    return minhash
+
+
+def _lsh_candidate_neighbors(
+    candidates: list["PageEvidence"],
+) -> dict[UUID, set[UUID]]:
+    """Return, for each candidate page, the set of other candidates' page
+    ids that MinHash/LSH flags as plausibly near-duplicate. This is a
+    PRE-FILTER only: it never decides similarity itself, it only narrows
+    which pairs _near_duplicate_clusters bothers checking with exact
+    _jaccard(). Only called when the candidate count exceeds
+    NEAR_DUPLICATE_LSH_PREFILTER_PAGE_COUNT.
+    """
+    lsh = MinHashLSH(
+        threshold=NEAR_DUPLICATE_SIMILARITY_THRESHOLD,
+        num_perm=NEAR_DUPLICATE_LSH_NUM_PERMUTATIONS,
+    )
+    minhashes: dict[UUID, MinHash] = {}
+    for page in candidates:
+        minhash = _minhash_for_tokens(page.content_tokens or frozenset())
+        minhashes[page.page_id] = minhash
+        lsh.insert(str(page.page_id), minhash)
+    neighbors: dict[UUID, set[UUID]] = defaultdict(set)
+    for page in candidates:
+        for match_key in lsh.query(minhashes[page.page_id]):
+            match_id = UUID(match_key)
+            if match_id != page.page_id:
+                neighbors[page.page_id].add(match_id)
+    return neighbors
 
 
 class SiteDiagnosticsService:
@@ -1154,6 +1200,14 @@ class SiteDiagnosticsService:
                 "minimum_usable_content_length": MINIMUM_USABLE_CONTENT_LENGTH,
                 "similarity_threshold": NEAR_DUPLICATE_SIMILARITY_THRESHOLD,
                 "minimum_affected_page_count": MINIMUM_AFFECTED_PAGE_COUNT,
+                # AT-3: the similarity decision itself is always exact
+                # Jaccard; on large sites a MinHash/LSH pre-filter narrows
+                # which page pairs are checked at all, which carries a
+                # small, well-established false-negative probability not
+                # present when this flag is False.
+                "large_site_lsh_prefilter_engaged": (
+                    total > NEAR_DUPLICATE_LSH_PREFILTER_PAGE_COUNT
+                ),
             },
         }
 
@@ -1390,11 +1444,26 @@ class SiteDiagnosticsService:
         candidates: list[PageEvidence],
     ) -> tuple[tuple[PageEvidence, ...], ...]:
         remaining = sorted(candidates, key=lambda page: (page.normalized_url, str(page.page_id)))
+        # AT-3: below the threshold, behavior is unchanged from before --
+        # every candidate is checked against every other candidate with
+        # exact Jaccard, same as always. Only large sites engage the LSH
+        # pre-filter, and even then the actual similarity/threshold
+        # decision below is still always exact _jaccard().
+        neighbor_ids: dict[UUID, set[UUID]] | None = (
+            _lsh_candidate_neighbors(remaining)
+            if len(remaining) > NEAR_DUPLICATE_LSH_PREFILTER_PAGE_COUNT
+            else None
+        )
         clusters: list[tuple[PageEvidence, ...]] = []
         while remaining:
             seed = remaining.pop(0)
+            pool = (
+                [page for page in remaining if page.page_id in neighbor_ids.get(seed.page_id, ())]
+                if neighbor_ids is not None
+                else tuple(remaining)
+            )
             cluster = [seed]
-            for candidate in tuple(remaining):
+            for candidate in tuple(pool):
                 if all(
                     _jaccard(
                         candidate.content_tokens or frozenset(),

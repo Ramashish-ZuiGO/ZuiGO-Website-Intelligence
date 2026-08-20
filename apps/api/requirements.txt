@@ -9,3 +9,4 @@ SQLAlchemy==2.0.51
 uvicorn[standard]==0.40.0
 httpx==0.28.1
 reportlab==5.0.0
+datasketch==2.0.0

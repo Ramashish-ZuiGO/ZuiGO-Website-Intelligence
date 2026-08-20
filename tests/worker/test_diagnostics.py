@@ -223,7 +223,7 @@ def test_upgrade_only_csp_uses_new_security_formula() -> None:
         }
     )
     assert result["verified_observations"]["csp_quality"] == "upgrade_only"
-    assert result["score"]["formula_version"] == "1.1.0"
+    assert result["score"]["formula_version"] == "1.2.0"
     assert any(item["code"] == "CSP_WEAK" for item in result["score"]["deductions"])
 
 
@@ -1437,7 +1437,8 @@ def test_security_risk_strong_evidence() -> None:
     result = page_security_risk_score(obs, csp_quality="strong")
     assert result["score"] == 100
     assert result["risk_band"] == "strong"
-    assert result["score_version"] == "1.0.0"
+    assert result["score_version"] == "1.1.0"
+    assert result["grade"] == "A+"
     assert len(result["deductions"]) == 0
     assert result["evidence_coverage"] > 80
     assert result["confidence"] == "high"
@@ -1538,7 +1539,51 @@ def test_security_risk_deterministic() -> None:
 def test_security_risk_version_retained() -> None:
     obs = {"https": True}
     result = page_security_risk_score(obs)
-    assert result["score_version"] == "1.0.0"
+    assert result["score_version"] == "1.1.0"
+
+
+def test_security_risk_hsts_short_max_age_is_a_smaller_deduction_than_missing() -> None:
+    """AT-2: HSTS presence alone used to be treated as a full pass -- a
+    max-age=1 header scored identically to a robust one. Real methodology
+    (Mozilla/MDN HTTP Observatory) requires at least 6 months.
+    """
+    short_obs = {"https": True, "strict_transport_security": "max-age=60"}
+    missing_obs = {"https": True, "strict_transport_security": None}
+    robust_obs = {"https": True, "strict_transport_security": "max-age=63072000"}
+
+    short_result = page_security_risk_score(short_obs)
+    missing_result = page_security_risk_score(missing_obs)
+    robust_result = page_security_risk_score(robust_obs)
+
+    short_codes = [d["code"] for d in short_result["deductions"]]
+    missing_codes = [d["code"] for d in missing_result["deductions"]]
+    robust_codes = [d["code"] for d in robust_result["deductions"]]
+
+    assert "HSTS_MAX_AGE_TOO_SHORT" in short_codes
+    assert "HSTS_MISSING" not in short_codes
+    assert "HSTS_MISSING" in missing_codes
+    assert "HSTS_MAX_AGE_TOO_SHORT" not in robust_codes
+    # A short max-age is a real weakness but a lesser one than no header at all.
+    assert short_result["score"] > missing_result["score"]
+    assert short_result["score"] < robust_result["score"]
+
+
+def test_security_risk_grade_matches_score_band() -> None:
+    assert page_security_risk_score({"https": False})["grade"] in ("D+", "D", "D-", "F")
+    strong_obs = {
+        "https": True,
+        "strict_transport_security": "max-age=63072000",
+        "content_security_policy": "default-src 'self'",
+        "x_frame_options": "DENY",
+        "x_content_type_options": "nosniff",
+        "referrer_policy": "strict-origin",
+        "permissions_policy": "camera=()",
+        "cross_origin_opener_policy": "same-origin",
+        "cross_origin_resource_policy": "same-origin",
+        "server": None,
+        "x_powered_by": None,
+    }
+    assert page_security_risk_score(strong_obs, csp_quality="strong")["grade"] == "A+"
 
 
 def test_security_risk_deductions_explain_score() -> None:

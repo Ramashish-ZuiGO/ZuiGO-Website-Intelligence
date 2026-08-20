@@ -20,9 +20,55 @@ from lxml import html as lxml_html
 from worker_app.analysis.url_safety import UrlSafetyError, validate_public_url
 
 FORMULA_VERSION = "1.0.0"
-SECURITY_FORMULA_VERSION = "1.1.0"
+# AT-2: 1.2.0 added the same HSTS max-age threshold check as
+# page_security_risk_score's PAGE_SECURITY_RISK_FORMULA_VERSION 1.1.0 --
+# these two deduction lists previously disagreed (this one treated any
+# HSTS presence as a full pass; the other now correctly requires >= 6
+# months) despite living in the same function and describing the same page.
+SECURITY_FORMULA_VERSION = "1.2.0"
 HTML_STANDARDS_FORMULA_VERSION = "1.0.0"
-PAGE_SECURITY_RISK_FORMULA_VERSION = "1.0.0"
+# AT-2: 1.1.0 added HSTS max-age threshold checking (previously presence-only)
+# and a standard A+-F letter grade, informed by Mozilla/MDN's published HTTP
+# Observatory grade scale (github.com/mdn/mdn-http-observatory) -- not a
+# byte-exact port of their internal per-header point deltas, which are
+# defined per-test-file rather than in one published table, but the same
+# real 100-point-base/5-point-band grading categories rather than an
+# invented scale.
+PAGE_SECURITY_RISK_FORMULA_VERSION = "1.1.0"
+
+# Mozilla/MDN HTTP Observatory's real recommended minimum: 6 months.
+HSTS_MIN_MAX_AGE_SECONDS = 15_552_000
+
+_SECURITY_GRADE_BANDS: list[tuple[int, str]] = [
+    (100, "A+"),
+    (90, "A"),
+    (85, "A-"),
+    (80, "B+"),
+    (70, "B"),
+    (65, "B-"),
+    (60, "C+"),
+    (50, "C"),
+    (45, "C-"),
+    (40, "D+"),
+    (30, "D"),
+    (25, "D-"),
+]
+
+
+def _security_grade(score: int) -> str:
+    normalized = max(0, min(100, score))
+    normalized -= normalized % 5
+    for threshold, grade in _SECURITY_GRADE_BANDS:
+        if normalized >= threshold:
+            return grade
+    return "F"
+
+
+def _hsts_max_age_seconds(hsts_value: str) -> int | None:
+    match = re.search(r"max-age\s*=\s*(\d+)", hsts_value, re.I)
+    return int(match.group(1)) if match else None
+
+
 TAP_TARGET_MINIMUM_CSS_PX = 24
 TAP_TARGET_EVIDENCE_LIMIT = 20
 SECURITY_DISCLAIMER = (
@@ -856,10 +902,24 @@ def security_diagnostics(playwright: dict[str, Any]) -> dict[str, Any]:
                 "points": 10,
             }
         )
-    if playwright.get("https_usage") and not headers.get("strict-transport-security"):
+    hsts_header = headers.get("strict-transport-security")
+    if playwright.get("https_usage") and not hsts_header:
         deductions.append(
             {"code": "HSTS_MISSING", "reason": "HSTS is absent on HTTPS", "points": 15}
         )
+    elif playwright.get("https_usage") and hsts_header:
+        hsts_max_age = _hsts_max_age_seconds(hsts_header)
+        if hsts_max_age is None or hsts_max_age < HSTS_MIN_MAX_AGE_SECONDS:
+            deductions.append(
+                {
+                    "code": "HSTS_MAX_AGE_TOO_SHORT",
+                    "reason": (
+                        f"HSTS max-age is {hsts_max_age if hsts_max_age is not None else 'unparseable'}"
+                        f" seconds, under the recommended {HSTS_MIN_MAX_AGE_SECONDS} (6 months)"
+                    ),
+                    "points": 7,
+                }
+            )
     if not headers.get("x-frame-options") and "frame-ancestors" not in (csp or ""):
         deductions.append(
             {
@@ -1866,6 +1926,21 @@ def page_security_risk_score(
                 {"code": "HSTS_MISSING", "reason": "HSTS header absent on HTTPS page", "points": 10}
             )
             findings_used.append("HSTS_MISSING")
+        elif hsts and https:
+            max_age = _hsts_max_age_seconds(hsts)
+            if max_age is None or max_age < HSTS_MIN_MAX_AGE_SECONDS:
+                deductions.append(
+                    {
+                        "code": "HSTS_MAX_AGE_TOO_SHORT",
+                        "reason": (
+                            f"HSTS max-age is {max_age if max_age is not None else 'unparseable'}"
+                            f" seconds, under the recommended {HSTS_MIN_MAX_AGE_SECONDS}"
+                            " (6 months)"
+                        ),
+                        "points": 5,
+                    }
+                )
+                findings_used.append("HSTS_MAX_AGE_TOO_SHORT")
     if http_to_https_redirect is not None:
         checks_available += 1
         if not http_to_https_redirect and https:
@@ -1998,6 +2073,7 @@ def page_security_risk_score(
     return {
         "score": raw_score,
         "score_version": PAGE_SECURITY_RISK_FORMULA_VERSION,
+        "grade": _security_grade(raw_score),
         "risk_band": _risk_band(raw_score),
         "evidence_coverage": evidence_coverage,
         "confidence": confidence,

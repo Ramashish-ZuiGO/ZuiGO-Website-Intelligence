@@ -283,6 +283,7 @@ function WebsiteSignalsSection({
   const htmlStdStatus = s(htmlStdData?.validation_status || "unavailable");
   const secRiskScore = securityRisk?.score as number | null | undefined;
   const secRiskBand = s(securityRisk?.risk_band || "unavailable");
+  const secRiskGrade = securityRisk?.grade as string | null | undefined;
 
   return (
     <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
@@ -336,7 +337,13 @@ function WebsiteSignalsSection({
       <SignalCard
         title="Passive Security Posture"
         status={secRiskScore != null ? secRiskBand : "unavailable"}
-        metric={secRiskScore != null ? `${secRiskScore} / 100` : undefined}
+        metric={
+          secRiskScore != null
+            ? secRiskGrade
+              ? `${secRiskScore} / 100 (${secRiskGrade})`
+              : `${secRiskScore} / 100`
+            : undefined
+        }
         detail={
           secRiskScore != null
             ? `${s(securityRisk?.confidence)} confidence`
@@ -567,13 +574,19 @@ function WebsiteSignalsTechnicalEvidence({
       {!!securityRisk && (securityRisk.score as number) != null && (
         <div>
           <h4 className="font-semibold text-slate-900">Security & Risk Detail</h4>
-          <dl className="mt-2 grid gap-x-6 gap-y-1 sm:grid-cols-3">
+          <dl className="mt-2 grid gap-x-6 gap-y-1 sm:grid-cols-4">
             <div>
               <dt className="text-slate-500">Score</dt>
               <dd className="text-lg font-bold">
                 {s(securityRisk.score)}/100
               </dd>
             </div>
+            {securityRisk.grade != null && (
+              <div>
+                <dt className="text-slate-500">Grade</dt>
+                <dd className="text-lg font-bold">{s(securityRisk.grade)}</dd>
+              </div>
+            )}
             <div>
               <dt className="text-slate-500">Risk Band</dt>
               <dd className="capitalize">

@@ -79,7 +79,7 @@ TEMPLATE_ID = "zuigo_evidence_report"
 # browser_compatibility block is the single source of truth). Older
 # snapshots keep serving their frozen stored artifacts via the
 # version-aware download guard.
-TEMPLATE_VERSION = "2.3.0"
+TEMPLATE_VERSION = "2.4.0"
 # Customer-facing product name for generated artifacts. Internal identifiers
 # (template ids, package names, historical snapshots) are not renamed.
 CUSTOMER_PRODUCT_NAME = "ZuiGO WebIQ"
@@ -2242,6 +2242,37 @@ def _build_sections(
         if html_validation_rows
         else None
     )
+    # AT-2 follow-up: page_security_risk_score's real, versioned,
+    # weighted-deduction security header grade (the "Passive Security
+    # Posture" signal, homepage-only) is already collected and persisted
+    # by the worker under the security_diagnostics AnalysisDiagnostic row
+    # -- it simply never reached this canonical report snapshot, only the
+    # live /analysis-runs/{id}/report Overview-tab endpoint. Same
+    # homepage-only scope caveat as html_validation above: this run's own
+    # AnalysisDiagnostic row, never site-wide.
+    security_diagnostics_row = db.scalar(
+        select(AnalysisDiagnostic).where(
+            AnalysisDiagnostic.analysis_run_id == run.id,
+            AnalysisDiagnostic.group_name == "security_diagnostics",
+        )
+    )
+    page_security_risk = (
+        security_diagnostics_row.payload.get("verified_observations", {}).get("page_security_risk")
+        if security_diagnostics_row
+        else None
+    )
+    passive_security_posture = (
+        {
+            "scope": "homepage_only",
+            "scope_statement": (
+                "This score reflects the homepage's HTTP security headers only, "
+                "not every page of the site."
+            ),
+            **page_security_risk,
+        }
+        if page_security_risk
+        else None
+    )
     diagnostic_findings = (
         list(
             db.scalars(
@@ -3095,6 +3126,7 @@ def _build_sections(
                 "finding_count": len(technical_findings),
                 "findings": technical_findings,
                 "zero_findings_means_clean": False,
+                "passive_security_posture": passive_security_posture,
             },
             evidence=[
                 *result_ref,
@@ -3104,6 +3136,11 @@ def _build_sections(
                     for item in technical_findings
                     for reference in item["evidence_references"]
                 ],
+                *(
+                    [_evidence("analysis_diagnostic", security_diagnostics_row.id)]
+                    if security_diagnostics_row
+                    else []
+                ),
             ],
             unavailable_reason=(
                 None if run.result or diagnostics else "Technical evidence was not analysed."

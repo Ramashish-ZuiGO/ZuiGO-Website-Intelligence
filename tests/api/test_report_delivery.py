@@ -1746,6 +1746,98 @@ def test_w3c_validation_evidence_surfaces_and_stays_clearly_labeled(
     assert "official W3C" in validation["label_statement"]
 
 
+def test_passive_security_posture_surfaces_in_security_technical_section(
+    report_api: tuple[
+        TestClient,
+        sessionmaker[Session],
+        uuid.UUID,
+        uuid.UUID,
+        uuid.UUID,
+        list[tuple[str, str, int]],
+    ],
+) -> None:
+    """AT-2 follow-up: page_security_risk_score's real, graded security
+    header score (the "Passive Security Posture" signal) was already
+    collected and persisted by the worker under the security_diagnostics
+    AnalysisDiagnostic row, but only ever reached the live Overview-tab
+    endpoint, never this canonical report snapshot -- the same class of
+    gap M18 found for W3C validation. Same homepage-only scope caveat.
+    """
+    from app.models import AnalysisDiagnostic
+
+    _client, factory, _project_id, _website_id, run_id, _dispatched = report_api
+    with factory() as db:
+        db.add(
+            AnalysisDiagnostic(
+                analysis_run_id=run_id,
+                group_name="security_diagnostics",
+                # security_diagnostics() returns via the group() helper, which
+                # nests real observations under "verified_observations" -- NOT
+                # a top-level key. Matching that real shape here is exactly
+                # what caught a real bug in the first draft of this wiring
+                # (report_delivery.py read payload["page_security_risk"]
+                # directly and always got None against real data).
+                payload={
+                    "status": "available",
+                    "verified_observations": {
+                        "page_security_risk": {
+                            "score": 69,
+                            "score_version": "1.1.0",
+                            "grade": "B-",
+                            "risk_band": "good",
+                            "evidence_coverage": 90.0,
+                            "confidence": "high",
+                            "deductions": [
+                                {
+                                    "code": "HSTS_MAX_AGE_TOO_SHORT",
+                                    "reason": (
+                                        "HSTS max-age is 3600 seconds, under the "
+                                        "recommended 6 months"
+                                    ),
+                                    "points": 5,
+                                }
+                            ],
+                        },
+                    },
+                },
+            )
+        )
+        db.commit()
+
+    report = _generate_completed_report(factory, run_id, key="passive-security-posture-report")
+    sections = {section.section_key: section.content for section in report.sections}
+    posture = sections["security_technical"]["passive_security_posture"]
+
+    assert posture["scope"] == "homepage_only"
+    assert "homepage" in posture["scope_statement"]
+    assert posture["score"] == 69
+    assert posture["grade"] == "B-"
+    assert posture["risk_band"] == "good"
+    assert any(d["code"] == "HSTS_MAX_AGE_TOO_SHORT" for d in posture["deductions"])
+
+
+def test_passive_security_posture_absent_is_typed_none_not_fabricated(
+    report_api: tuple[
+        TestClient,
+        sessionmaker[Session],
+        uuid.UUID,
+        uuid.UUID,
+        uuid.UUID,
+        list[tuple[str, str, int]],
+    ],
+) -> None:
+    """Locked invariant #7 (CLAUDE.md): the base report_api fixture has no
+    security_diagnostics AnalysisDiagnostic row at all, so
+    passive_security_posture must come back None, never a fabricated or
+    default score.
+    """
+    _client, factory, _project_id, _website_id, run_id, _dispatched = report_api
+    report = _generate_completed_report(factory, run_id, key="passive-security-posture-absent")
+    sections = {section.section_key: section.content for section in report.sections}
+
+    assert sections["security_technical"]["passive_security_posture"] is None
+
+
 def test_report_feedback_submission_listing_and_validation(
     report_api: tuple[
         TestClient,
